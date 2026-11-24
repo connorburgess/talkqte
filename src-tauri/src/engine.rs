@@ -1113,6 +1113,29 @@ impl Engine {
         }
     }
 
+    /// The person's answer about a line suppressed as a likely echo: keep it
+    /// as theirs (shown and kept as an ordinary line; still never sent to a
+    /// cue model) or remove it from the transcript and the kept meeting.
+    pub fn resolve_echo(&mut self, id: &str, keep: bool) -> Result<(), String> {
+        let status = self
+            .state
+            .sources
+            .as_mut()
+            .ok_or("That line is no longer in this session.")?;
+        let index = status
+            .echoes
+            .iter()
+            .position(|echo| echo.line.id == id)
+            .ok_or("That line is no longer in this session.")?;
+        if keep {
+            status.echoes[index].kept = true;
+        } else {
+            status.echoes.remove(index);
+        }
+        self.changed();
+        Ok(())
+    }
+
     /// `ingest_from` for a line from the microphone.
     pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
         self.ingest_from(session, LineOrigin::Microphone, segment)
@@ -1178,10 +1201,16 @@ impl Engine {
         }
         let both = self.sources().is_some_and(SessionSources::both_sources);
         if both && origin == LineOrigin::Microphone && self.echo.is_echo(segment.at_ms, text) {
-            // The microphone heard the application's sound through the
-            // speakers. Counted, never shown, never sent to a cue model.
+            // The microphone most likely heard the application's sound
+            // through the speakers. Kept aside, shown marked and kept in the
+            // meeting until the person removes it; never sent to a cue model.
+            let line = Segment {
+                text: text.into(),
+                speaker: YOU.into(),
+                ..segment
+            };
             if let Some(status) = self.state.sources.as_mut() {
-                status.echo_dropped = status.echo_dropped.saturating_add(1);
+                status.suppressed(line);
             }
             self.changed();
             return Err(ECHO_DROPPED.into());
@@ -2075,19 +2104,38 @@ impl Engine {
                 flat(application)
             ));
         }
-        if self.state.transcript.is_empty() {
+        // Lines suppressed as a likely echo stay in the meeting, marked, unless
+        // the person removed them; one they kept as theirs is ordinary.
+        let echoes = self
+            .state
+            .sources
+            .as_ref()
+            .map_or(&[][..], |status| status.echoes.as_slice());
+        let mut lines: Vec<(&Segment, Option<bool>)> = self
+            .state
+            .transcript
+            .iter()
+            .map(|line| (line, None))
+            .chain(echoes.iter().map(|echo| (&echo.line, Some(echo.kept))))
+            .collect();
+        lines.sort_by_key(|(line, _)| line.at_ms);
+        if lines.is_empty() {
             out.push_str("None.\n");
         }
-        for line in &self.state.transcript {
-            match two {
-                Some(_) if line.speaker == YOU || line.speaker == THEM => out.push_str(&format!(
-                    "- {} {}: {}\n",
-                    clock(line.at_ms),
-                    line.speaker,
-                    flat(&line.text)
-                )),
-                _ => out.push_str(&format!("- {} {}\n", clock(line.at_ms), flat(&line.text))),
-            }
+        for (line, echo) in lines {
+            let label = match (two, echo) {
+                (Some(_), Some(false)) => format!(" {YOU} (likely an echo of {THEM}):"),
+                (Some(_), _) if line.speaker == YOU || line.speaker == THEM => {
+                    format!(" {}:", line.speaker)
+                }
+                _ => String::new(),
+            };
+            out.push_str(&format!(
+                "- {}{} {}\n",
+                clock(line.at_ms),
+                label,
+                flat(&line.text)
+            ));
         }
         out
     }

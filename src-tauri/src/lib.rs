@@ -1,3 +1,16 @@
+// `native-audio-spike` reads launch settings that list applications and start
+// capture with the scope notice taken as acknowledged. It exists for debug
+// lab builds only: a release build with it must not exist.
+#[cfg(all(not(debug_assertions), feature = "native-audio-spike"))]
+compile_error!("native-audio-spike is a development feature; never build a release with it");
+
+/// Marks an executable built with `native-audio-spike`, so the release
+/// pre-flight can tell a development build from its bytes
+/// (`scripts/release-preflight.mjs`).
+#[cfg(feature = "native-audio-spike")]
+#[used]
+static DEVELOPMENT_MARKER: [u8; 46] = *b"talkqte-development-feature:native-audio-spike";
+
 pub mod anthropic_api;
 pub mod application_audio;
 #[cfg(target_os = "macos")]
@@ -124,9 +137,13 @@ struct Runtime {
     /// The Deepgram budget of the running microphone session, made by its
     /// start, so an application joining that session spends the same one.
     live_budget: Option<(u64, transcription::cloud::Budget)>,
-    /// The application the development join setting will attach to the
-    /// next microphone session, which is then declared with it.
-    dev_join_application: Option<String>,
+    /// The listed application the development join setting will attach to
+    /// the next microphone session, which is then declared with it. Taken by
+    /// that one session.
+    dev_join_application: Option<application_audio::Application>,
+    /// The join setting declared its application once; it never does again.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    dev_join_declared: bool,
     /// The call-starting prompt: off unless the person turns it on.
     call_prompt: call_prompt::Watcher,
     processing_reviews: processing_reviews::Reviews,
@@ -166,6 +183,7 @@ impl Default for Runtime {
             source_session: None,
             live_budget: None,
             dev_join_application: None,
+            dev_join_declared: false,
             call_prompt: call_prompt::Watcher::default(),
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
@@ -569,6 +587,27 @@ fn export_preview(state: tauri::State<AppState>) -> Result<String, String> {
 /// The person's choice, for this session only, to include its transcript
 /// and the cues shown in the export. Changing it drops any earlier preview,
 /// so only a preview of the new content can be saved.
+/// The person's answer about a line suppressed as a likely echo: keep it as
+/// theirs, or remove it from the transcript and the kept meeting. Notebook
+/// only. A line kept is still never sent to a cue model.
+#[tauri::command]
+fn resolve_echo_line(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+    keep: bool,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Only the notebook can change the transcript.".into());
+    }
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.engine.resolve_echo(&id, keep)?;
+    runtime.export = None;
+    publish(&app, &mut runtime);
+    Ok(())
+}
+
 #[tauri::command]
 fn set_keep_meeting(
     app: tauri::AppHandle,
@@ -1371,14 +1410,7 @@ async fn start_live_session(
         };
         let start = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-            let declared = joining
-                .as_ref()
-                .map(|(name, _)| name.clone())
-                .or_else(|| runtime.dev_join_application.clone());
-            let sources = match declared {
-                Some(name) => engine::SessionSources::both(&name),
-                None => engine::SessionSources::microphone(),
-            };
+            let sources = runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app));
             runtime.begin_live_start()?.with_sources(sources)
         };
         // Made only once this start holds the gate, so a refused second
@@ -1582,11 +1614,11 @@ mod application_source {
     pub(crate) fn reviewed(
         app: &tauri::AppHandle,
         review: &str,
-    ) -> Result<(String, String), String> {
+    ) -> Result<(crate::application_audio::Application, String), String> {
         use tauri::Manager;
         app.try_state::<crate::application_audio_host::Host>()
             .and_then(|host| host.reviewed_application(review))
-            .map(|name| (name, review.to_owned()))
+            .map(|application| (application, review.to_owned()))
             .ok_or_else(|| "The selected application changed. Choose it again.".into())
     }
 
@@ -1601,7 +1633,10 @@ mod application_source {
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub(crate) fn reviewed(_: &tauri::AppHandle, _: &str) -> Result<(String, String), String> {
+    pub(crate) fn reviewed(
+        _: &tauri::AppHandle,
+        _: &str,
+    ) -> Result<(crate::application_audio::Application, String), String> {
         Err("This build cannot hear another application.".into())
     }
 
@@ -1694,6 +1729,7 @@ pub fn run() {
             export_preview,
             export_markdown,
             set_keep_meeting,
+            resolve_echo_line,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,

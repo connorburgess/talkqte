@@ -173,11 +173,7 @@ fn applications() -> Vec<Application> {
 }
 
 impl Backend for Fake {
-    fn begin_session(
-        &mut self,
-        control: &Control,
-        application: &str,
-    ) -> Result<Box<dyn FnOnce()>, Failure> {
+    fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
         while self.script.session_waits.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -193,7 +189,7 @@ impl Backend for Fake {
                 Some(crate::microphone::not_capturing(microphone, true)),
                 !self.script.recognizer_missing.load(Ordering::SeqCst),
             )?;
-            runtime.begin_source_session(control, application)?
+            runtime.begin_source_session(control)?
         };
         let runtime = self.runtime.clone();
         Ok(Box::new(move || {
@@ -340,10 +336,14 @@ impl Drop for Fixture {
 fn fixture(live: bool) -> Fixture {
     let mut runtime = Runtime::default();
     if live {
-        let ticket = runtime
-            .begin_live_start()
-            .unwrap()
-            .with_sources(crate::engine::SessionSources::both("Fictional player"));
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional-0",
+                )));
         runtime.install_live_start(&ticket).unwrap();
     }
     let runtime = Arc::new(Mutex::new(runtime));
@@ -719,15 +719,15 @@ fn a_listing_cancelled_before_the_worker_takes_it_never_asks_the_os() {
 fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session() {
     use app::before_native_start;
     let listed = ["fictional-0", "fictional-1"];
-    let live = || {
-        let mut runtime = Runtime::default();
-        let ticket = runtime
-            .begin_live_start()
-            .unwrap()
-            .with_sources(crate::engine::SessionSources::both("Fictional player"));
-        runtime.install_live_start(&ticket).unwrap();
-        Arc::new(Mutex::new(runtime))
-    };
+    let live =
+        || {
+            let mut runtime = Runtime::default();
+            let ticket = runtime.begin_live_start().unwrap().with_sources(
+                crate::engine::SessionSources::both(("Fictional player", "fictional-0")),
+            );
+            runtime.install_live_start(&ticket).unwrap();
+            Arc::new(Mutex::new(runtime))
+        };
     let control = || {
         let gate = Gate::default();
         let review = gate
@@ -770,10 +770,9 @@ fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session()
             let mut runtime = replaced.lock().unwrap();
             drop(runtime.take_live_for_stop());
             runtime.engine.end();
-            let ticket = runtime
-                .begin_live_start()
-                .unwrap()
-                .with_sources(crate::engine::SessionSources::both("Fictional player"));
+            let ticket = runtime.begin_live_start().unwrap().with_sources(
+                crate::engine::SessionSources::both(("Fictional player", "fictional-0")),
+            );
             runtime.install_live_start(&ticket).unwrap();
             Ok(())
         }),
@@ -904,11 +903,12 @@ fn a_start_that_cannot_attach_ends_off_with_its_reason_and_sends_no_native_reque
     assert!(!off.may_be_capturing);
     assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
 
-    // A live session that already has another source.
+    // A live session that already has another source: another operation on
+    // the same declared selection, the only kind a session can take.
     let fixture = self::fixture(true);
     let other_gate = Gate::default();
     let other = other_gate
-        .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+        .review(Application::new("fictional-0".into(), "Fictional player".into()).unwrap())
         .unwrap();
     fixture
         .runtime
@@ -1643,7 +1643,7 @@ mod by_setting {
         let f = fixture(true);
         let asked = std::sync::atomic::AtomicUsize::new(0);
         // The person starts the microphone a few polls after launch.
-        let running = || asked.fetch_add(1, Ordering::SeqCst) >= 3;
+        let running = |_: &Application| asked.fetch_add(1, Ordering::SeqCst) >= 3;
         let outcome = f.host.start_by_setting_joining(
             &joining("Fictional player"),
             waits(),
@@ -1670,7 +1670,7 @@ mod by_setting {
         let outcome = f.host.start_by_setting_joining(
             &joining("Fictional player"),
             short,
-            Some(|| false),
+            Some(|_: &Application| false),
             |_| true,
         );
         assert_eq!(outcome, Outcome::Refused("microphone_not_started"));
@@ -2000,7 +2000,6 @@ mod startup_diagnostics {
                 app::begin_session_checked(
                     &runtime,
                     &review.control(),
-                    "Fictional Player",
                     Err(failure),
                     || {
                         microphone_reads += 1;
@@ -2020,7 +2019,6 @@ mod startup_diagnostics {
             app::begin_session_checked(
                 &NoAccess,
                 &review.control(),
-                "Fictional Player",
                 Ok(()),
                 || panic!("unavailable Runtime must not inspect microphone"),
                 |s, r| events.push((s, r))
@@ -2041,7 +2039,6 @@ mod startup_diagnostics {
                 app::begin_session_checked(
                     &runtime,
                     &review.control(),
-                    "Fictional Player",
                     Ok(()),
                     || microphone,
                     |s, r| events.push((s, r))
@@ -2061,7 +2058,6 @@ mod startup_diagnostics {
             app::begin_session_checked(
                 &runtime,
                 &cancelled.control(),
-                "Fictional Player",
                 Ok(()),
                 || Some(true),
                 |s, r| events.push((s, r))
@@ -2076,7 +2072,6 @@ mod startup_diagnostics {
         let session = app::begin_session_checked(
             &runtime,
             &review.control(),
-            "Fictional Player",
             Ok(()),
             || Some(true),
             |s, r| events.push((s, r)),
@@ -2184,4 +2179,53 @@ mod startup_diagnostics {
             assert_eq!(value["version"], 1);
         }
     }
+}
+
+/// The application-audio capability added at startup, through the generated
+/// manifest and real IPC: the notebook may call the command, the companion
+/// may not, and before the capability is added nobody may.
+#[test]
+fn only_the_notebook_may_call_application_audio() {
+    use tauri::Manager;
+    let mut context = crate::application_context();
+    context.config_mut().app.windows.clear();
+    let app = tauri::test::mock_builder()
+        .invoke_handler(tauri::generate_handler![app::application_audio])
+        .build(context)
+        .unwrap();
+    app.manage(Host::new(|| -> Box<dyn Backend> {
+        panic!("a snapshot never reaches the backend")
+    }));
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+        .build()
+        .unwrap();
+    let invoke = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>| {
+        tauri::test::get_ipc_response(
+            window,
+            tauri::webview::InvokeRequest {
+                cmd: "application_audio".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "http://127.0.0.1:1420".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(
+                    serde_json::json!({"action": {"kind": "snapshot"}}),
+                ),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+    };
+    let denied = invoke(&main).unwrap_err();
+    assert!(denied.to_string().contains("not allowed"), "{denied}");
+    app::allow(app.handle()).unwrap();
+    let snapshot = invoke(&main)
+        .unwrap()
+        .deserialize::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(snapshot["phase"], "off");
+    let denied = invoke(&cue).unwrap_err();
+    assert!(denied.to_string().contains("not allowed"), "{denied}");
 }

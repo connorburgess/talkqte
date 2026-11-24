@@ -104,6 +104,9 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-call-prompt-settings",
         "allow-set-call-prompt",
         "allow-clear-call-prompt-apps",
+        // Keeping or removing a line suppressed as an echo edits the
+        // transcript: the notebook's alone.
+        "allow-resolve-echo-line",
     ]);
     assert!(
         notebook_only.is_subset(&main),

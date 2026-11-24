@@ -895,12 +895,18 @@ pub fn streams() -> Result<Streams, SttFailure> {
 /// Streams for a session's second capture source, spending `budget`, the
 /// budget its first source's [`streams`] made, so the session has one cap
 /// across both. With development settings the launch budget is used, as for
-/// every source. Refused when neither is usable, like [`streams`].
+/// every source. With the person's key and no session budget the source is
+/// refused: it never gets a fresh cap of its own. Refused when neither is
+/// usable, like [`streams`].
 pub fn streams_sharing(budget: Option<Budget>) -> Result<Streams, SttFailure> {
-    Ok(streams_for(
-        source().map_err(|_| SttFailure::Settings)?,
-        budget,
-    ))
+    joining_streams(source().map_err(|_| SttFailure::Settings)?, budget)
+}
+
+fn joining_streams(source: Source, budget: Option<Budget>) -> Result<Streams, SttFailure> {
+    if matches!(source, Source::OwnKey) && budget.is_none() {
+        return Err(SttFailure::Settings);
+    }
+    Ok(streams_for(source, budget))
 }
 
 /// The language a source's streams use: the launch setting for a
@@ -1734,9 +1740,12 @@ mod tests {
         assert!(microphone.contains("sends the live audio from your microphone to Deepgram"));
         assert!(!microphone.contains("application"));
         assert!(!microphone.contains("both"));
-        let alone = own(&SessionSources::application("Fictional Call"));
+        let alone = own(&SessionSources::application((
+            "Fictional Call",
+            "fictional-call",
+        )));
         assert!(alone.contains("the live audio of Fictional Call (audio from all of its windows may be included), not your microphone,"));
-        let both = own(&SessionSources::both("Fictional Call"));
+        let both = own(&SessionSources::both(("Fictional Call", "fictional-call")));
         for part in [
             "from your microphone and, as a second stream, from Fictional Call (audio from all of its windows may be included)",
             "each minute of audio of each stream",
@@ -1762,9 +1771,15 @@ mod tests {
         assert_eq!(second.budget().unwrap().reserve(forty), forty);
         assert_eq!(first.budget().unwrap().reserve(u64::MAX), cap - forty);
         assert_eq!(second.budget().unwrap().reserve(1), 0);
-        // A source without a shared budget gets a fresh one.
-        let other = streams_for(Source::OwnKey, None);
-        assert_eq!(other.budget().unwrap().reserve(u64::MAX), cap);
+        // A second source without the session's budget is refused, never
+        // given a fresh 120 minutes.
+        assert!(joining_streams(Source::OwnKey, None).is_err());
+        let joined = joining_streams(Source::OwnKey, first.budget()).unwrap();
+        assert_eq!(
+            joined.budget().unwrap().reserve(1),
+            0,
+            "the same, spent budget"
+        );
     }
 
     #[test]

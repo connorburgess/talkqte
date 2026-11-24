@@ -707,10 +707,14 @@ mod tests {
 
     fn fixture() -> Fixture {
         let mut runtime = Runtime::default();
-        let ticket = runtime
-            .begin_live_start()
-            .unwrap()
-            .with_sources(crate::engine::SessionSources::both("Fictional player"));
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional",
+                )));
         runtime.install_live_start(&ticket).unwrap();
         drop(ticket);
         let session = runtime.engine.session();

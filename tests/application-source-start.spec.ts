@@ -181,3 +181,23 @@ test('a refused listing says why, and listing can be cancelled', async ({
   ]);
   await expect(start(page)).toBeDisabled();
 });
+
+test('the chooser says when the development launch setting acknowledged the notice', async ({
+  page,
+}) => {
+  const chooser = await notebook(page);
+  await page.evaluate(() =>
+    window.captureTest.hostChanged({
+      bySetting: true,
+      problem: 'noMatchingApplication',
+    }),
+  );
+  await chooser.getByRole('radio', { name: /^One application only/ }).check();
+  await expect(chooser).toContainText(
+    'The TALKQTE_DEV_APPLICATION_SOURCE launch setting acknowledged this notice and asked for one start; it does not retry.',
+  );
+  await expect(chooser.getByRole('alert')).toHaveText(
+    'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.',
+  );
+  expect(await hostCalls(page)).toEqual([]);
+});

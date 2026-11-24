@@ -180,7 +180,7 @@ impl Host {
         observe: impl FnOnce(&str) -> bool,
     ) -> Outcome {
         // A lab run binds a session for the application alone.
-        self.start_by_setting_joining(settings, waits, None::<fn() -> bool>, observe)
+        self.start_by_setting_joining(settings, waits, None::<fn(&Application) -> bool>, observe)
     }
 
     /// One attempt for `settings`, blocking the calling thread, which must
@@ -192,7 +192,7 @@ impl Host {
         &self,
         settings: &Settings,
         waits: Waits,
-        microphone_running: Option<impl Fn() -> bool>,
+        microphone_running: Option<impl Fn(&Application) -> bool>,
         observe: impl FnOnce(&str) -> bool,
     ) -> Outcome {
         let name = settings.application.as_str();
@@ -258,9 +258,14 @@ impl Host {
         };
         let choice = choice.id.clone();
         if let Some(running) = &microphone_running {
+            // The listed application itself, so the next microphone session
+            // is declared with this exact selection, not a name.
+            let Some(application) = self.listed_application(&choice) else {
+                return refuse("busy", None);
+            };
             say("waiting_for_microphone", name, None);
             let deadline = Instant::now() + waits.microphone;
-            while !running() {
+            while !running(&application) {
                 if Instant::now() >= deadline {
                     return refuse("microphone_not_started", None);
                 }

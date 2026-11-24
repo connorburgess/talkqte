@@ -29,6 +29,7 @@
     "allow-export-markdown",
     "allow-export-preview",
     "allow-set-keep-meeting",
+    "allow-resolve-echo-line",
     "allow-microphone-snapshot",
     "allow-start-microphone",
     "allow-stop-microphone",
