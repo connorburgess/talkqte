@@ -41,6 +41,12 @@ Only then add the existing microphone, preserving source identity and mapping na
 | Audio contract           | Distinct source IDs, measured clock drift/discontinuities and correct channel/resampling handling. Bounded preallocated callbacks perform no inference, blocking work, disk/network or logging. Slow-consumer tests expose counted drops/time gaps. Mic pickup does not create duplicate remote transcript lines.        |
 | Performance              | Measure capture alone, then combined/full pipeline against existing budgets: zero dropped chunks/60 minutes, backlog ≤2, app memory ≤600 MB, transcript p95 ≤5 seconds, average CPU ≤15% of one core and battery ≤8%/hour on the target M1/8 GB. These remain targets, not results.                                      |
 
+Update, 24 November 2026: the microphone-plus-one-application session is now
+offered in ordinary macOS builds, with one review naming both sources, one
+Deepgram budget, source labels and a bounded echo guard
+([host](native-application-audio-host.md#in-the-ordinary-build--24-november-2026)).
+Every gate in the table above is still open on a device.
+
 ## Authorization and hardware are the next dependencies
 
 The next dependency is explicit authorization for synthetic other-app capture, adequate build/storage headroom, and suitable macOS 14.x hardware—not a provider adapter. Minimum-device performance and native permission/packaging tests remain separate gates. Defer Bluetooth, automatic source detection/restart, browser-tab extensions and dual production adapters. If evidence forces 14.2+, the owner must choose among a higher feature floor, microphone-only operation on 14.0/14.1, or a second adapter. Neither successful compilation nor this plan justifies support or improved-participation claims.

@@ -13,12 +13,12 @@ not listed.
 Declared licences
 -----------------
 
-Rust crate: 183
+Rust crate: 186
     90  MIT OR Apache-2.0
     20  MIT
     19  Apache-2.0 OR MIT
     15  Unicode-3.0
-    10  Zlib OR Apache-2.0 OR MIT
+    13  Zlib OR Apache-2.0 OR MIT
      4  MIT/Apache-2.0
      3  BSD-3-Clause
      2  Apache-2.0
@@ -530,6 +530,16 @@ objc2-core-foundation 0.3.2
   Source: https://github.com/madsmtm/objc2
   Notice texts: none shipped in the package; see the source for its licence files
 
+objc2-core-graphics 0.3.2
+  Declared licence: Zlib OR Apache-2.0 OR MIT
+  Source: https://github.com/madsmtm/objc2
+  Notice texts: none shipped in the package; see the source for its licence files
+
+objc2-core-media 0.3.2
+  Declared licence: Zlib OR Apache-2.0 OR MIT
+  Source: https://github.com/madsmtm/objc2
+  Notice texts: none shipped in the package; see the source for its licence files
+
 objc2-encode 4.1.0
   Declared licence: MIT
   Source: https://github.com/madsmtm/objc2
@@ -546,6 +556,11 @@ objc2-foundation 0.3.2
   Notice texts: none shipped in the package; see the source for its licence files
 
 objc2-quartz-core 0.3.2
+  Declared licence: Zlib OR Apache-2.0 OR MIT
+  Source: https://github.com/madsmtm/objc2
+  Notice texts: none shipped in the package; see the source for its licence files
+
+objc2-screen-capture-kit 0.3.2
   Declared licence: Zlib OR Apache-2.0 OR MIT
   Source: https://github.com/madsmtm/objc2
   Notice texts: none shipped in the package; see the source for its licence files

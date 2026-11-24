@@ -21,9 +21,11 @@ lab-evaluator = ["cloud-transcription"]
 # person's stored key. Deepgram streaming itself is in every build and sends
 # nothing until the session review is approved. Never part of a release build.
 cloud-transcription = []
-# Development-only application audio: one main-window command can list, review
-# and start a selected application. Never part of a default build.
-native-audio-spike = ["dep:objc2-screen-capture-kit", "dep:objc2-foundation", "dep:dispatch2", "dep:objc2-core-media", "dep:objc2-core-audio-types"]
+# Development-only launch settings for application audio
+# (TALKQTE_DEV_APPLICATION_SOURCE and friends, read once at launch) and the lab
+# paths built on them. Application audio itself, chosen in the notebook, is in
+# every macOS build. Never part of a release build.
+native-audio-spike = []
 # Development-only timing log for lab runs with fictional audio: writes one
 # JSON line per event to the file named by TALKQTE_TIMING_LOG. No dependency.
 timing-log = []
@@ -75,14 +77,14 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 # The person's own provider keys in the login Keychain (generic passwords
 # through Security.framework). The standard binding; no default features.
 security-framework = { version = "3", default-features = false }
+# One selected application's audio through ScreenCaptureKit, only after the
+# person chooses it in the notebook. Direct bindings, pinned.
+objc2-screen-capture-kit = { version = "=0.3.2", default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
+dispatch2 = { version = "=0.3.1" }
 
-# Direct bindings for the isolated native ownership experiment.
-objc2-screen-capture-kit = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }
-objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
-dispatch2 = { version = "=0.3.1", optional = true }
-
-objc2-core-media = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime", "objc2-core-audio-types"] }
-objc2-core-audio-types = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+objc2-core-media = { version = "=0.3.2", default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime", "objc2-core-audio-types"] }
+objc2-core-audio-types = { version = "=0.3.2", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std"] }

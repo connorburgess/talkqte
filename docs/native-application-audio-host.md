@@ -1,10 +1,45 @@
-# Development-only application-audio host
+# Application-audio host
 
-13 November 2026. With the `native-audio-spike` Cargo feature on macOS, the app
-now has one path that can select an application and start the
+## In the ordinary build — 24 November 2026
+
+The host, the ScreenCaptureKit owner, the source worker and the
+`application_audio` command are now compiled into every macOS build; the
+`native-audio-spike` feature only adds the development launch settings below
+and the lab paths, and stays refused in a release. Before a live session the
+notebook's **Listen to** offers **Microphone**, **Microphone and one
+application**, or **One application only**. An application option shows the
+scope notice and says the first listing asks macOS for Screen & System Audio
+Recording; **List applications** sends `list` with the acknowledgement;
+choosing one and **Start live session** sends `review`, then either
+`start_live_session { application: review }` (both: the microphone session
+starts, declares the application, and the host's ordinary `start` attaches it)
+or `startSession` (alone). The session's review names exactly its sources and
+one Deepgram budget covers both streams; lines are labelled You and Them by
+source; a bounded echo guard drops microphone repeats; an application that
+stops, fails or never starts in a two-source session is shown while the
+microphone continues ([cloud transcription](cloud-transcription.md)). The panel
+no longer has its own application-alone start.
+
+Release checks: ScreenCaptureKit is no longer a development-only framework
+marker (`scripts/release-preflight.mjs`), and its bindings
+(`objc2-screen-capture-kit`, `objc2-core-media`, `objc2-core-graphics`) are in
+the release notices. No entitlement is added: the app is not sandboxed, and
+ScreenCaptureKit needs none outside the App Sandbox. macOS has no Info.plist
+usage key for ScreenCaptureKit capture, so its prompt names the app and the
+in-app notice carries the disclosure; the microphone usage string was
+corrected to say audio goes to Deepgram after approval. The deployment target
+stays macOS 14.0; ScreenCaptureKit audio needs 13.0.
+
+None of it has been run: no application was listed, no prompt shown and no
+stream created. Roadmap item **T2** stays open; the device checks it still
+needs are listed there.
+
+## The development host — 13 November 2026
+
+With the `native-audio-spike` Cargo feature on macOS, the app
+gained one path that can select an application and start the
 [source worker](native-audio-owner.md#source-worker-and-transcript-sink--13-november-2026).
-It is not in a default build. The notebook shows its status and a Stop for
-it, but nothing to list, review or start. It was not run:
+It was not run:
 no application was listed, no permission prompt was shown and no stream was
 created for this change. Roadmap item **T2** stays open.
 
@@ -73,7 +108,7 @@ fictional audio excluded, bounded Stop/release, then QuickTime regression and
 host-seam tests. A new adapter, permission flow or feature OS floor is not
 chosen or implemented by this record. **T2 remains open.**
 
-## What a development build adds
+## What the host adds (originally a development build only)
 
 - `application_audio_host.rs`: the host, its status and the app wiring.
 - `application_audio::native::shareable_applications`: one ScreenCaptureKit

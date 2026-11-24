@@ -1,4 +1,9 @@
-# Development-only native audio ownership
+# Native audio ownership
+
+> Update, 24 November 2026: this owner, the source worker and the session clock
+> are compiled into every macOS build; `native-audio-spike` now adds only
+> development launch settings ([host](native-application-audio-host.md#in-the-ordinary-build--24-november-2026)).
+> The dated text below describes them as they were added.
 
 12 November 2026. The `native-audio-spike` Cargo feature adds a macOS
 ScreenCaptureKit owner in `application_audio::native`. It is off by default and

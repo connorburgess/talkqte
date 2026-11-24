@@ -335,7 +335,7 @@ test('a live launch says where audio goes in Settings, offers no speech model, a
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.locator('#live-transcription').locator('..');
   await expect(settings).toContainText(
-    'TalkQTE does not transcribe on this device. A development build can send the session’s audio to Deepgram for transcription once you enable cue processing for that session',
+    'TalkQTE does not transcribe on this device: the session’s audio is sent to Deepgram with your key once you enable cue processing for that session.',
   );
   await expect(settings.getByRole('status')).toHaveText(
     'Ready. Audio goes to Deepgram only after you enable cue processing for a session.',

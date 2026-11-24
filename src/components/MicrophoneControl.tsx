@@ -49,9 +49,9 @@ export function MicrophoneControl({
   cancelling?: boolean;
   action?: ReactNode;
   processingConfigured?: boolean;
-  /** Development builds only: a selected application may still be captured. */
+  /** macOS builds: a selected application may still be captured. */
   sourceMayBeCapturing?: boolean;
-  /** Development builds only: the application a live session was started
+  /** macOS builds: the application a live session was started
    * for alone, with no microphone. */
   sourceSession?: string | null;
   /** Development builds that selected cloud transcription only. */

@@ -257,3 +257,32 @@
 .processing-actions:empty {
   display: none;
 }
+.session-sources {
+  margin-top: var(--space-16);
+  max-width: 68ch;
+}
+.session-sources fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.session-sources legend {
+  font-weight: 700;
+  padding: 0;
+}
+.session-sources-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.session-sources-application {
+  margin-top: var(--space-8);
+}
+.session-sources-application fieldset {
+  margin-top: var(--space-16);
+}
+.session-sources-application .processing-muted + .processing-muted {
+  margin-top: var(--space-8);
+}

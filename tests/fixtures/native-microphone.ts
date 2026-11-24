@@ -9,7 +9,12 @@ import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
-import type { ProcessingSnapshot, StopTarget } from '../../src/lib/processing';
+import type {
+  ApplicationAudioAction,
+  ApplicationAudioStatus,
+  ProcessingSnapshot,
+  StopTarget,
+} from '../../src/lib/processing';
 
 let microphone: MicrophoneSnapshot = {
   revision: 0,
@@ -60,6 +65,46 @@ let delayProcessingSnapshot = new URLSearchParams(location.search).has(
 );
 const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
+/** The arguments of each start_live_session call. */
+const liveStarts: unknown[] = [];
+// A fictional application-audio host: no OS listing, prompt or capture.
+let host: ApplicationAudioStatus | null = null;
+let hostRefusal: string | null = null;
+let hostReview = 0;
+function hostUpdate(value: Partial<ApplicationAudioStatus>) {
+  host = { ...host!, ...value, revision: host!.revision + 1 };
+  return structuredClone(host);
+}
+function hostAction(action: ApplicationAudioAction) {
+  switch (action.kind) {
+    case 'snapshot':
+      return structuredClone(host!);
+    case 'list':
+      return hostUpdate({ phase: 'listing', choices: [], problem: null });
+    case 'cancelList':
+      return hostUpdate({ phase: 'off' });
+    case 'review': {
+      const choice = host!.choices.find((item) => item.id === action.source);
+      if (!choice) throw 'unknown_source';
+      return hostUpdate({
+        phase: 'reviewing',
+        application: choice.name,
+        operation: `fictional-review-${++hostReview}`,
+        problem: null,
+      });
+    }
+    case 'startSession':
+      if (action.review !== host!.operation) throw 'changed';
+      if (hostRefusal) {
+        const problem = hostRefusal;
+        hostRefusal = null;
+        return hostUpdate({ phase: 'off', operation: null, problem });
+      }
+      return hostUpdate({ phase: 'starting', choices: [] });
+    default:
+      return structuredClone(host!);
+  }
+}
 async function sendProcessing(value: Partial<ProcessingSnapshot>) {
   processing = {
     ...processing,
@@ -274,9 +319,11 @@ mockIPC(
       return providerKeysFixture.command(command, args);
     switch (command) {
       case 'application_audio':
-        // Development builds only: record what the notebook asked for.
+        // Record what the notebook asked for; answer as the fictional host
+        // when a test has set one up.
         applicationAudio.push(structuredClone(args));
-        return null;
+        if (!host) return null;
+        return hostAction((args as { action: ApplicationAudioAction }).action);
       case 'processing_snapshot':
         if (delayProcessingSnapshot)
           return new Promise<ProcessingSnapshot>((resolve) =>
@@ -435,6 +482,7 @@ mockIPC(
         return value;
       }
       case 'start_live_session':
+        liveStarts.push(structuredClone(args ?? null));
         await beginStart();
         return;
       case 'stop_live_session':
@@ -537,6 +585,12 @@ declare global {
       state: () => ProcessingSnapshot;
       targets: StopTarget[];
       applicationAudio: unknown[];
+      liveStarts: unknown[];
+      /** Answer application_audio as a fictional host with this status. */
+      host: (value: Partial<ApplicationAudioStatus>) => void;
+      /** The host publishes a change, as when listing finishes. */
+      hostChanged: (value: Partial<ApplicationAudioStatus>) => Promise<void>;
+      refuseStart: (problem: string) => void;
       releaseStart: () => void;
       holdStart: () => void;
       failStart: (message: string) => void;
@@ -595,6 +649,26 @@ window.captureTest = {
   state: () => structuredClone(processing),
   targets: stopTargets,
   applicationAudio,
+  liveStarts,
+  host: (value) => {
+    host = {
+      revision: 1,
+      phase: 'off',
+      application: null,
+      operation: null,
+      choices: [],
+      problem: null,
+      scopeNotice:
+        'Audio from all windows of this application may be included.',
+      ...value,
+    } as ApplicationAudioStatus;
+  },
+  hostChanged: async (value) => {
+    await emit('application-audio:changed', hostUpdate(value));
+  },
+  refuseStart: (problem) => {
+    hostRefusal = problem;
+  },
   holdStart: () => {
     heldStart = true;
   },

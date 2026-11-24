@@ -8,7 +8,7 @@
 pub mod chunks;
 pub mod handoff;
 pub mod listing;
-#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+#[cfg(target_os = "macos")]
 pub mod native;
 pub mod timing;
 
@@ -126,7 +126,7 @@ impl Control {
     }
 
     /// Identity of the reviewed operation, not of its application or name.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn same_operation(&self, other: &Control) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }

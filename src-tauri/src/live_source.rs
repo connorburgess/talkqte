@@ -15,10 +15,7 @@ use crate::{
 /// A live session started for one source alone, with that source's control,
 /// so the session's Stop also stops a source that has not attached yet.
 /// Only a development build or a test starts one.
-#[cfg_attr(
-    not(any(all(target_os = "macos", feature = "native-audio-spike"), test)),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) struct SourceSession {
     session: u64,
     control: Control,
@@ -54,7 +51,7 @@ impl Drop for LiveSource {
     }
 }
 
-#[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refused {
     /// No running live session, the session is stopping, or the source was
@@ -69,7 +66,7 @@ pub(crate) enum Refused {
 }
 
 /// Why the source sink did not take a line.
-#[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LineRefused {
     /// The source is not attached to this running session. Its worker should
@@ -97,7 +94,7 @@ impl Runtime {
 
     /// A live session with the microphone is running and no source feeds it
     /// yet, so an application may be attached to it now.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn microphone_session_takes_a_source(&self) -> bool {
         self.live_source_operation().is_some()
             && self.live_source.is_none()
@@ -116,7 +113,7 @@ impl Runtime {
     /// second attach for the same operation is refused like any other. The
     /// control only has to be uncancelled; a review that is never approved
     /// can occupy the session until it is dropped, and delivers nothing.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn attach_live_source(&mut self, control: &Control) -> Result<(), Refused> {
         self.reconcile_live_source();
         let operation = self
@@ -219,7 +216,7 @@ impl Runtime {
     /// line from a source enters the engine. Call with the runtime lock held.
     /// A line is refused unless that exact source is attached to this running
     /// session, so audio that reached a worker some other way adds nothing.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn ingest_source_line(
         &mut self,
         session: u64,
@@ -238,7 +235,7 @@ impl Runtime {
     /// is committed. A worker's own source check can pass just before Stop
     /// takes this lock; this one cannot, and it also refuses a source that
     /// was never attached.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn live_source_accepts(&self, session: u64, control: &Control) -> bool {
         self.live_source.as_ref().is_some_and(|source| {
             source.session == session
@@ -321,10 +318,7 @@ impl Runtime {
 
     /// The Deepgram budget of the running live session, for a second
     /// source joining it. None outside that session.
-    #[cfg_attr(
-        not(any(all(target_os = "macos", feature = "native-audio-spike"), test)),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
     pub(crate) fn session_budget(&self) -> Option<crate::transcription::cloud::Budget> {
         let (session, budget) = self.live_budget.as_ref()?;
         (self.live_session() == Some(*session) && self.engine.session() == *session)
@@ -339,7 +333,7 @@ impl Runtime {
     /// model is loaded and no microphone is opened here; the source's worker
     /// loads its own recognizer. Refused while any session runs, as an
     /// ordinary live start is.
-    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn begin_source_session(
         &mut self,
         control: &Control,

@@ -79,8 +79,16 @@ function universal(...slices) {
 }
 
 const SYSTEM = ['/usr/lib/libSystem.B.dylib'];
+// A fictional framework that only a fictional development feature links; the
+// real list is empty now that every macOS build links ScreenCaptureKit.
+const MARKER = {
+  'fictional-spike': {
+    framework: 'FictionalSpikeKit',
+    crate: 'objc2-fictional-spike-kit',
+  },
+};
 const SPIKE =
-  '/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit';
+  '/System/Library/Frameworks/FictionalSpikeKit.framework/Versions/A/FictionalSpikeKit';
 
 function write(root, path, content) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -842,20 +850,24 @@ test('a development feature switched on by the configuration fails', (t) => {
 
 test("an executable that loads the development feature's framework fails", (t) => {
   const expected =
-    'development features in the app: the executable loads ScreenCaptureKit, which only native-audio-spike links; it was built with that development feature';
+    'development features in the app: the executable loads FictionalSpikeKit, which only fictional-spike links; it was built with that development feature';
   for (const libraries of [
     [SYSTEM, [SPIKE]],
     [SYSTEM, [SPIKE, true]],
   ]) {
     const { root, app } = fixture(t, { libraries });
-    assert.deepEqual(failures(preflight({ root, app, run: tools() })), [
-      expected,
-    ]);
+    assert.deepEqual(
+      failures(preflight({ root, app, run: tools(), frameworks: MARKER })),
+      [expected],
+    );
   }
   const mixed = fixture(t, {
     binary: universal(machO([SYSTEM]), machO([SYSTEM, [SPIKE]])),
   });
-  assert.deepEqual(failures(preflight({ ...mixed, run: tools() })), [expected]);
+  assert.deepEqual(
+    failures(preflight({ ...mixed, run: tools(), frameworks: MARKER })),
+    [expected],
+  );
 
   const plain = fixture(t, {
     libraries: [
@@ -864,18 +876,31 @@ test("an executable that loads the development feature's framework fails", (t) =
         '/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation',
       ],
       [
-        '/System/Library/Frameworks/ScreenCaptureKitHelper.framework/Versions/A/ScreenCaptureKitHelper',
+        '/System/Library/Frameworks/FictionalSpikeKitHelper.framework/Versions/A/FictionalSpikeKitHelper',
       ],
     ],
   });
-  const result = preflight({ ...plain, run: tools() });
+  const result = preflight({ ...plain, run: tools(), frameworks: MARKER });
   assert.deepEqual(failures(result), []);
   assert.match(
     result.findings.find(
       (finding) => finding.check === 'development features in the app',
     ).message,
-    /none of ScreenCaptureKit among 3 linked libraries/,
+    /none of FictionalSpikeKit among 3 linked libraries/,
   );
+});
+
+test('an ordinary build that loads ScreenCaptureKit passes: it is no development marker', (t) => {
+  const { root, app } = fixture(t, {
+    libraries: [
+      SYSTEM,
+      [
+        '/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit',
+      ],
+    ],
+  });
+  const result = preflight({ root, app, run: tools() });
+  assert.deepEqual(failures(result), []);
 });
 
 test('an executable the check cannot read fails a release and is noted otherwise', (t) => {
@@ -901,9 +926,9 @@ test('the framework marker stops counting once release builds link its crate', (
   write(
     root,
     'src-tauri/NOTICES.txt',
-    `Fictional notices\n${inputsLine(root)}\n\nobjc2-screen-capture-kit 0.3.2\n  Declared licence: Zlib OR Apache-2.0 OR MIT\n`,
+    `Fictional notices\n${inputsLine(root)}\n\nobjc2-fictional-spike-kit 0.3.2\n  Declared licence: Zlib OR Apache-2.0 OR MIT\n`,
   );
-  assert.deepEqual(failures(preflight({ root })), [
-    'development features: objc2-screen-capture-kit is now linked into release builds, so ScreenCaptureKit no longer shows that a bundle was built with native-audio-spike; update DEVELOPMENT_FRAMEWORKS in scripts/release-preflight.mjs',
+  assert.deepEqual(failures(preflight({ root, frameworks: MARKER })), [
+    'development features: objc2-fictional-spike-kit is now linked into release builds, so FictionalSpikeKit no longer shows that a bundle was built with fictional-spike; update DEVELOPMENT_FRAMEWORKS in scripts/release-preflight.mjs',
   ]);
 });

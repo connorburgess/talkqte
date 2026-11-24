@@ -1327,7 +1327,12 @@ pub(crate) mod app {
         )?;
         // Freeze source and finite Stop settings once, shared by arming and
         // autostart so the approved source cannot change between those steps.
+        // The development launch settings exist only with
+        // `native-audio-spike`; an ordinary build starts nothing by itself.
+        #[cfg(feature = "native-audio-spike")]
         let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(not(feature = "native-audio-spike"))]
+        let settings: Option<DevSettings> = None;
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_lab_source::initialize(settings.as_ref(), |name| std::env::var(name).ok())
             .map_err(std::io::Error::other)?;
@@ -1419,6 +1424,7 @@ pub(crate) mod app {
 
 pub(crate) use app::{exit, install, source_status};
 
+#[cfg_attr(not(any(feature = "native-audio-spike", test)), allow(dead_code))]
 mod dev_start;
 pub(crate) use dev_start::{Settings as DevSettings, Waits as DevWaits};
 

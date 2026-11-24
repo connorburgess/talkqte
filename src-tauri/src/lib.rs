@@ -1,6 +1,6 @@
 pub mod anthropic_api;
 pub mod application_audio;
-#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+#[cfg(target_os = "macos")]
 mod application_audio_host;
 pub mod audio_tap;
 mod capture_control;
@@ -63,9 +63,9 @@ pub mod live;
 mod live_control;
 mod live_source;
 mod microphone;
-#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+#[cfg(target_os = "macos")]
 mod native_session_clock;
-#[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+#[cfg(target_os = "macos")]
 mod native_source;
 pub mod notes_file;
 mod processing_commands;
@@ -313,12 +313,12 @@ fn publish_processing(app: &tauri::AppHandle, runtime: &mut Runtime) -> engine::
     let controller = app.state::<microphone::Controller>();
     let (generation, microphone) = controller.control_snapshot();
     let capture = capture_state(microphone);
-    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    #[cfg(target_os = "macos")]
     let source = application_audio_host::source_status(app).map(|source| {
         let combined = application_audio_host::overall_capture(capture, source.phase);
         (combined, (capture, source))
     });
-    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    #[cfg(not(target_os = "macos"))]
     let source: Option<(
         engine::CaptureState,
         (engine::CaptureState, engine::SourceCapture),
@@ -1573,7 +1573,7 @@ async fn start_live_session(
 mod application_source {
     /// The name of the application under `review`, and the review, if that
     /// review is the host's current one.
-    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    #[cfg(target_os = "macos")]
     pub(crate) fn reviewed(
         app: &tauri::AppHandle,
         review: &str,
@@ -1586,7 +1586,7 @@ mod application_source {
     }
 
     /// Start the reviewed application into the running microphone session.
-    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    #[cfg(target_os = "macos")]
     pub(crate) fn join(app: &tauri::AppHandle, review: &str) -> Result<(), ()> {
         use tauri::Manager;
         let host = app
@@ -1595,12 +1595,12 @@ mod application_source {
         host.start(review).map_err(drop)
     }
 
-    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn reviewed(_: &tauri::AppHandle, _: &str) -> Result<(String, String), String> {
         Err("This build cannot hear another application.".into())
     }
 
-    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn join(_: &tauri::AppHandle, _: &str) -> Result<(), ()> {
         Err(())
     }
@@ -1662,7 +1662,7 @@ pub fn run() {
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
         .invoke_handler(tauri::generate_handler![
-            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            #[cfg(target_os = "macos")]
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
             processing_commands::review_processing_scope,
@@ -1747,7 +1747,7 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             companion_macos::hide_controls(app)?;
-            #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+            #[cfg(target_os = "macos")]
             application_audio_host::install(app.handle())?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -1842,7 +1842,7 @@ pub fn run() {
                 // End any model call still in flight, and its helpers.
                 #[cfg(feature = "claude-cli")]
                 claude_cli::end_all();
-                #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+                #[cfg(target_os = "macos")]
                 application_audio_host::exit(app);
             }
         });

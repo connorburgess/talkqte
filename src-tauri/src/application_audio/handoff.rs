@@ -118,7 +118,7 @@ pub struct Input {
 impl Input {
     /// Clone before startup so the owner can detect silent consumer retirement
     /// without borrowing the callback producer or acquiring a lock.
-    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    #[cfg(target_os = "macos")]
     pub(super) fn consumer_closed_signal(&self) -> Arc<AtomicBool> {
         self.consumer_closed.clone()
     }

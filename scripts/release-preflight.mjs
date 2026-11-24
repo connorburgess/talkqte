@@ -134,17 +134,14 @@ export function configuredDevelopmentFeatures(manifest, config) {
   return DEVELOPMENT_FEATURES.filter((name) => enabled.has(name));
 }
 
-/** Frameworks only a development feature links, keyed by that feature. The
- * crate that links ScreenCaptureKit is an optional dependency that only
- * native-audio-spike turns on, so a release executable loading it was built
- * with the feature. The notices check below keeps this true: it fails if that
- * crate ever appears among the crates a release links. */
-export const DEVELOPMENT_FRAMEWORKS = {
-  'native-audio-spike': {
-    framework: 'ScreenCaptureKit',
-    crate: 'objc2-screen-capture-kit',
-  },
-};
+/** Frameworks only a development feature links, keyed by that feature, so
+ * a release executable loading one was built with it. The notices check below
+ * keeps each entry true: it fails if the entry's crate appears among the
+ * crates a release links. Empty since 24 November 2026: ScreenCaptureKit,
+ * once linked only by native-audio-spike, is linked by every macOS build for
+ * the application the person chooses in the notebook, and the feature now
+ * adds only launch settings, which link nothing of their own. */
+export const DEVELOPMENT_FRAMEWORKS = {};
 
 const DYLIB_COMMANDS = new Set([
   0xc, // LC_LOAD_DYLIB
@@ -385,7 +382,10 @@ const usageDescriptions = (plist) =>
   );
 
 /** Checks that need only the repository: what a build would be made from. */
-export function checkSources(root = REPOSITORY) {
+export function checkSources(
+  root = REPOSITORY,
+  frameworks = DEVELOPMENT_FRAMEWORKS,
+) {
   let sources;
   try {
     sources = readSources(root);
@@ -521,9 +521,7 @@ export function checkSources(root = REPOSITORY) {
 
   const { noticesPath, notices } = sources;
   const stale = notices === undefined ? null : staleReason(notices, root);
-  for (const [feature, { framework, crate }] of Object.entries(
-    DEVELOPMENT_FRAMEWORKS,
-  ))
+  for (const [feature, { framework, crate }] of Object.entries(frameworks))
     if (notices && new RegExp(`^${crate} `, 'm').test(notices))
       findings.push(
         fail(
@@ -610,6 +608,7 @@ export function checkBundle(app, sources, options = {}) {
   const expect = options.expect ?? 'bundle';
   const release = expect !== 'bundle';
   const run = options.run ?? defaultRun;
+  const frameworks = options.frameworks ?? DEVELOPMENT_FRAMEWORKS;
   const findings = [];
   const { config } = sources;
 
@@ -782,9 +781,8 @@ export function checkBundle(app, sources, options = {}) {
       );
     }
     if (libraries) {
-      const built = Object.entries(DEVELOPMENT_FRAMEWORKS).filter(
-        ([, { framework }]) =>
-          libraries.some((path) => path.includes(`/${framework}.framework/`)),
+      const built = Object.entries(frameworks).filter(([, { framework }]) =>
+        libraries.some((path) => path.includes(`/${framework}.framework/`)),
       );
       findings.push(
         built.length
@@ -799,9 +797,11 @@ export function checkBundle(app, sources, options = {}) {
             )
           : ok(
               'development features in the app',
-              `none of ${Object.values(DEVELOPMENT_FRAMEWORKS)
-                .map(({ framework }) => framework)
-                .join(', ')} among ${libraries.length} linked libraries`,
+              Object.keys(frameworks).length
+                ? `none of ${Object.values(frameworks)
+                    .map(({ framework }) => framework)
+                    .join(', ')} among ${libraries.length} linked libraries`
+                : `no framework marks a development feature; ${libraries.length} linked libraries read`,
             ),
       );
     }
@@ -987,11 +987,16 @@ function checkSignature(app, sources, { expect, run, info }) {
 }
 
 /** Runs every applicable check; `passed` is false if any finding failed. */
-export function preflight({ root = REPOSITORY, app, ...options } = {}) {
-  const { findings, sources } = checkSources(root);
+export function preflight({
+  root = REPOSITORY,
+  app,
+  frameworks = DEVELOPMENT_FRAMEWORKS,
+  ...options
+} = {}) {
+  const { findings, sources } = checkSources(root, frameworks);
   if (app && sources)
     try {
-      findings.push(...checkBundle(app, sources, options));
+      findings.push(...checkBundle(app, sources, { ...options, frameworks }));
     } catch (error) {
       findings.push(fail('bundle', `could not be inspected: ${error.message}`));
     }
