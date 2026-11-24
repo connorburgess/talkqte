@@ -9,6 +9,7 @@ import {
   CloudUpload,
   EyeOff,
   FileText,
+  History,
   MessageCircle,
   Mic,
   Pause,
@@ -41,6 +42,7 @@ import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
+import { MeetingHistory } from './components/MeetingHistory';
 import { MeetingNotes } from './components/MeetingNotes';
 import {
   PanelDivider,
@@ -598,7 +600,9 @@ function Notebook() {
       }
     });
   };
-  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
+    'notebook',
+  );
   useEffect(() => {
     if (
       !preparing ||
@@ -1141,6 +1145,14 @@ function Notebook() {
               <BookOpen size={19} />
               Notebook
             </button>
+            <button
+              className={view === 'meetings' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'meetings' ? 'page' : undefined}
+              onClick={() => setView('meetings')}
+            >
+              <History size={19} />
+              Meetings
+            </button>
           </nav>
           {view === 'notebook' && (
             <div className="meeting-list-content">
@@ -1199,7 +1211,13 @@ function Notebook() {
         <header className="toolbar">
           <div className="breadcrumb">
             <BookOpen size={16} />
-            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
+            <span>
+              {view === 'notebook'
+                ? 'Notebook'
+                : view === 'meetings'
+                  ? 'Meetings'
+                  : 'Settings'}
+            </span>
             {view === 'notebook' && state.live && (
               <>
                 <ChevronRight size={14} />
@@ -1317,7 +1335,7 @@ function Notebook() {
             }
           />
         )}
-        {(preparing || live || finishing || view === 'settings') &&
+        {(preparing || live || finishing || view !== 'notebook') &&
           (capture.statusError || capture.error) && (
             <div className="error-banner" role="alert">
               <span>
@@ -2020,6 +2038,8 @@ function Notebook() {
           </div>
         )}
 
+        {view === 'meetings' && <MeetingHistory />}
+
         {view === 'settings' && (
           <div className="secondary-page settings-page">
             <h1>Make room for your conversation.</h1>
@@ -2287,9 +2307,9 @@ function Notebook() {
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
-                A guided first-run setup, both sides of a call rather than the
-                microphone alone, and a notebook that remembers your sessions.
-                Integrations with other note-takers are planned for later.
+                A guided first-run setup, and both sides of a call rather than
+                the microphone alone. Integrations with other note-takers are
+                planned for later.
               </p>
               <p className="small muted">
                 These features are not available in this prototype.

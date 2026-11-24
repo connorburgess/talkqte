@@ -108,3 +108,112 @@
     animation: none;
   }
 }
+
+/* The Meetings page and one kept meeting. */
+.history {
+  display: grid;
+  gap: var(--space-16);
+  align-content: start;
+}
+.history h1:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-control);
+}
+.history-search {
+  max-width: 480px;
+}
+.history-list {
+  display: grid;
+  gap: var(--space-8);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.history-row {
+  display: grid;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-12) var(--space-16);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-row:hover {
+  background: var(--hover);
+}
+.history-row:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.history-row-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.history-row-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+.history-empty {
+  padding: var(--space-16);
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  color: var(--muted);
+  font-size: 14px;
+}
+.history-rename {
+  display: grid;
+  gap: var(--space-8);
+  max-width: 480px;
+}
+.kept-section {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  min-width: 0;
+}
+.kept-section h2 {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.kept-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.kept-lines {
+  display: grid;
+  gap: var(--space-8);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.kept-lines li {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: var(--space-8);
+  overflow-wrap: anywhere;
+}
+.kept-lines li.is-echo {
+  color: var(--muted);
+}
+.kept-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 2px;
+}

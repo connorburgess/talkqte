@@ -431,3 +431,53 @@ fn a_version_one_meeting_file_is_read() {
     assert!(meeting.content.transcript[1].echo);
     assert_eq!(meeting.content.transcript[2].label, Some(Label::Them));
 }
+
+#[test]
+fn the_export_holds_the_kept_content_and_is_named_by_date_not_title() {
+    let mut both = content(Date::NOV_2, "Thanks, Friday works.");
+    both.sources = Sources::Both;
+    both.transcript = vec![
+        Line {
+            at_ms: 1_000,
+            label: Some(Label::You),
+            echo: false,
+            text: "I can bring the\nladder.".into(),
+        },
+        Line {
+            at_ms: 2_000,
+            label: Some(Label::You),
+            echo: true,
+            text: "Thanks, Friday works.".into(),
+        },
+        Line {
+            at_ms: 2_100,
+            label: Some(Label::Them),
+            echo: false,
+            text: "Thanks, Friday works.".into(),
+        },
+    ];
+    let meeting = Meeting {
+        id: "0123456789abcdef0123456789abcdef".into(),
+        title: "Orchard review".into(),
+        revision: 1,
+        content: both,
+    };
+    let markdown = markdown(&meeting);
+    assert!(markdown.starts_with(
+        "# Orchard review\n\nKept in TalkQTE. Started 2026-11-02 09:00 UTC, 30 min, from the microphone and one application's audio.\n\n## Notes\n\nBring the fictional ladder.\n"
+    ));
+    assert!(markdown.contains("\n## Decisions\n\n- Review takes two days.\n"));
+    assert!(markdown.contains(
+        "- 00:05 · Timing: What date should we aim for? (from: \"Thanks, Friday works.\")\n"
+    ));
+    assert!(markdown.contains("- 00:01 You: I can bring the ladder.\n"));
+    assert!(markdown.contains("- 00:02 You (likely an echo of Them): Thanks, Friday works.\n"));
+    assert!(markdown.contains("- 00:02 Them: Thanks, Friday works.\n"));
+    assert_eq!(export_file_name(&meeting), "talkqte-meeting-2026-11-02.md");
+}
+
+struct Date;
+impl Date {
+    /// 2 November 2026, 09:00 UTC.
+    const NOV_2: u64 = 1_793_610_000_000;
+}

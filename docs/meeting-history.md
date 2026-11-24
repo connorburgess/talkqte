@@ -28,6 +28,24 @@ Nothing is kept unless the person keeps that meeting.
 - The export review's **Also keep this meeting** is unchanged: it only
   decides whether that one Markdown export includes the transcript and cues.
 
+## Finding, opening and deleting
+
+- **Meetings** in the sidebar opens the list: newest first, each row with its
+  title, date and time, length, sources and whether it has meeting notes.
+  **Search titles and text** matches every word typed, ignoring case, against
+  the title, notes, meeting notes, transcript and cues; it runs in Rust on
+  this Mac, a quarter of a second after typing stops.
+- Choosing a row opens the meeting read-only: meeting notes, the person's
+  notes, the cues shown, and the transcript with You/Them and likely-echo
+  marks. Nothing on the page is editable except through:
+  - **Rename** (a title of up to 200 characters),
+  - **Export…** (Markdown in the export's shape, headed by the title, date
+    in UTC, length and sources; the file is named `talkqte-meeting-<date>.md`,
+    never by the title; the system save dialog chooses where),
+  - **Delete…** (an inline confirmation; the meeting's folder is removed).
+- A meeting that could not be read is counted under the list and left as it
+  is; Settings → **Delete all meetings** removes it.
+
 ## What a kept meeting holds
 
 | Kept                                                               | Never kept                                         |
@@ -131,6 +149,12 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
   application-name choice, a later notes change kept only through **Update
   kept meeting**, a failed keep, the Settings offer and **Delete all
   meetings** confirmation, and a lab run.
+
+- The same spec covers the Meetings page: newest first and search, the empty
+  and no-match states, opening read-only with focus on the title and back to
+  its row, rename, export and delete with confirmation, and a meeting kept in
+  this session appearing in the list. The Markdown export's content and file
+  name are tested in Rust.
 
 ## What a real run must confirm
 

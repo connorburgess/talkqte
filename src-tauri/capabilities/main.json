@@ -44,6 +44,7 @@
     "allow-rename-kept-meeting",
     "allow-delete-kept-meeting",
     "allow-delete-all-kept-meetings",
+    "allow-export-kept-meeting",
     "allow-discard-meeting-notes",
     "allow-meeting-notes-model",
     "allow-set-meeting-notes-model",

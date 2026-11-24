@@ -208,3 +208,170 @@ test('a lab run neither offers nor lists kept meetings', async ({ page }) => {
     page.getByRole('region', { name: 'Kept meetings' }),
   ).toContainText('This is a lab run: kept meetings are not read or written.');
 });
+
+const fictional = [
+  {
+    title: 'Orchard review',
+    startedAtMs: Date.UTC(2026, 10, 20, 9),
+    durationMs: 1_800_000,
+    sources: 'both' as const,
+    transcribedBy: 'Deepgram',
+    transcript: [
+      { atMs: 1_000, label: 'you' as const, text: 'I can bring the ladder.' },
+      {
+        atMs: 2_000,
+        label: 'you' as const,
+        echo: true,
+        text: 'Legal said review takes two days.',
+      },
+      {
+        atMs: 2_100,
+        label: 'them' as const,
+        text: 'Legal said review takes two days.',
+      },
+    ],
+    notes: 'Gate code is in the blue tin.',
+    cues: [
+      {
+        atMs: 2_200,
+        kind: 'Timing',
+        question: 'What date should we aim for?',
+        evidence: 'Legal said review takes two days.',
+      },
+    ],
+    meetingNotes: '## Decisions\n\n- Review takes two days.',
+  },
+  {
+    title: 'Compost rota',
+    startedAtMs: Date.UTC(2026, 10, 22, 15),
+    durationMs: 600_000,
+    sources: 'microphone' as const,
+    transcript: [{ atMs: 3_000, text: 'Priya keeps the padlock code.' }],
+    notes: '',
+    cues: [],
+  },
+];
+
+async function withMeetings(page: Page) {
+  await openNative(page);
+  await page.evaluate(
+    (list) => list.forEach((meeting) => window.historyTest.add(meeting)),
+    fictional,
+  );
+  await page.getByRole('button', { name: 'Meetings' }).click();
+}
+
+const list = (page: Page) => page.getByRole('list', { name: 'Kept meetings' });
+
+test('the Meetings page lists kept meetings newest first and searches titles and text', async ({
+  page,
+}) => {
+  await withMeetings(page);
+  await expect(
+    page.getByRole('heading', { name: 'Meetings', level: 1 }),
+  ).toBeVisible();
+  await expect(list(page).getByRole('button')).toHaveText([
+    /^Compost rota/,
+    /^Orchard review.*Microphone and application · Meeting notes/,
+  ]);
+  const search = page.getByRole('searchbox', {
+    name: 'Search titles and text',
+  });
+  await search.fill('two days');
+  await expect(list(page).getByRole('button')).toHaveText([/^Orchard review/]);
+  await search.fill('nothing like this');
+  await expect(page.locator('.history').getByRole('status')).toHaveText(
+    'No kept meeting matches that search.',
+  );
+  await search.fill('');
+  await expect(list(page).getByRole('button')).toHaveCount(2);
+});
+
+test('an empty history says how to keep a meeting', async ({ page }) => {
+  await openNative(page);
+  await page.getByRole('button', { name: 'Meetings' }).click();
+  await expect(page.locator('.history').getByRole('status')).toHaveText(
+    'No meetings are kept yet. After a live session ends, choose Keep meeting to keep it here.',
+  );
+});
+
+test('a kept meeting opens read-only with its notes, meeting notes, cues and transcript', async ({
+  page,
+}) => {
+  await withMeetings(page);
+  await list(page)
+    .getByRole('button', { name: /^Orchard review/ })
+    .click();
+  const title = page.getByRole('heading', { name: 'Orchard review', level: 1 });
+  await expect(title).toBeFocused();
+  await expect(
+    page.getByRole('region', { name: 'Meeting notes' }),
+  ).toContainText('Review takes two days.');
+  await expect(page.getByRole('region', { name: 'Your notes' })).toContainText(
+    'Gate code is in the blue tin.',
+  );
+  await expect(page.getByRole('region', { name: 'Cues shown' })).toContainText(
+    'Timing: What date should we aim for?',
+  );
+  const transcript = page.getByRole('region', { name: 'Transcript' });
+  await expect(transcript.getByRole('listitem')).toHaveText([
+    '00:01You: I can bring the ladder.',
+    '00:02You (likely an echo of Them): Legal said review takes two days.',
+    '00:02Them: Legal said review takes two days.',
+  ]);
+  // Read-only: no editable text anywhere on the page.
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to meetings' }).click();
+  await expect(
+    list(page).getByRole('button', { name: /^Orchard review/ }),
+  ).toBeFocused();
+});
+
+test('rename, export and delete are explicit', async ({ page }) => {
+  await withMeetings(page);
+  await list(page)
+    .getByRole('button', { name: /^Compost rota/ })
+    .click();
+  await page.getByRole('button', { name: 'Rename' }).click();
+  const field = page.getByRole('textbox', { name: 'Title' });
+  await field.fill('Compost rota, November');
+  await page.getByRole('button', { name: 'Save title' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Compost rota, November', level: 1 }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Export…' }).click();
+  await expect(page.locator('.history').getByRole('status')).toHaveText(
+    'Export saved.',
+  );
+
+  await page.getByRole('button', { name: 'Delete…' }).click();
+  const confirm = page.getByRole('group', {
+    name: /Delete “Compost rota, November”/,
+  });
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  expect(await page.evaluate(() => window.historyTest.meetings())).toHaveLength(
+    2,
+  );
+  await page.getByRole('button', { name: 'Delete…' }).click();
+  await confirm.getByRole('button', { name: 'Delete meeting' }).click();
+  await expect(page.locator('.history').getByRole('status')).toHaveText(
+    'Meeting deleted.',
+  );
+  await expect(list(page).getByRole('button')).toHaveText([/^Orchard review/]);
+  const titles = await page.evaluate(() =>
+    window.historyTest.meetings().map((meeting) => meeting.title),
+  );
+  expect(titles).toEqual(['Orchard review']);
+});
+
+test('a kept meeting from this session appears in the list', async ({
+  page,
+}) => {
+  await openNative(page);
+  await endedSession(page);
+  await offer(page).getByRole('textbox', { name: 'Title' }).fill('Gate sign');
+  await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
+  await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
+  await page.getByRole('button', { name: 'Meetings' }).click();
+  await expect(list(page).getByRole('button')).toHaveText([/^Gate sign/]);
+});

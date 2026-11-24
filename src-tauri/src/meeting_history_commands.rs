@@ -301,3 +301,41 @@ pub(crate) async fn delete_all_kept_meetings(
     }
     Ok(count)
 }
+
+/// Saves a kept meeting as Markdown where the person chooses. The file is
+/// named by the meeting's date, never its title. Returns false if the
+/// person cancelled.
+#[tauri::command]
+pub(crate) async fn export_kept_meeting(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    main_only(&window)?;
+    let meeting = blocking(&app, move |store| store.open_meeting(&id))
+        .await?
+        .map_err(message)?;
+    let markdown = crate::meeting_history::markdown(&meeting);
+    let name = crate::meeting_history::export_file_name(&meeting);
+    let dialog = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(file) = dialog
+            .dialog()
+            .file()
+            .add_filter("Markdown", &["md"])
+            .set_file_name(name)
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = file
+            .into_path()
+            .map_err(|_| "Choose a local file destination.")?;
+        std::fs::write(path, markdown)
+            .map_err(|_| "Could not save the file. Choose a writable destination.")?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "Could not open the save dialog.")?
+}

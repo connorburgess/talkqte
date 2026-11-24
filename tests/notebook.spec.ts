@@ -84,14 +84,18 @@ test('export saves exactly the reviewed notes and nothing about a demo', async (
   await expect(dialog).not.toBeVisible();
 });
 
-test('the sidebar has no meeting list or search, and settings explain the prototype', async ({
+test('the sidebar links to kept meetings but holds no meeting list or search, and settings explain the prototype', async ({
   page,
 }) => {
   const sidebar = page.getByRole('complementary', {
     name: 'Notebook navigation',
   });
   await expect(sidebar.getByRole('textbox')).toHaveCount(0);
-  await expect(sidebar.getByText('Meetings', { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('searchbox')).toHaveCount(0);
+  // Kept meetings have their own page; the sidebar lists none of them.
+  await expect(
+    sidebar.getByRole('button', { name: 'Meetings', exact: true }),
+  ).toHaveCount(1);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Question timing' })

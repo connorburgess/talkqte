@@ -772,6 +772,104 @@ impl Store {
     }
 }
 
+/// The meeting's start as `YYYY-MM-DD HH:MM UTC`.
+pub fn utc_start(meeting: &Meeting) -> String {
+    i64::try_from(meeting.content.started_at_ms)
+        .ok()
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map_or_else(
+            || "an unknown date".into(),
+            |when| when.format("%Y-%m-%d %H:%M UTC").to_string(),
+        )
+}
+
+/// A file name for the export: the meeting's date, never its title.
+pub fn export_file_name(meeting: &Meeting) -> String {
+    let date = utc_start(meeting);
+    match date.get(..10) {
+        Some(day) if date.len() > 10 => format!("talkqte-meeting-{day}.md"),
+        _ => "talkqte-meeting.md".into(),
+    }
+}
+
+/// A kept meeting as Markdown, in the same shape as an export that keeps
+/// the meeting: the notes, kept meeting notes, cues shown and transcript.
+pub fn markdown(meeting: &Meeting) -> String {
+    use crate::engine::{THEM, YOU};
+    let clock = crate::meeting_notes::clock;
+    let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let content = &meeting.content;
+    let sources = match (content.sources, content.application.as_deref()) {
+        (Sources::Microphone, _) => "the microphone".to_string(),
+        (Sources::Application, Some(name)) => format!("{}'s audio", flat(name)),
+        (Sources::Application, None) => "one application's audio".to_string(),
+        (Sources::Both, Some(name)) => format!("the microphone and {}'s audio", flat(name)),
+        (Sources::Both, None) => "the microphone and one application's audio".to_string(),
+    };
+    let minutes = content.duration_ms.div_ceil(60_000);
+    let mut out = format!(
+        "# {}\n\nKept in TalkQTE. Started {}, {} min, from {}.\n\n## Notes\n\n{}\n",
+        flat(&meeting.title),
+        utc_start(meeting),
+        minutes,
+        sources,
+        if content.notes.trim().is_empty() {
+            "None."
+        } else {
+            content.notes.trim_end()
+        }
+    );
+    if let Some(notes) = &content.meeting_notes {
+        out.push_str(&format!("\n{}\n", notes.trim_end()));
+    }
+    out.push_str("\n## Cues shown\n\n");
+    if content.cues.is_empty() {
+        out.push_str("None.\n");
+    }
+    for cue in &content.cues {
+        out.push_str(&format!(
+            "- {} · {}: {}",
+            clock(cue.at_ms),
+            flat(&cue.kind),
+            flat(&cue.question)
+        ));
+        if !cue.evidence.trim().is_empty() {
+            out.push_str(&format!(" (from: \"{}\")", flat(&cue.evidence)));
+        }
+        out.push('\n');
+    }
+    out.push_str("\n## Transcript\n\n");
+    if let Some(provider) = &content.transcribed_by {
+        out.push_str(&format!(
+            "Transcribed by {}. Speakers are not identified.\n\n",
+            flat(provider)
+        ));
+    }
+    if content.sources == Sources::Both {
+        out.push_str(&format!(
+            "{YOU} marks a line heard by this Mac's microphone and {THEM} a line from the application's audio. They say where a line was heard, not who said it.\n\n"
+        ));
+    }
+    if content.transcript.is_empty() {
+        out.push_str("None.\n");
+    }
+    for line in &content.transcript {
+        let label = match (line.label, line.echo) {
+            (Some(Label::You), true) => format!(" {YOU} (likely an echo of {THEM}):"),
+            (Some(Label::You), false) => format!(" {YOU}:"),
+            (Some(Label::Them), _) => format!(" {THEM}:"),
+            (None, _) => String::new(),
+        };
+        out.push_str(&format!(
+            "- {}{} {}\n",
+            clock(line.at_ms),
+            label,
+            flat(&line.text)
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "meeting_history_tests.rs"]
 mod tests;

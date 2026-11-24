@@ -18,6 +18,7 @@ export const commands = [
   'rename_kept_meeting',
   'delete_kept_meeting',
   'delete_all_kept_meetings',
+  'export_kept_meeting',
 ];
 
 /** Every command the notebook invoked, with its arguments. */
@@ -173,6 +174,13 @@ export function command(
       meetings = meetings.filter((item) => item.id !== id);
       if (sessionKept?.id === id) sessionKept = null;
       return null;
+    }
+    case 'export_kept_meeting': {
+      const { id } = args as { id: string };
+      if (!meetings.some((item) => item.id === id))
+        throw 'That meeting is no longer kept.';
+      // The save dialog is the system's; the stand-in reports a save.
+      return true;
     }
     case 'delete_all_kept_meetings': {
       const count = meetings.length;

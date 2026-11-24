@@ -167,3 +167,19 @@ export function failure(error: unknown, fallback: string) {
   if (typeof error === 'string' && error) return error;
   return fallback;
 }
+
+/** Saves a kept meeting as Markdown where the person chooses; false if
+ * they cancelled. */
+export function exportKeptMeeting(id: string) {
+  if (!desktop) return browserOnly();
+  return invoke<boolean>('export_kept_meeting', { id });
+}
+
+/** A time from the start of the meeting, as the transcript shows it. */
+export function clock(atMs: number) {
+  const s = Math.floor(atMs / 1000);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return s >= 3600
+    ? `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`
+    : `${two(Math.floor(s / 60))}:${two(s % 60)}`;
+}
