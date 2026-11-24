@@ -54,6 +54,10 @@ export const issueText = {
     'Cues stopped: the model connection stopped working. Nothing more will be sent until you turn it on again.',
   keyRejected:
     'Cues stopped: Anthropic did not accept your API key. Replace it in Settings, then start a new session.',
+  keyRateLimited:
+    'Cues stopped: Anthropic is limiting requests for your API key. Nothing more will be sent and it will not retry; wait a minute, then turn the model connection on again.',
+  billing:
+    'Cues stopped: your Anthropic account has no credit left for API requests. Nothing more will be sent; add credit in the Anthropic Console, then turn the model connection on again.',
   keyUnavailable:
     'Cues stopped: your Anthropic key could not be read from the Keychain, or it was removed. Check it in Settings, then start a new session.',
   spendLimit:

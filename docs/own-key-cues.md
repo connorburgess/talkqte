@@ -133,7 +133,9 @@ These defaults are an owner decision that is still open:
     tokens at the lab's pinned prices (read 2026-11-16).
   - Any other outcome is charged the worst case, because what was generated
     may still be billed.
-  - A missing key, and an HTTP 401 or 403, are charged nothing.
+  - A missing key, an HTTP 401 or 403, a 402 or a refusal for the account's
+    credit balance, and a request that never left the Mac (the name did not
+    resolve or no connection was made) are charged nothing.
 - **Display**: the `cue_usage` main-window command returns the current
   session's `{ model, requests, requestCap, spentMicroUsd, spendCapMicroUsd }`.
   It is an estimate from the person's side, not Anthropic's bill.

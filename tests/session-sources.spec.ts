@@ -91,7 +91,7 @@ test('dropped echoes are counted and a stopped application is said plainly', asy
     both,
   );
   await expect(page.getByRole('alert')).toContainText(
-    'Audio from Fictional Call stopped: the connection was lost. Only your microphone is heard now',
+    'Audio from Fictional Call stopped: the connection failed or was lost. Check your internet connection. Only your microphone is heard now',
   );
   await page.evaluate(
     (sources) =>

@@ -66,6 +66,7 @@ mod dev_stop;
 #[cfg(debug_assertions)]
 mod dev_user_name;
 pub mod engine;
+mod export_file;
 pub mod granola;
 #[cfg(all(
     debug_assertions,
@@ -695,8 +696,7 @@ async fn export_markdown(
         let path = file
             .into_path()
             .map_err(|_| "Choose a local file destination.")?;
-        std::fs::write(path, markdown)
-            .map_err(|_| "Could not save the file. Choose a writable destination.")?;
+        export_file::write(&path, &markdown)?;
         Ok(true)
     })
     .await
