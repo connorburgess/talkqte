@@ -151,12 +151,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The appindicator library is what Tauri's Linux bundler looks for
+      # once the tray-icon feature appears in Cargo.toml (macOS's menu bar
+      # item); the deb then depends on its runtime library.
       - name: Install the desktop build libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config file libwebkit2gtk-4.1-dev librsvg2-dev \
-            libxdo-dev libdbus-1-dev libasound2-dev xvfb x11-utils dbus
+            libxdo-dev libdbus-1-dev libasound2-dev libayatana-appindicator3-dev xvfb x11-utils dbus
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
