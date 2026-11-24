@@ -425,7 +425,7 @@ function PlatformLimits({ platform }: { platform: PlatformCapabilities }) {
   return (
     <div className="ob-perm-card" aria-label={`What the ${name} build does`}>
       <div className="ob-card-head">
-        <h3>The {name} test build</h3>
+        <h2>The {name} test build</h2>
         <span className="ob-chip">Unsigned · not checked on hardware</span>
       </div>
       <p>
@@ -456,7 +456,7 @@ function OtherPlatformPermissions({
       </p>
       <div className="ob-perm-card">
         <div className="ob-card-head">
-          <h3>Microphone</h3>
+          <h2>Microphone</h2>
           <span className="ob-card-meta">Used from session start</span>
         </div>
         <p>
@@ -467,7 +467,7 @@ function OtherPlatformPermissions({
       </div>
       <div className="ob-perm-card">
         <div className="ob-card-head">
-          <h3>Application audio</h3>
+          <h2>Application audio</h2>
           <span className="ob-chip">Not available on {name} yet</span>
         </div>
         <p>

@@ -2171,7 +2171,8 @@ function Notebook() {
                   In a live session, when someone asks you something by name,
                   such as “Sam, can you take the draft?”, the question is shown
                   as Asked you and stays while you answer. Questions for other
-                  people stay quiet. TalkQTE remembers your name on this Mac.
+                  people stay quiet. TalkQTE remembers your name on{' '}
+                  {notMacos(platform) ? 'this computer' : 'this Mac'}.
                 </p>
               </div>
               <div className="setting-control">
