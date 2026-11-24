@@ -220,6 +220,9 @@ jobs:
           CI checked: built on Ubuntu 24.04; the deb installs on Ubuntu 26.04 LTS
           and both open their window under a virtual display (Xvfb). The
           AppImage was built but not launched. Nothing else was checked here.
+          The AppImage also carries Ubuntu 24.04 system libraries (WebKitGTK,
+          GTK and others) under their own licences; they are not listed in
+          THIRD-PARTY-NOTICES.txt.
           EOF
           ls -l "$out"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
