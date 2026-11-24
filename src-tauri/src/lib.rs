@@ -1716,6 +1716,7 @@ async fn stop_live_session(
 }
 
 /// The menu bar's Stop: ends a running session as the notebook's Stop does.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn stop_live_from_menu(app: &tauri::AppHandle) {
     let live = {
         let state = app.state::<AppState>();

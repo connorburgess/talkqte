@@ -4,6 +4,10 @@
 //! remembered by TalkQTE, since the person can change it in System Settings.
 //! Tests use a fake backend; nothing here registers anything during tests.
 
+// The status item and login items are macOS's; elsewhere only the
+// shared model is compiled.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use serde::Serialize;
 
 /// What the system says about TalkQTE as a login item.

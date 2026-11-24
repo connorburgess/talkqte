@@ -5,7 +5,9 @@ use crate::{
     call_prompt::{Answer, Settings},
     AppState,
 };
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     (window.label() == "main")

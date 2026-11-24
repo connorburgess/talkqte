@@ -9,6 +9,10 @@
 //! as the notebook's Stop does. The call-starting offer's switch is the same
 //! setting as in Settings.
 
+// The status item and login items are macOS's; elsewhere only the
+// shared model is compiled.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use std::sync::Mutex;
 
 /// What the menu shows.
