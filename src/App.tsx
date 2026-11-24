@@ -29,7 +29,7 @@ import {
   type GranolaStatus,
 } from './lib/types';
 
-import { CueCard } from './components/Question';
+import { CueCard, cueAnnouncement } from './components/Question';
 import {
   ProcessingControl,
   processingIssueText,
@@ -54,6 +54,9 @@ import { Onboarding } from './components/Onboarding';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
+import { SavedSettings } from './components/SavedSettings';
+import { MenuBarSettings } from './components/MenuBarSettings';
+import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
 import {
   SessionSources,
   microphoneOnly,
@@ -235,6 +238,8 @@ function FloatingQuestion() {
   }, [busy, cueId]);
   return (
     <main className="floating-surface" aria-label="Meeting companion">
+      {/* The window's title for heading navigation; the bar shows none. */}
+      <h1 className="visually-hidden">TalkQTE companion</h1>
       <div
         className={`companion-shell${edge === 'bottom' ? ' is-bottom' : ''}`}
       >
@@ -481,14 +486,54 @@ function transcriptLines(state: Snapshot) {
   return lines.sort((a, b) => a.segment.atMs - b.segment.atMs);
 }
 
+const defaultNotesRatio = 1 / 1.95;
+
+/** Panel sizes as the settings file keeps them: a default is kept as none. */
+function panelSizes(sidebarWidth: number | null, notesRatio: number) {
+  return {
+    sidebarWidth: sidebarWidth === null ? null : Math.round(sidebarWidth),
+    notesRatio: notesRatio === defaultNotesRatio ? null : notesRatio,
+  };
+}
+
 function Notebook() {
   const [measureShell, shellWidth] = useElementWidth();
   const [measureGrid, gridWidth] = useElementWidth();
-  // Layout preferences belong to this mounted notebook only, never meeting data.
+  // Layout preferences, never meeting data: kept in the settings file.
   const [preferredListWidth, setPreferredListWidth] = useState<number | null>(
     null,
   );
-  const [notesRatio, setNotesRatio] = useState(1 / 1.95);
+  const [notesRatio, setNotesRatio] = useState(defaultNotesRatio);
+  // Saving starts once the saved sizes are in, so the defaults shown while
+  // they load never overwrite them.
+  const [panelsLoaded, setPanelsLoaded] = useState(false);
+  // What the file holds, so only a real change is written.
+  const savedPanels = useRef('');
+  useEffect(() => {
+    let alive = true;
+    void savedPanelSizes().then((saved) => {
+      if (!alive) return;
+      if (saved.sidebarWidth !== null)
+        setPreferredListWidth(saved.sidebarWidth);
+      if (saved.notesRatio !== null) setNotesRatio(saved.notesRatio);
+      savedPanels.current = JSON.stringify(
+        panelSizes(saved.sidebarWidth, saved.notesRatio ?? defaultNotesRatio),
+      );
+      setPanelsLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!panelsLoaded) return;
+    const next = panelSizes(preferredListWidth, notesRatio);
+    if (JSON.stringify(next) === savedPanels.current) return;
+    savedPanels.current = JSON.stringify(next);
+    savePanelSizes(next);
+  }, [panelsLoaded, preferredListWidth, notesRatio]);
+  // Remounts the settings that read their own value after Reset settings.
+  const [settingsEpoch, setSettingsEpoch] = useState(0);
   const listResizable = shellWidth >= 1000;
   const listDefault = shellWidth > 1200 ? 248 : shellWidth > 1150 ? 220 : 205;
   const listMax = Math.max(200, Math.min(400, shellWidth - 480));
@@ -599,6 +644,34 @@ function Notebook() {
     });
   };
   const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  // The menu bar's Start session…: the notebook with its ordinary start in
+  // reach. Nothing is chosen, listed or started.
+  const [startRequested, setStartRequested] = useState(0);
+  useEffect(() => {
+    if (!bridge.desktop) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen('menu-bar:start-session', () => {
+      setView('notebook');
+      setStartRequested((count) => count + 1);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (!startRequested) return;
+    const button = startButton.current;
+    if (!button) return;
+    button.scrollIntoView({ block: 'center' });
+    button.focus();
+  }, [startRequested, view]);
   useEffect(() => {
     if (
       !preparing ||
@@ -718,6 +791,40 @@ function Notebook() {
       state.live && state.status === 'ended' ? state.focus.join('\n') : null,
     );
   }, [state?.live, state?.status]);
+  // Said once each to assistive technology, through regions that stay
+  // mounted: a live region added together with its words is often not read.
+  // A new cue is read; its countdown, a hold or an answer are not.
+  const [cueNotice, setCueNotice] = useState('');
+  const announcedCue = useRef<string | null>(null);
+  useEffect(() => {
+    const cue = state?.cue;
+    if (!cue) {
+      setCueNotice('');
+      return;
+    }
+    if (announcedCue.current === cue.id) return;
+    announcedCue.current = cue.id;
+    setCueNotice(cueAnnouncement(cue));
+  }, [state?.cue?.id]);
+  const sessionWas = useRef<string | null>(null);
+  useEffect(() => {
+    const now = state?.live ? (state.status ?? null) : null;
+    if (sessionWas.current === 'running' && now === 'ended')
+      setNotice('Live session ended.');
+    sessionWas.current = now;
+  }, [state?.live, state?.status]);
+  // The echo count changes with every marked line; only the first is said.
+  const echoesSaid = useRef(false);
+  useEffect(() => {
+    const text = echoText(state?.sources);
+    if (!text) {
+      echoesSaid.current = false;
+      return;
+    }
+    if (echoesSaid.current) return;
+    echoesSaid.current = true;
+    setNotice(text);
+  }, [state?.sources?.echoDropped]);
   const suggestionList = useRef<HTMLFieldSetElement>(null);
   useEffect(() => {
     if (suggestions === null || !focusSuggestions.current) return;
@@ -1256,13 +1363,13 @@ function Notebook() {
                     className="secondary-button"
                     onClick={() => {
                       setPreferredListWidth(null);
-                      setNotesRatio(1 / 1.95);
+                      setNotesRatio(defaultNotesRatio);
                     }}
                   >
                     Reset panel sizes
                   </button>
                   <p>
-                    Sizes last until you close the app. Narrow windows stack the
+                    TalkQTE remembers these sizes. Narrow windows stack the
                     panels.
                   </p>
                 </div>
@@ -1454,9 +1561,9 @@ function Notebook() {
                   {applicationEndedText(state.sources) && (
                     <p role="alert">{applicationEndedText(state.sources)}</p>
                   )}
-                  {echoText(state.sources) && (
-                    <p role="status">{echoText(state.sources)}</p>
-                  )}
+                  {/* Said once through the notice region; the count is
+                      not re-read as it grows. */}
+                  {echoText(state.sources) && <p>{echoText(state.sources)}</p>}
                   {transcriptionDropText(state.transcription) && (
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
@@ -2026,7 +2133,7 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
-            <ProviderKeys />
+            <ProviderKeys key={settingsEpoch} />
             {keysAvailable && (
               <section className="setting">
                 <div>
@@ -2052,8 +2159,7 @@ function Notebook() {
                   In a live session, when someone asks you something by name,
                   such as “Sam, can you take the draft?”, the question is shown
                   as Asked you and stays while you answer. Questions for other
-                  people stay quiet. Your name is kept only until you close the
-                  app.
+                  people stay quiet. TalkQTE remembers your name on this Mac.
                 </p>
               </div>
               <div className="setting-control">
@@ -2141,8 +2247,9 @@ function Notebook() {
                   the display you want to use.
                 </p>
                 <p className="small">
-                  No camera access or video changes. Appearance choices last
-                  until you quit.
+                  No camera access or video changes. TalkQTE remembers the
+                  position you choose here; a place you drag the companion to
+                  lasts until you quit.
                   {!bridge.desktop && ' Position applies in the desktop app.'}
                 </p>
               </div>
@@ -2241,7 +2348,8 @@ function Notebook() {
                 }
               />
             </section>
-            <CallPromptSetting />
+            <CallPromptSetting key={settingsEpoch} />
+            <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             <section className="setting">
               <div>
                 <h2 id="live-transcription" tabIndex={-1}>
@@ -2267,6 +2375,16 @@ function Notebook() {
               </div>
             </section>
             <MeetingHistorySettings />
+            <SavedSettings
+              onReset={() => {
+                setPreferredListWidth(null);
+                setNotesRatio(defaultNotesRatio);
+                setUserName('');
+                confirmedName.current = '';
+                setNameError('');
+                setSettingsEpoch((epoch) => epoch + 1);
+              }}
+            />
             <section className="setting">
               <div>
                 <h2>Your data</h2>
@@ -2299,6 +2417,9 @@ function Notebook() {
         )}
         <div className="visually-hidden" role="status">
           {notice}
+        </div>
+        <div className="visually-hidden" role="status" aria-label="Cue">
+          {cueNotice}
         </div>
         <p className="visually-hidden" id="panel-resize-help">
           Drag to resize. Left and right arrows adjust width; Home and End use

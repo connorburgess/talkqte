@@ -324,6 +324,46 @@ test('with cloud transcription, the notebook names the service, and says plainly
   );
 });
 
+test("each way transcription can stop with the person's own key says what happened and what to do", async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await startLive(page);
+  for (const [stopped, said] of [
+    [
+      'auth',
+      'the service refused the API key or credential. Replace the key in Settings.',
+    ],
+    [
+      'key_unavailable',
+      'your Deepgram key could not be read from the Keychain, or it was removed. Check it in Settings.',
+    ],
+    [
+      'quota',
+      'the account cannot pay for more audio. Add credit in your Deepgram account.',
+    ],
+    ['rate_limited', 'the service is limiting requests. Wait a minute.'],
+    [
+      'network',
+      'the connection failed or was lost. Check your internet connection.',
+    ],
+    ['unavailable', 'the service is having a problem on its side.'],
+    ['cap_reached', 'the transcription minute limit was reached.'],
+  ]) {
+    await page.evaluate(
+      (stopped) =>
+        window.liveTest.publish({
+          status: 'ended',
+          transcription: { provider: 'Deepgram', stopped },
+        } as never),
+      stopped,
+    );
+    await expect(session(page).getByRole('alert')).toHaveText(
+      `Transcription by Deepgram stopped: ${said} The live session ended; nothing fell back to another transcription service.`,
+    );
+  }
+});
+
 test('a live launch says where audio goes in Settings, offers no speech model, and says when a lab run ended or audio was dropped', async ({
   page,
 }) => {

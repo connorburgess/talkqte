@@ -33,6 +33,12 @@ pub enum SttFailure {
     CapReached,
     /// The connection could not be made or was lost.
     Network,
+    /// The provider answered the handshake with a server error (5xx): an
+    /// outage on its side, not the person's connection.
+    Unavailable,
+    /// The person's key could not be read from the Keychain when a stream
+    /// opened, or it was removed during the session.
+    KeyUnavailable,
     /// A reply did not follow the provider's protocol.
     Protocol,
     /// The provider closed the stream.
@@ -57,6 +63,8 @@ impl SttFailure {
             Self::RateLimited => "rate_limited",
             Self::CapReached => "cap_reached",
             Self::Network => "network",
+            Self::Unavailable => "unavailable",
+            Self::KeyUnavailable => "key_unavailable",
             Self::Protocol => "protocol",
             Self::Closed => "closed",
             Self::Settings => "settings",
@@ -503,7 +511,11 @@ impl CloudFeed {
     fn fail_or_reconnect(&mut self, failure: SttFailure) -> Result<(), SttFailure> {
         let recoverable = matches!(
             failure,
-            SttFailure::Network | SttFailure::Closed | SttFailure::Stalled | SttFailure::Protocol
+            SttFailure::Network
+                | SttFailure::Unavailable
+                | SttFailure::Closed
+                | SttFailure::Stalled
+                | SttFailure::Protocol
         );
         if !recoverable || self.reconnects >= MAX_RECONNECTS || self.reopener.is_none() {
             return Err(self.fail(failure));
@@ -622,8 +634,8 @@ impl Language {
     }
 }
 
-/// The person's choice for the next live session with their own key. Kept
-/// for this app run, like the other settings; English until changed.
+/// The person's choice for the next live session with their own key, saved
+/// in the settings file; English until changed.
 static LANGUAGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The language the next session started with the person's key will use.

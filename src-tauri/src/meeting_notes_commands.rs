@@ -100,6 +100,7 @@ pub async fn write_meeting_notes(
             crate::publish(&app, &mut runtime);
             return Err(match written.result {
                 Err(Failure::Cancelled) => meeting_notes::Refusal::Cancelled.message().into(),
+                Err(Failure::Unreachable) => meeting_notes::UNSENT_OFFLINE.into(),
                 _ => "The request could not be prepared. Nothing was sent.".into(),
             });
         }
@@ -186,6 +187,11 @@ pub fn meeting_notes_model() -> &'static str {
 
 /// Chooses the model for the next notes request, from those the app lists.
 #[tauri::command]
-pub fn set_meeting_notes_model(model: String) -> Result<&'static str, String> {
-    meeting_notes::set_notes_model(&model)
+pub fn set_meeting_notes_model(
+    app: tauri::AppHandle,
+    model: String,
+) -> Result<&'static str, String> {
+    let model = meeting_notes::set_notes_model(&model)?;
+    crate::settings_commands::record(&app, |settings| settings.notes_model = model);
+    Ok(model)
 }

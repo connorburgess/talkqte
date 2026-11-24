@@ -68,7 +68,7 @@ pub enum Status {
     Ended,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Sensitivity {
     Balanced,
@@ -476,8 +476,8 @@ pub struct Snapshot {
     pub live: bool,
     /// Live cue suppression only; capture, transcription and the clock continue.
     pub cues_paused: bool,
-    /// The person's name for this session only, used to notice questions
-    /// asked of them. Never saved, and not sent to the companion.
+    /// The person's name, used to notice questions asked of them. Kept in
+    /// the settings file (`settings.rs`); never sent to the companion.
     pub user_name: Option<String>,
     /// What matters in this meeting, as short lines the user typed, for this
     /// session only: questions about them come through sooner, Focused mode

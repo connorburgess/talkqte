@@ -229,7 +229,7 @@
   background: var(--band);
   min-width: 0;
 }
-.ob-perm-card h3 {
+.ob-perm-card h2 {
   font-size: 16px;
   font-weight: 600;
   color: var(--ink);
@@ -291,7 +291,7 @@
 .ob-skip-dialog::backdrop {
   background: var(--backdrop);
 }
-.ob-skip-dialog h3 {
+.ob-skip-dialog h2 {
   font-size: 18px;
   font-weight: 600;
   line-height: 1.3;

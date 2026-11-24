@@ -18,8 +18,8 @@ Nothing is kept unless the person keeps that meeting.
   The next meeting is offered again.
 - **Settings → Kept meetings → Offer to keep each meeting** turns the
   question off. It is on by default, because offering stores nothing, and
-  lasts until quit; it moves into the settings file once that file is
-  merged ([release path](release-path.md#recoverable-upgrades)).
+  lasts until quit (moving it into the [settings file](release-path.md#recoverable-upgrades)
+  is a separate follow-up).
 - Once kept, the card says **Kept in your meetings as "…"**. Notes typed
   afterwards, meeting notes kept afterwards, or echo answers change nothing
   on disk until the person chooses **Update kept meeting**, which appears only
@@ -93,8 +93,8 @@ meetings/                 mode 700
   `TALKQTE_DEV_LAB_DESCRIPTOR`, `TALKQTE_DEV_LAB_CONTEXT`,
   `TALKQTE_DEV_APPLICATION_SOURCE`, `TALKQTE_DEV_PLAYER_PID`; debug builds
   only) has no history: nothing is listed, read or written, and the offer is
-  not shown. This is the same list as the settings file's guard; once that
-  change is merged the two should share one function.
+  not shown. It calls `settings::lab_run()` so kept meetings and the settings
+  file share the exact same guard.
 
 ## Commands
 

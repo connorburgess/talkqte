@@ -441,33 +441,11 @@ fn render<T: Serialize>(value: &T) -> Vec<u8> {
     bytes
 }
 
-/// Whether this launch is a lab run. The same launch settings as the
-/// settings file's guard: the lab launcher always sets the run identifier
-/// and the timing log; the others mark a lab launch made by hand. Debug
-/// builds only; a release build has no lab runs.
+/// Whether this launch is a lab run. Uses the settings file's guard so both
+/// follow the exact same launch settings. Debug builds only; a release build
+/// has no lab runs.
 fn lab_run() -> bool {
-    #[cfg(debug_assertions)]
-    {
-        lab_run_in(|name| std::env::var_os(name).is_some())
-    }
-    #[cfg(not(debug_assertions))]
-    false
-}
-
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
-const LAB_SETTINGS: &[&str] = &[
-    "TALKQTE_DEV_LAB_RUN_ID",
-    "TALKQTE_TIMING_LOG",
-    "TALKQTE_DEV_CUE_BACKEND",
-    "TALKQTE_DEV_LAB_DESCRIPTOR",
-    "TALKQTE_DEV_LAB_CONTEXT",
-    "TALKQTE_DEV_APPLICATION_SOURCE",
-    "TALKQTE_DEV_PLAYER_PID",
-];
-
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
-fn lab_run_in(present: impl Fn(&str) -> bool) -> bool {
-    LAB_SETTINGS.iter().any(|name| present(name))
+    crate::settings::lab_run()
 }
 
 /// The kept meetings for this launch.

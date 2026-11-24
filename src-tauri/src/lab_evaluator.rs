@@ -375,7 +375,7 @@ fn failure_code(f: Failure) -> u8 {
     match f {
         Failure::SignIn => 2,
         Failure::Credentials => 3,
-        Failure::UsageLimit => 4,
+        Failure::UsageLimit | Failure::Billing => 4,
         Failure::InvalidDecision => 5,
         Failure::Expired => 6,
         _ => 1,

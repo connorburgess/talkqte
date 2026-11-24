@@ -396,10 +396,13 @@ fn a_lab_run_or_a_launch_without_a_folder_reads_and_writes_nothing() {
 
 #[test]
 fn every_lab_launch_setting_turns_the_history_off() {
-    for name in LAB_SETTINGS {
-        assert!(lab_run_in(|present| present == *name), "{name}");
+    for name in crate::settings::LAB_SETTINGS {
+        assert!(
+            crate::settings::lab_run_in(|present| present == *name),
+            "{name}"
+        );
     }
-    assert!(!lab_run_in(|_| false));
+    assert!(!crate::settings::lab_run_in(|_| false));
 }
 
 /// A fixed version-1 file, so a later format has to read or migrate it.

@@ -368,6 +368,9 @@ pub enum Failure {
     Credentials,
     /// A usage or rate limit was reached.
     UsageLimit,
+    /// The account cannot pay for more requests: Anthropic answered 402,
+    /// or refused the request for its credit balance.
+    Billing,
     /// The model could not be reached, or the backend reported an error.
     Unreachable,
     /// The provider declined to answer this one request. A recorded
@@ -519,6 +522,7 @@ impl Worker {
                                 Failure::SignIn
                                 | Failure::Credentials
                                 | Failure::UsageLimit
+                                | Failure::Billing
                                 | Failure::Unreachable
                                 | Failure::InvalidDecision
                                 | Failure::Refused

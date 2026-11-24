@@ -71,6 +71,51 @@ const applicationAudio: unknown[] = [];
 const liveStarts: unknown[] = [];
 // The call-starting prompt's settings and the companion's answers.
 let callPrompt = { enabled: false, notFor: [] as string[] };
+/** The settings file, as the stand-in keeps it: set
+ * `window.standInSavedSettings` before loading to start from saved values. */
+const savedSettings = {
+  status: { saving: 'on' } as { saving: string; error?: string },
+  panels: { sidebarWidth: null, notesRatio: null } as {
+    sidebarWidth: number | null;
+    notesRatio: number | null;
+  },
+  panelWrites: 0,
+  resets: 0,
+  ...(
+    window as typeof window & {
+      standInSavedSettings?: Partial<{
+        status: { saving: string; error?: string };
+        panels: { sidebarWidth: number | null; notesRatio: number | null };
+      }>;
+    }
+  ).standInSavedSettings,
+};
+
+/** The menu bar item and the system's login item, as the stand-in plays
+ * them: set `window.standInPresence` before loading to change them. No
+ * login item is registered. */
+const presence = {
+  menuBar: true,
+  keepRunning: false,
+  openAtLogin: 'off' as 'off' | 'on' | 'needsApproval' | 'unavailable',
+  approval: false,
+  loginItemsOpened: 0,
+  ...(
+    window as typeof window & {
+      standInPresence?: Partial<{
+        menuBar: boolean;
+        openAtLogin: 'off' | 'on' | 'needsApproval' | 'unavailable';
+        approval: boolean;
+      }>;
+    }
+  ).standInPresence,
+};
+const presenceReply = () => ({
+  menuBar: presence.menuBar,
+  keepRunning: presence.keepRunning,
+  openAtLogin: presence.openAtLogin,
+});
+
 const callPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
 let host: ApplicationAudioStatus | null = null;
@@ -501,6 +546,38 @@ mockIPC(
             };
         return value;
       }
+      case 'presence_settings':
+        return presenceReply();
+      case 'set_keep_running_in_menu_bar':
+        presence.keepRunning = (args as { enabled: boolean }).enabled;
+        return presenceReply();
+      case 'set_open_at_login': {
+        const on = (args as { enabled: boolean }).enabled;
+        presence.openAtLogin = on
+          ? presence.approval
+            ? 'needsApproval'
+            : 'on'
+          : 'off';
+        return presenceReply();
+      }
+      case 'open_login_items':
+        presence.loginItemsOpened++;
+        return;
+      case 'settings_status':
+        return structuredClone(savedSettings.status);
+      case 'panel_sizes':
+        return structuredClone(savedSettings.panels);
+      case 'set_panel_sizes':
+        savedSettings.panels = structuredClone(
+          (args as { panels: typeof savedSettings.panels }).panels,
+        );
+        savedSettings.panelWrites++;
+        return structuredClone(savedSettings.panels);
+      case 'reset_settings':
+        savedSettings.resets++;
+        savedSettings.panels = { sidebarWidth: null, notesRatio: null };
+        callPrompt = { enabled: false, notFor: [] };
+        return;
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
       case 'set_call_prompt':
@@ -629,6 +706,12 @@ declare global {
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
       callPrompt: () => { enabled: boolean; notFor: string[] };
+      savedSettings: () => typeof savedSettings;
+      presence: () => typeof presence;
+      /** The menu bar's Start session…, as the native side relays it. */
+      menuBarStart: () => Promise<void>;
+      /** The menu bar's call-starting switch. */
+      menuBarOffer: (enabled: boolean) => Promise<void>;
       /** The companion's Start on an offer, as the native side relays it. */
       callPromptStart: (
         application: { name: string; bundleId: string } | null,
@@ -693,6 +776,13 @@ declare global {
 window.permissionTest = permissionFixture;
 window.providerKeysTest = providerKeysFixture.providerKeysTest;
 window.captureTest = {
+  presence: () => structuredClone(presence),
+  menuBarStart: () => emit('menu-bar:start-session'),
+  menuBarOffer: (enabled: boolean) => {
+    callPrompt = { ...callPrompt, enabled };
+    return emit('call-prompt:settings', structuredClone(callPrompt));
+  },
+  savedSettings: () => structuredClone(savedSettings),
   send: sendProcessing,
   state: () => structuredClone(processing),
   targets: stopTargets,
