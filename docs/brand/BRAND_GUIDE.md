@@ -41,6 +41,7 @@ Exported visual sheets in `docs/brand/images/`:
 - Headline: `Stay grounded. Respond in the moment.`
 - Base ground: pure white (`#FFFFFF`).
 - **No one-sided accent borders (hard rule):** Never place an accent border on one side only (left, right, top, or bottom, including inset `box-shadow` strips, pseudo-element bars, or absolutely positioned strip elements) on cards, cues, notes, callouts, alerts, quotes, chips, or list items. A neutral `1px` hairline (`--line`) used as a full-width section or row divider is allowed. Automated checks enforce this rule in both repositories (`scripts/check-brand-borders.test.mjs` for the brand guide specimens, the app border check on the notebook branch, and `tests/borders.spec.js` in the website repository).
+- **Future screens follow this guide (owner, 24 November 2026):** every new or changed screen uses Direction C and the shared tokens and components (no new one-off styles), is added to the specimen sheets in `index.html` with all of its states (marked "Designed, not built" until it ships), and passes the one-sided-border check in each repository.
 
 ---
 
