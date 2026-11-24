@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ProviderKeysRows } from './ProviderKeys';
+import { keyStoreLabel, keysStatus, type KeyStore } from '../lib/providerKeys';
 import './onboarding.css';
 
 type Step = 1 | 2 | 3 | 4;
@@ -44,11 +45,24 @@ export function Onboarding({
   onStartLive,
 }: OnboardingProps) {
   const [step, setStep] = useState<Step>(1);
+  const [keyStore, setKeyStore] = useState<KeyStore>();
   const [confirmSkip, setConfirmSkip] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const keepButtonRef = useRef<HTMLButtonElement>(null);
   const confirmSkipButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Which store keeps the keys on this platform, for step 2's label.
+  useEffect(() => {
+    let live = true;
+    keysStatus().then(
+      (status) => live && setKeyStore(status?.store),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Move keyboard and screen-reader focus to the step heading on mount and on
   // every step change.
@@ -84,7 +98,16 @@ export function Onboarding({
     headingRef.current?.focus();
   };
 
-  const meta = STEP_META[step];
+  const meta =
+    step === 2
+      ? {
+          ...STEP_META[2],
+          badge:
+            keyStore && !keyStore.available
+              ? 'No keyring on this system'
+              : `Stored in ${keyStoreLabel(keyStore?.kind)}`,
+        }
+      : STEP_META[step];
 
   return (
     <section

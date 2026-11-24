@@ -10,7 +10,7 @@ TalkQTE is an early prototype being built to help keep meetings on target with a
 
 One cue appears in a quiet floating window. It says what it is and quotes the line or note it came from. You can hold it, dismiss it, or let it pass. There is no Save step or queue of questions to manage. Your existing note-taker can remain the record of what was actually said; if you have none, you can choose to keep a session's transcript and cues with your notes when you export, and ask once per meeting for notes written from the transcript with your own Anthropic key.
 
-The first way to use TalkQTE is with your own API keys: a Deepgram key for streaming transcription and an Anthropic key for cue decisions, kept in the macOS Keychain. With both stored, an ordinary build can run a live session once you approve that session's processing review; each provider bills your own account. Native reliability, latency and useful timing remain unverified. The former on-device transcription path was removed.
+The first way to use TalkQTE is with your own API keys: a Deepgram key for streaming transcription and an Anthropic key for cue decisions, kept in the macOS Keychain (Windows Credential Manager or the desktop keyring in the unsigned Windows and Ubuntu test builds). With both stored, an ordinary build can run a live session once you approve that session's processing review; each provider bills your own account. Native reliability, latency and useful timing remain unverified. The former on-device transcription path was removed.
 
 ## The experience we are working toward
 
