@@ -83,11 +83,16 @@ pub fn transcription_language() -> crate::transcription::cloud::Language {
 /// and its review always name the same language; nothing is sent by this.
 #[tauri::command]
 pub fn set_transcription_language(
+    app: tauri::AppHandle,
     state: tauri::State<crate::AppState>,
     language: crate::transcription::cloud::Language,
 ) -> Result<crate::transcription::cloud::Language, String> {
     let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    set_language_when_closed(runtime.live_session_open(), language)
+    let language = set_language_when_closed(runtime.live_session_open(), language)?;
+    crate::settings_commands::record(&app, |settings| {
+        settings.transcription_language = language;
+    });
+    Ok(language)
 }
 
 fn set_language_when_closed(
