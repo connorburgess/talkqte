@@ -244,6 +244,11 @@ pub(super) struct EchoGuard {
 }
 
 impl EchoGuard {
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.recent.len()
+    }
+
     pub(super) fn clear(&mut self) {
         self.recent.clear();
     }

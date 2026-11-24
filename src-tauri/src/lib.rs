@@ -1927,6 +1927,11 @@ pub fn run() {
                             });
                         }
                     }
+                    if let Some((session, budget)) = runtime.live_budget.clone() {
+                        runtime
+                            .engine
+                            .cloud_transcription_left(session, budget.left());
+                    }
                     let cue = runtime.engine.cue_snapshot();
                     publish_processing(&handle, &mut runtime);
                     let menu = menu_bar::state_of(&runtime);
