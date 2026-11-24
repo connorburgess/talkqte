@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { desktop } from '../lib/bridge';
+import { usePlatform } from '../lib/platform';
 import type { CloudTranscription } from '../lib/transcription';
 import {
   microphoneLabel,
@@ -8,6 +9,7 @@ import {
 } from '../lib/microphone';
 
 function MicrophoneInput({ state }: { state: MicrophoneSnapshot | null }) {
+  const platform = usePlatform();
   if (!desktop || !state) return null;
   const opened = ['starting', 'listening', 'stopping'].includes(state.status);
   return (
@@ -20,13 +22,30 @@ function MicrophoneInput({ state }: { state: MicrophoneSnapshot | null }) {
       )}
       <details>
         <summary>Change microphone</summary>
-        <p>
-          On macOS, stop the microphone or live session and wait for Off. After
-          an error, wait until Start is available. Choose an input in macOS
-          System Settings → Sound → Input, then start again here. Each start
-          uses the macOS default input; TalkQTE does not switch devices
-          automatically.
-        </p>
+        {platform?.os === 'windows' ? (
+          <p>
+            Stop the microphone or live session and wait for Off. After an
+            error, wait until Start is available. Choose an input in Windows
+            Settings → System → Sound → Input, then start again here. Each start
+            uses the Windows default input; TalkQTE does not switch devices
+            automatically.
+          </p>
+        ) : platform?.os === 'linux' ? (
+          <p>
+            Stop the microphone or live session and wait for Off. After an
+            error, wait until Start is available. Choose an input in your
+            desktop's sound settings, then start again here. Each start uses the
+            default input; TalkQTE does not switch devices automatically.
+          </p>
+        ) : (
+          <p>
+            On macOS, stop the microphone or live session and wait for Off.
+            After an error, wait until Start is available. Choose an input in
+            macOS System Settings → Sound → Input, then start again here. Each
+            start uses the macOS default input; TalkQTE does not switch devices
+            automatically.
+          </p>
+        )}
       </details>
     </div>
   );

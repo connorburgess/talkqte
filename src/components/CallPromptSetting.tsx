@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { desktop } from '../lib/bridge';
+import { platformName, usePlatform } from '../lib/platform';
 
 interface Settings {
   enabled: boolean;
@@ -12,6 +13,7 @@ interface Settings {
 export function CallPromptSetting() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
+  const platform = usePlatform();
 
   useEffect(() => {
     let alive = true;
@@ -34,6 +36,19 @@ export function CallPromptSetting() {
 
   // The browser preview has no microphone or applications to notice.
   if (!desktop) return null;
+  if (platform && !platform.callPrompt)
+    return (
+      <section className="setting" aria-labelledby="call-prompt-setting">
+        <div>
+          <h2 id="call-prompt-setting">When a call starts</h2>
+          <p>
+            Not available on {platformName(platform)} yet. On a Mac, TalkQTE can
+            offer to start a session when another app starts using the
+            microphone; here, start a live session from the notebook.
+          </p>
+        </div>
+      </section>
+    );
   return (
     <section className="setting" aria-labelledby="call-prompt-setting">
       <div>

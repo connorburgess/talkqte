@@ -1,5 +1,13 @@
 //! Platform permission and input-stream adapter. Constructing this module does
 //! not query a device or request access; only the explicit start command does.
+//!
+//! The input stream is cpal's on every platform built here: Core Audio on
+//! macOS, WASAPI (shared mode) on Windows, ALSA on Linux, where desktop
+//! Ubuntu's default ALSA device is PipeWire's (through `pipewire-alsa`) or
+//! PulseAudio's. Only macOS has an access prompt to ask first. Windows has a
+//! privacy switch instead (Settings → Privacy & security → Microphone →
+//! "Let desktop apps access your microphone"); when it is off, opening the
+//! stream fails and the start reports a device error. Linux has none.
 use super::{CaptureStream, Failure, Meter};
 use std::sync::Arc;
 
@@ -33,18 +41,25 @@ pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send +
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows and Linux have no access prompt for a desktop app to request:
+/// the stream itself is the check.
+#[cfg(any(windows, target_os = "linux"))]
+pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
+    complete(Ok(()));
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
     complete(Err(Failure::Unsupported));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 struct InputStream {
     stream: cpal::Stream,
     device_name: Option<String>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 impl CaptureStream for InputStream {
     fn play(&self) -> Result<(), Failure> {
         cpal::traits::StreamTrait::play(&self.stream).map_err(|_| Failure::Device)
@@ -54,7 +69,7 @@ impl CaptureStream for InputStream {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn input<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
@@ -97,7 +112,7 @@ where
         .map_err(|_| Failure::Device)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 pub(super) fn build_stream(
     meter: Arc<Meter>,
     tap_chunk_ms: Option<u64>,
@@ -138,7 +153,7 @@ pub(super) fn build_stream(
     Ok((stream, chunker))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub(super) fn build_stream(
     _meter: Arc<Meter>,
     _tap_chunk_ms: Option<u64>,
