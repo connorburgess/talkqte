@@ -634,8 +634,8 @@ impl Language {
     }
 }
 
-/// The person's choice for the next live session with their own key. Kept
-/// for this app run, like the other settings; English until changed.
+/// The person's choice for the next live session with their own key, saved
+/// in the settings file; English until changed.
 static LANGUAGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The language the next session started with the person's key will use.

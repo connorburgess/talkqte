@@ -98,7 +98,7 @@ pub fn schema() -> &'static Value {
     &contract().schema
 }
 
-/// The notes model chosen in Settings, for this app run only.
+/// The notes model chosen in Settings; saved in the settings file.
 fn chosen() -> &'static Mutex<&'static str> {
     static CHOSEN: Mutex<&'static str> = Mutex::new(DEFAULT_MODEL);
     &CHOSEN

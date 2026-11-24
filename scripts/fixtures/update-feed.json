@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "notes": "Fictional update feed for tests. Nothing is downloaded from it.",
+  "pub_date": "2026-12-01T09:00:00Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBzaWduYXR1cmUK",
+      "url": "https://downloads.example.invalid/talkqte/0.2.0/TalkQTE_0.2.0_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBzaWduYXR1cmUK",
+      "url": "https://downloads.example.invalid/talkqte/0.2.0/TalkQTE_0.2.0_x64.app.tar.gz"
+    }
+  }
+}

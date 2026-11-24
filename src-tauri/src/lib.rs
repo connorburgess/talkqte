@@ -78,8 +78,10 @@ mod lab_evaluator;
 pub mod live;
 mod live_control;
 mod live_source;
+mod login_item;
 pub mod meeting_notes;
 mod meeting_notes_commands;
+mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
 mod native_session_clock;
@@ -100,8 +102,11 @@ pub mod provider_keys;
     )
 ))]
 mod selected_attestation;
+pub mod settings;
+mod settings_commands;
 pub mod timing_log;
 pub mod transcription;
+mod updates;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
 use std::{
@@ -417,6 +422,23 @@ fn change(
     result
 }
 
+/// A change to a saved display choice or the name: applied as any change,
+/// then that one setting, as the engine now holds it, is written to the
+/// settings file. Only the field the person changed is saved, so a
+/// development launch setting applied over the file is never written.
+fn change_setting(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    action: impl FnOnce(&mut Engine) -> Result<(), String>,
+    save: impl FnOnce(&engine::Snapshot, &mut settings::Settings),
+) -> Result<(), String> {
+    change(app, state, action)?;
+    if let Ok(runtime) = state.0.lock() {
+        settings_commands::record(app, |settings| save(&runtime.engine.state, settings));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn snapshot(
     window: tauri::WebviewWindow,
@@ -515,10 +537,15 @@ fn set_companion_position(
 ) -> Result<(), String> {
     // A preset replaces wherever the person dragged the window to.
     companion::reset_drag(&app);
-    change(&app, &state, |e| {
-        e.set_companion_position(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_companion_position(value);
+            Ok(())
+        },
+        |s, saved| saved.companion_position = s.companion_position,
+    )
 }
 #[tauri::command]
 fn set_question_size(
@@ -526,10 +553,15 @@ fn set_question_size(
     state: tauri::State<AppState>,
     value: QuestionSize,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_question_size(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_question_size(value);
+            Ok(())
+        },
+        |s, saved| saved.question_size = s.question_size,
+    )
 }
 #[tauri::command]
 fn update_notes(
@@ -545,7 +577,12 @@ fn set_user_name(
     state: tauri::State<AppState>,
     name: Option<String>,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.set_user_name(name))
+    change_setting(
+        &app,
+        &state,
+        |e| e.set_user_name(name),
+        |s, saved| saved.user_name = s.user_name.clone(),
+    )
 }
 #[tauri::command]
 fn set_focus(
@@ -561,10 +598,15 @@ fn set_sensitivity(
     state: tauri::State<AppState>,
     value: Sensitivity,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_sensitivity(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_sensitivity(value);
+            Ok(())
+        },
+        |s, saved| saved.sensitivity = s.sensitivity,
+    )
 }
 #[tauri::command]
 fn set_overlay(
@@ -572,10 +614,15 @@ fn set_overlay(
     state: tauri::State<AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_overlay(enabled);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_overlay(enabled);
+            Ok(())
+        },
+        |s, saved| saved.overlay_enabled = s.overlay_enabled,
+    )
 }
 
 #[tauri::command]
@@ -1669,6 +1716,24 @@ async fn stop_live_session(
         .map_err(|_| "Could not finish the live session.".into())
 }
 
+/// The menu bar's Stop: ends a running session as the notebook's Stop does.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn stop_live_from_menu(app: &tauri::AppHandle) {
+    let live = {
+        let state = app.state::<AppState>();
+        let Ok(mut runtime) = state.0.lock() else {
+            return;
+        };
+        let live = runtime.take_live_for_stop();
+        publish(app, &mut runtime);
+        live
+    };
+    if let Some(live) = live {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || finish_live(&app, live, true));
+    }
+}
+
 /// Stop microphone during a live session stops the whole session, so the
 /// notebook never shows a live session with nothing listening.
 #[tauri::command]
@@ -1703,6 +1768,8 @@ pub fn run() {
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
+        .manage(menu_bar::Shown::default())
+        .manage(login_item::LoginItems(login_item::for_app()))
         .invoke_handler(tauri::generate_handler![
             #[cfg(target_os = "macos")]
             application_audio_host::app::application_audio,
@@ -1768,11 +1835,23 @@ pub fn run() {
             stop_live_session,
             microphone::microphone_snapshot,
             microphone::start_microphone,
-            stop_microphone
+            stop_microphone,
+            settings_commands::settings_status,
+            settings_commands::panel_sizes,
+            settings_commands::set_panel_sizes,
+            settings_commands::reset_settings,
+            settings_commands::presence_settings,
+            settings_commands::set_keep_running_in_menu_bar,
+            settings_commands::set_open_at_login,
+            settings_commands::open_login_items
         ])
         .setup(|app| {
+            // The person's saved settings, before anything is published. A
+            // lab run reads none (settings.rs).
+            settings_commands::load(app.handle());
             // A lab launch may give the user's name; it is set before the
-            // first session, as if typed in Settings.
+            // first session, as if typed in Settings, over any saved name,
+            // and is never written to the settings file.
             #[cfg(debug_assertions)]
             {
                 dev_user_name::initialize();
@@ -1805,6 +1884,14 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             application_audio_host::install(app.handle())?;
             call_prompt_commands::install(app.handle());
+            // The menu bar item, from the first state.
+            let first = app
+                .state::<AppState>()
+                .0
+                .lock()
+                .map(|runtime| menu_bar::state_of(&runtime))
+                .unwrap_or_default();
+            menu_bar::install(app.handle(), first);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();
@@ -1842,7 +1929,9 @@ pub fn run() {
                     }
                     let cue = runtime.engine.cue_snapshot();
                     publish_processing(&handle, &mut runtime);
+                    let menu = menu_bar::state_of(&runtime);
                     drop(runtime);
+                    menu_bar::update(&handle, menu);
                     microphone::refresh(&handle);
                     let Some(microphone) = handle.state::<microphone::Controller>().try_status()
                     else {
@@ -1874,15 +1963,30 @@ pub fn run() {
                     companion::moved(window.app_handle(), (position.x, position.y));
                 }
             }
-            if window.label() == "main"
-                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
-            {
-                window.app_handle().exit(0);
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let app = window.app_handle();
+                    let keep = app
+                        .try_state::<settings::Store>()
+                        .is_some_and(|store| store.saved().keep_running_in_menu_bar);
+                    match menu_bar::on_close(keep, menu_bar::has_item(app)) {
+                        menu_bar::Close::Hide => {
+                            api.prevent_close();
+                            menu_bar::hide_notebook(app);
+                        }
+                        menu_bar::Close::Quit => app.exit(0),
+                    }
+                }
             }
         })
         .build(context)
         .expect("TalkQTE could not start")
         .run(|app, event| {
+            // Clicking TalkQTE in the Dock or Finder brings the notebook back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                menu_bar::show_notebook(app);
+            }
             if matches!(
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
