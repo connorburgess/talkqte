@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { knownPlatform } from '../lib/platform';
 import { Pause, Play, Square } from 'lucide-react';
 import {
   describeSource,
@@ -87,6 +88,13 @@ export function processingIssueText(
   lab = false,
   api = false,
 ): string {
+  if (!lab && issue === 'keyUnavailable') {
+    const os = knownPlatform()?.os;
+    if (os === 'windows')
+      return 'Cues stopped: your Anthropic key could not be read from Windows Credential Manager, or it was removed. Check it in Settings, then start a new session.';
+    if (os === 'linux')
+      return 'Cues stopped: your Anthropic key could not be read from the keyring, or it was removed. Check it in Settings, then start a new session.';
+  }
   if (!lab) return issueText[issue];
   if (api && issue === 'devSettings') return apiLaunchApproval;
   if (

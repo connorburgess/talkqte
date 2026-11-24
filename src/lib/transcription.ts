@@ -1,3 +1,5 @@
+import { knownPlatform } from './platform';
+
 /** Where a live session's audio is transcribed, and the fixed code that
  * ended it. Only a development build with cloud transcription has one. */
 export interface CloudTranscription {
@@ -80,8 +82,17 @@ export function transcriptionStopText(
   transcription: CloudTranscription | undefined,
 ): string | null {
   if (!transcription?.stopped) return null;
-  const reason =
-    STOP_REASONS[transcription.stopped] ?? 'it stopped unexpectedly';
+  let reason = STOP_REASONS[transcription.stopped] ?? 'it stopped unexpectedly';
+  if (transcription.stopped === 'key_unavailable') {
+    const os = knownPlatform()?.os;
+    if (os === 'windows') {
+      reason =
+        'your Deepgram key could not be read from Windows Credential Manager, or it was removed. Check it in Settings';
+    } else if (os === 'linux') {
+      reason =
+        'your Deepgram key could not be read from the keyring, or it was removed. Check it in Settings';
+    }
+  }
   return `Transcription by ${transcription.provider} stopped: ${reason}. The live session ended; nothing fell back to another transcription service.`;
 }
 

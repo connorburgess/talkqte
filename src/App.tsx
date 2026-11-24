@@ -49,6 +49,7 @@ import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
+import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
@@ -544,6 +545,7 @@ function Notebook() {
   const resizeNotes = (value: number) =>
     setNotesRatio(value / (gridWidth - 28));
   const { state, error, setError, busy, run } = useSession<Snapshot>();
+  const platform = usePlatform();
   const microphone = useMicrophone();
   const capture = useCaptureControl();
   // A session fed by a selected application alone, with the microphone off
@@ -1565,6 +1567,18 @@ function Notebook() {
                                     ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
                                     : 'Nothing is being captured.'}
                   </p>
+                  {notMacos(platform) &&
+                    !state.live &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing && (
+                      <p className="small muted">
+                        On {platformName(platform)}, live sessions hear your
+                        microphone only: with headphones, that is your side of a
+                        call. Hearing another application is not available on{' '}
+                        {platformName(platform)} yet.
+                      </p>
+                    )}
                   {transcriptionStopText(state.transcription) && (
                     <p role="alert">
                       {transcriptionStopText(state.transcription)}
@@ -2050,7 +2064,8 @@ function Notebook() {
                         Asks Granola’s assistant one question about your
                         meetings of the last 30 days and shows its answer for
                         you to tick. Granola sees the question; nothing else
-                        leaves this Mac.
+                        leaves{' '}
+                        {notMacos(platform) ? 'this computer' : 'this Mac'}.
                       </p>
                     </div>
                   )}
@@ -2175,7 +2190,8 @@ function Notebook() {
                   In a live session, when someone asks you something by name,
                   such as “Sam, can you take the draft?”, the question is shown
                   as Asked you and stays while you answer. Questions for other
-                  people stay quiet. TalkQTE remembers your name on this Mac.
+                  people stay quiet. TalkQTE remembers your name on{' '}
+                  {notMacos(platform) ? 'this computer' : 'this Mac'}.
                 </p>
               </div>
               <div className="setting-control">

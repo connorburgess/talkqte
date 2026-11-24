@@ -8640,6 +8640,155 @@ Cue processing stopped: -</pre>
                 <span class="sk-btn">Set up TalkQTE again</span>
               </div>
             </article>
+
+            <!-- WINDOWS AND LINUX BUILDS -->
+            <div class="spec-title mono-label">
+              <strong>Windows and Linux builds · what the platform says</strong>
+              <span
+                >Shown only when Rust reports a non-macOS build
+                (<code>platform_capabilities</code>); macOS copy is
+                unchanged</span
+              >
+            </div>
+            <div class="panel-grid">
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Step 1 · Windows (Linux reads the same)</span
+                  ><span>Chip: Alpha · Windows</span>
+                </div>
+                <div class="ob-perm-card">
+                  <div class="ob-card-head">
+                    <strong class="panel-h3">The Windows test build</strong>
+                    <span class="sk-chip"
+                      >Unsigned · not checked on hardware</span
+                    >
+                  </div>
+                  <p class="panel-muted" style="font-size: 12px">
+                    Live sessions here hear your microphone only. Hearing
+                    another application, such as the app your call is in, is not
+                    available on Windows yet; with headphones, the microphone
+                    hears your side of a call only. The offer to start when a
+                    call begins is macOS-only for now, and the companion stays
+                    on top of other windows but may not show over a full-screen
+                    meeting. This build has not yet been checked on a real
+                    Windows PC.
+                  </p>
+                </div>
+              </article>
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Step 2 · key store chip</span
+                  ><span>Per platform and store state</span>
+                </div>
+                <div class="sk-actions" style="flex-wrap: wrap; gap: 8px">
+                  <span class="sk-chip">Stored in macOS Keychain</span>
+                  <span class="sk-chip"
+                    >Stored in Windows Credential Manager</span
+                  >
+                  <span class="sk-chip">Stored in Desktop keyring</span>
+                  <span class="sk-chip is-unreadable"
+                    >No keyring on this system</span
+                  >
+                </div>
+              </article>
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Step 3 · What TalkQTE will use later</span
+                  ><span>Windows and Linux: no access prompt</span>
+                </div>
+                <div class="ob-perm-card">
+                  <div class="ob-card-head">
+                    <strong class="panel-h3">Microphone</strong>
+                    <span class="mono-label">Used from session start</span>
+                  </div>
+                  <p class="panel-muted" style="font-size: 12px">
+                    TalkQTE uses your default input from Settings → System →
+                    Sound. If Settings → Privacy &amp; security → Microphone
+                    does not let desktop apps use the microphone, a session
+                    cannot start until you turn that on.
+                  </p>
+                </div>
+                <div class="ob-perm-card" style="margin-top: 8px">
+                  <div class="ob-card-head">
+                    <strong class="panel-h3">Application audio</strong>
+                    <span class="sk-chip">Not available on Windows yet</span>
+                  </div>
+                </div>
+              </article>
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Settings · Linux without a keyring</span
+                  ><span>Inputs and actions disabled</span>
+                </div>
+                <div class="km-notice" style="margin-top: 0">
+                  Keys cannot be saved on this system yet. TalkQTE keeps them
+                  only in your desktop keyring, and none answered for this
+                  login. On Ubuntu, sign in to a desktop session with GNOME
+                  Keyring (Passwords and Keys) unlocked, then reopen Settings.
+                  Live sessions need both keys.
+                </div>
+                <p
+                  class="panel-muted"
+                  style="margin-top: 10px; font-size: 12px"
+                >
+                  Each key row:
+                  <span class="sk-chip is-unreadable"
+                    >Cannot be saved on this system yet</span
+                  >
+                </p>
+              </article>
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Session start · Windows and Linux</span
+                  ><span>Below the idle status line</span>
+                </div>
+                <p class="panel-muted" style="font-size: 12px">
+                  On Windows, live sessions hear your microphone only: with
+                  headphones, that is your side of a call. Hearing another
+                  application is not available on Windows yet.
+                </p>
+                <div class="panel-setting-row" style="margin-top: 12px">
+                  <div>
+                    <strong class="panel-h3">When a call starts</strong>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 2px; font-size: 12px"
+                    >
+                      Not available on Windows yet. On a Mac, TalkQTE can offer
+                      to start a session when another app starts using the
+                      microphone; here, start a live session from the notebook.
+                    </p>
+                  </div>
+                </div>
+              </article>
+              <article class="panel-card">
+                <div class="panel-card-tag mono-label">
+                  <span>Settings · Menu bar and login, Saved settings</span
+                  ><span>Windows and Linux</span>
+                </div>
+                <div class="panel-setting-row" style="margin-top: 0">
+                  <div>
+                    <strong class="panel-h3">Menu bar and login</strong>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 2px; font-size: 12px"
+                    >
+                      Not available on Windows yet: TalkQTE has no
+                      notification-area icon here and does not open at login.
+                      Closing the notebook quits TalkQTE.
+                    </p>
+                  </div>
+                </div>
+                <p
+                  class="panel-muted"
+                  style="margin-top: 10px; font-size: 12px"
+                >
+                  Saved settings: “… in a small settings file in your user
+                  profile’s app data folder. Keys stay in Windows Credential
+                  Manager, and nothing from a meeting is saved there.”
+                </p>
+              </article>
+            </div>
           </div>
         </div>
       </section>

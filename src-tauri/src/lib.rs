@@ -88,6 +88,7 @@ mod native_session_clock;
 #[cfg(target_os = "macos")]
 mod native_source;
 pub mod notes_file;
+pub mod platform;
 mod processing_commands;
 pub mod processing_reviews;
 mod provider_key_commands;
@@ -749,6 +750,18 @@ impl LiveUnavailable {
             }
             Self::KeyRejected => {
                 "Deepgram rejected your API key. Replace it in Settings to start a live session."
+            }
+            Self::KeyUnreadable if cfg!(windows) => {
+                "Your Deepgram key could not be read from Windows Credential Manager. Check it in Settings."
+            }
+            Self::CueKeyUnreadable if cfg!(windows) => {
+                "Your Anthropic key could not be read from Windows Credential Manager. Check it in Settings."
+            }
+            Self::KeyUnreadable if cfg!(target_os = "linux") => {
+                "Your Deepgram key could not be read from the keyring. Check it in Settings."
+            }
+            Self::CueKeyUnreadable if cfg!(target_os = "linux") => {
+                "Your Anthropic key could not be read from the keyring. Check it in Settings."
             }
             Self::KeyUnreadable => {
                 "Your Deepgram key could not be read from the Keychain. Check it in Settings."
@@ -1774,6 +1787,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
+            platform::platform_capabilities,
             call_prompt_commands::call_prompt_settings,
             call_prompt_commands::set_call_prompt,
             call_prompt_commands::clear_call_prompt_apps,

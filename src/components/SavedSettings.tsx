@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { desktop } from '../lib/bridge';
+import { notMacos, usePlatform } from '../lib/platform';
 import {
   resetSettings,
   settingsStatus,
@@ -17,6 +18,7 @@ export function SavedSettings({ onReset }: { onReset: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const platform = usePlatform();
 
   useEffect(() => {
     let alive = true;
@@ -37,9 +39,12 @@ export function SavedSettings({ onReset }: { onReset: () => void }) {
           TalkQTE remembers the choices on this page between launches: your
           name, the transcription language, the notes model, how questions look
           and when they appear, where the companion sits, panel sizes and the
-          call-starting offer. They are kept in a small settings file on this
-          Mac that only your account can read. Keys stay in your Keychain, and
-          nothing from a meeting is saved there.
+          call-starting offer.{' '}
+          {platform?.os === 'windows'
+            ? 'They are kept in a small settings file in your user profile’s app data folder. Keys stay in Windows Credential Manager, and nothing from a meeting is saved there.'
+            : platform?.os === 'linux'
+              ? 'They are kept in a small settings file in your home folder that only your account can read. Keys stay in your desktop keyring, and nothing from a meeting is saved there.'
+              : 'They are kept in a small settings file on this Mac that only your account can read. Keys stay in your Keychain, and nothing from a meeting is saved there.'}
         </p>
         {labRun && (
           <p className="small muted" role="status">
@@ -49,7 +54,9 @@ export function SavedSettings({ onReset }: { onReset: () => void }) {
         )}
         {status?.saving === 'unavailable' && (
           <p className="small muted" role="status">
-            Settings cannot be saved on this Mac, so they last until you quit.
+            Settings cannot be saved on{' '}
+            {notMacos(platform) ? 'this computer' : 'this Mac'}, so they last
+            until you quit.
           </p>
         )}
         {status?.saving === 'newer' && (

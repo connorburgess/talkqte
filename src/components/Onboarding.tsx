@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { ProviderKeysRows } from './ProviderKeys';
 import { keyStoreLabel, keysStatus, type KeyStore } from '../lib/providerKeys';
+import {
+  deviceName,
+  notMacos,
+  platformName,
+  usePlatform,
+  type PlatformCapabilities,
+} from '../lib/platform';
 import './onboarding.css';
 
 type Step = 1 | 2 | 3 | 4;
@@ -46,6 +53,9 @@ export function Onboarding({
 }: OnboardingProps) {
   const [step, setStep] = useState<Step>(1);
   const [keyStore, setKeyStore] = useState<KeyStore>();
+  const platform = usePlatform();
+  const other = notMacos(platform);
+  const device = deviceName(platform);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -99,15 +109,22 @@ export function Onboarding({
   };
 
   const meta =
-    step === 2
-      ? {
-          ...STEP_META[2],
-          badge:
-            keyStore && !keyStore.available
-              ? 'No keyring on this system'
-              : `Stored in ${keyStoreLabel(keyStore?.kind)}`,
-        }
-      : STEP_META[step];
+    step === 1 && other
+      ? { ...STEP_META[1], badge: `Alpha · ${platformName(platform)}` }
+      : step === 3 && other
+        ? {
+            ...STEP_META[3],
+            heading: 'What TalkQTE will use later',
+          }
+        : step === 2
+          ? {
+              ...STEP_META[2],
+              badge:
+                keyStore && !keyStore.available
+                  ? 'No keyring on this system'
+                  : `Stored in ${keyStoreLabel(keyStore?.kind)}`,
+            }
+          : STEP_META[step];
 
   return (
     <section
@@ -143,10 +160,11 @@ export function Onboarding({
           {step === 1 && (
             <>
               <p className="ob-lead">
-                TalkQTE sits beside your meeting on macOS and surfaces one
-                short, source-backed cue when a moment matters. It does not join
-                the call as a participant. TalkQTE is in alpha.
+                TalkQTE sits beside your meeting on {platformName(platform)} and
+                surfaces one short, source-backed cue when a moment matters. It
+                does not join the call as a participant. TalkQTE is in alpha.
               </p>
+              {other && platform && <PlatformLimits platform={platform} />}
 
               <div className="ob-cue-card" aria-label="Fictional example cue">
                 <div className="ob-cue-top">
@@ -185,7 +203,7 @@ export function Onboarding({
                     <p>
                       With your own keys. Add your Deepgram and Anthropic keys
                       in the next step; you pay them directly for what you use,
-                      and audio and text go from your Mac to those providers.
+                      and audio and text go from {device} to those providers.
                     </p>
                   </div>
                   <div className="ob-way is-disabled" aria-disabled="true">
@@ -217,7 +235,11 @@ export function Onboarding({
             </>
           )}
 
-          {step === 3 && (
+          {step === 3 && other && platform && (
+            <OtherPlatformPermissions platform={platform} />
+          )}
+
+          {step === 3 && !other && (
             <>
               <p className="ob-lead">
                 macOS asks for permissions when you actually use a source, not
@@ -258,7 +280,7 @@ export function Onboarding({
           {step === 4 && (
             <>
               <p className="ob-lead">
-                Nothing leaves your Mac when you press Start live session. You
+                Nothing leaves {device} when you press Start live session. You
                 approve each session before anything is sent, and Stop ends the
                 session and stops sending.
               </p>
@@ -393,5 +415,66 @@ export function Onboarding({
         </div>
       </dialog>
     </section>
+  );
+}
+
+/** Step 1 on Windows and Linux: what this build does not do yet, before the
+ * person adds keys. */
+function PlatformLimits({ platform }: { platform: PlatformCapabilities }) {
+  const name = platformName(platform);
+  return (
+    <div className="ob-perm-card" aria-label={`What the ${name} build does`}>
+      <div className="ob-card-head">
+        <h2>The {name} test build</h2>
+        <span className="ob-chip">Unsigned · not checked on hardware</span>
+      </div>
+      <p>
+        Live sessions here hear your microphone only. Hearing another
+        application, such as the app your call is in, is not available on {name}{' '}
+        yet; with headphones, the microphone hears your side of a call only. The
+        offer to start when a call begins is macOS-only for now, and the
+        companion stays on top of other windows but may not show over a
+        full-screen meeting. This build has not yet been checked on a real{' '}
+        {platform.os === 'windows' ? 'Windows PC' : 'Linux machine'}.
+      </p>
+    </div>
+  );
+}
+
+/** Step 3 on Windows and Linux: there is no access prompt to expect. */
+function OtherPlatformPermissions({
+  platform,
+}: {
+  platform: PlatformCapabilities;
+}) {
+  const name = platformName(platform);
+  return (
+    <>
+      <p className="ob-lead">
+        {name} does not ask TalkQTE for microphone access with a prompt, and
+        nothing is captured or requested on this screen.
+      </p>
+      <div className="ob-perm-card">
+        <div className="ob-card-head">
+          <h2>Microphone</h2>
+          <span className="ob-card-meta">Used from session start</span>
+        </div>
+        <p>
+          {platform.os === 'windows'
+            ? 'TalkQTE uses your default input from Settings → System → Sound. If Settings → Privacy & security → Microphone does not let desktop apps use the microphone, a session cannot start until you turn that on.'
+            : 'TalkQTE uses the default input from your sound settings, through ALSA (PipeWire or PulseAudio on a desktop). It is opened only when you start a live session or microphone check.'}
+        </p>
+      </div>
+      <div className="ob-perm-card">
+        <div className="ob-card-head">
+          <h2>Application audio</h2>
+          <span className="ob-chip">Not available on {name} yet</span>
+        </div>
+        <p>
+          Hearing one application, instead of or beside your microphone, is
+          macOS-only for now. Live sessions on {name} use the microphone only.
+        </p>
+      </div>
+    </>
   );
 }

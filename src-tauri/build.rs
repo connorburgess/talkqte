@@ -49,6 +49,7 @@ fn main() {
             "start_microphone",
             "stop_microphone",
             "live_status",
+            "platform_capabilities",
             "provider_keys_status",
             "set_provider_key",
             "test_provider_key",

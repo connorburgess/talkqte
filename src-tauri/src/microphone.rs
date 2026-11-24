@@ -77,6 +77,8 @@ impl Failure {
             Self::Permission => "Microphone access is unavailable. Check TalkQTE in System Settings → Privacy & Security → Microphone, then try again.",
             Self::NoDevice => "No microphone is available. Connect an input device, then try again.",
             Self::Unsupported => "This microphone or platform is not supported by the activity monitor yet.",
+            Self::Device if cfg!(windows) => "Microphone monitoring stopped. Check your input device, and that Settings → Privacy & security → Microphone lets desktop apps use it, then try again.",
+            Self::Device if cfg!(target_os = "linux") => "Microphone monitoring stopped. Check your input device in your desktop's sound settings, then try again.",
             Self::Device => "Microphone monitoring stopped. Check your input device and permission, then try again.",
             Self::Stalled => "The microphone stopped delivering audio. Check your input device, then try again.",
         }

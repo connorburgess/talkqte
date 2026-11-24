@@ -31,12 +31,35 @@ As of this branch. "CI" is the hosted-runner evidence above; "VM" is the owner's
 | Capability | Windows (x64, Arm64) | Ubuntu (x64, Arm64) | Where macOS-only code lives |
 | --- | --- | --- | --- |
 | Install, launch, window | CI: installs, launches, uninstalls | CI: launches under Xvfb on 24.04 and, installed, on 26.04 | — |
-| Notebook, onboarding, settings, export | Built; Arm64 VM ran the fictional demo on an older commit | Built; Arm64 VM ran the demo under Wayland on an older commit | Interface copy names macOS throughout |
+| Notebook, onboarding, settings, export | Built; Arm64 VM ran the fictional demo on an older commit. Onboarding and the session start name Windows and say what this build does not do (browser tests against a Windows stand-in) | The same for Linux; Arm64 VM ran the demo under Wayland on an older commit | `src-tauri/src/platform.rs` reports the platform; `src/lib/platform.ts` words it |
 | Provider keys | Credential Manager; CI round-trips a fictional key in the runner's real store | Desktop keyring through the Secret Service; CI round-trips a fictional key in a throwaway GNOME Keyring; with no keyring service, keys cannot be saved and Settings says so | `src-tauri/src/provider_keys.rs` (Keychain); `provider_keys/windows.rs`, `provider_keys/secret_service.rs` |
-| Microphone check and live session | Reports the platform unsupported | Reports the platform unsupported | `src-tauri/src/microphone/native.rs`; cpal is a macOS-only dependency |
-| Another application's audio | Not built | Not built | `src-tauri/src/application_audio*`, `native_source.rs` (ScreenCaptureKit) |
+| Microphone check and microphone-only live session | Built on cpal's WASAPI host (shared mode, default input). No access prompt; if Windows' microphone privacy switch for desktop apps is off, the start reports a device error naming it. **Not run on a device**: hosted runners have no microphone | Built on cpal's ALSA host (default input, which desktop Ubuntu routes to PipeWire or PulseAudio). **Not run on a device** | `src-tauri/src/microphone/native.rs` (AVFoundation permission is macOS only) |
+| Another application's audio | Not built; the notebook says it is not available on Windows yet | Not built; the notebook says so | `src-tauri/src/application_audio*`, `native_source.rs` (ScreenCaptureKit) |
 | Companion window | Always on top and not focusable through Tauri; placement in steps; focus over full-screen apps unverified | The same; GNOME Wayland neither lets an app keep a window on top nor report its position | `src-tauri/src/companion_macos.rs` |
-| Call-starting offer | The setting exists, but nothing is read | The same | `src-tauri/src/call_prompt.rs` (Core Audio, NSWorkspace) |
+| Call-starting offer | Not built; Settings says it is not available on Windows yet | The same for Linux | `src-tauri/src/call_prompt.rs` (Core Audio, NSWorkspace) |
+| Menu bar item and Open at login | Not built; Settings says it is not available on Windows yet, and closing the notebook quits | The same for Linux | `src-tauri/src/menu_bar.rs`, `login_item.rs` (status item, SMAppService) |
+| Saved settings file | Built: the same file in Tauri's app data folder (`%APPDATA%\com.talkqte.desktop`, the roaming profile folder, so a domain profile may copy it to other PCs), relying on the profile's permissions; not run on a device | Built: `~/.local/share/com.talkqte.desktop`, mode 0600; not run on a device | `src-tauri/src/settings.rs` is cross-platform |
+
+### Designs for what is not built yet
+
+These are designs, not code. Each needs its own adapter module beside the macOS one, fakes for its tests, and a real-machine check before the notebook offers it.
+
+- **Another application's audio.** Windows 10 version 2004 (build 19041) and later can capture one process tree's output with WASAPI process loopback: `ActivateAudioInterfaceAsync` on `VAD\Process_Loopback` with `AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK` and `PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE`, listing candidate applications from processes with an audio session. It needs no permission prompt, so the notebook's notice and per-session review are the only consent step, as on macOS. On Linux, PipeWire exposes each application's output as a node (`media.class = Stream/Output/Audio`); a capture stream linked to that node hears it alone. Inside a sandbox (Flatpak, Snap) this goes through the screencast or camera portals instead. PulseAudio-only systems would need a monitor of a per-application null sink, which moves the person's audio and is not proposed. Both would feed the existing application-audio contract (`application_audio.rs`), keeping its review, attachment and Stop rules.
+- **Call-starting offer.** Windows records each app currently using the microphone under `HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone` (`LastUsedTimeStop` of 0 while in use), readable without a permission, and `GetForegroundWindow` names the frontmost app. Linux can see capture streams in the PipeWire graph, but Wayland gives no portable way to learn the frontmost application, so only the microphone signal would be available there.
+- **Companion window.** Windows: keep Tauri's always-on-top, non-activating window and check it over full-screen and screen-shared meetings (D2); reduced motion from `SPI_GETCLIENTAREAANIMATION`. Linux on X11 honours always-on-top (`_NET_WM_STATE_ABOVE`); GNOME on Wayland lets no ordinary window stay on top or choose its position, so a Linux companion there may only be a normal window or need a GNOME extension.
+- **Menu bar item and login item** (macOS only, on main since #429). Windows: a notification-area icon (Tauri's tray, `Shell_NotifyIcon`) and `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Linux: an AppIndicator/StatusNotifierItem tray icon (needs `libayatana-appindicator3`; GNOME shows it only with the AppIndicator extension) and an XDG autostart entry in `~/.config/autostart/`. The saved settings file (#426) already uses Tauri's cross-platform app data folder; see the table.
+
+### What a person must check on a real machine
+
+CI cannot show any of these. On a real Windows 11 PC (x64 first, then Arm64) and a real Ubuntu 26.04 LTS desktop (GNOME, Wayland and X11 sessions), using fictional conversations only:
+
+1. Install the artifact; record the SmartScreen or package warning, the install location, and that the Start menu or applications entry opens TalkQTE.
+2. Go through onboarding: the platform name, the "test build" card and step 3's cards read as on this page.
+3. Save, test, replace and remove a fictional-shaped key; find it in Credential Manager or Passwords and Keys; quit and reopen and see it still set. On Ubuntu, lock the keyring first and note the unlock prompt; in a session without GNOME Keyring, see "Keys cannot be saved on this system yet".
+4. Start the microphone check: the input name, activity while speaking, Stop releasing the device (the Windows microphone indicator or PipeWire's stream list clears). Turn off Windows' "Let desktop apps access your microphone" and see the device error naming it.
+5. With real keys and a fictional recording played into the microphone: a live session's review, transcript lines, a cue, Stop.
+6. Companion: placement, staying on top of another app, not taking focus, over a full-screen browser call, during screen sharing, at 150% scaling.
+7. Export a notes file with the save dialog; uninstall and confirm what remains (keys stay in the store until removed).
 
 ## Windows validation
 
