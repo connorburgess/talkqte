@@ -50,6 +50,7 @@ import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
+import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
@@ -2405,14 +2406,24 @@ function Notebook() {
                   transcribe. With cloud transcription or cue processing on,
                   audio goes to the named transcription service and recent lines
                   to the cue provider, for that session only. A live session’s
-                  transcript is kept in memory only and cannot be exported.
-                  Notes exist in memory until you close the app. Exports contain
+                  transcript is kept in memory only; it is in an export only if
+                  you choose to keep the meeting, after the session ends. Notes
+                  exist in memory until you close the app. Exports contain
                   exactly the text you review and are saved to the location you
                   choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
             </section>
+            <Diagnostics
+              current={() => ({
+                desktop: bridge.desktop,
+                session: state,
+                processing: capture.state ?? null,
+                microphone: microphone.state,
+                liveAvailable: liveStatus?.available ?? null,
+              })}
+            />
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
