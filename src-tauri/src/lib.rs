@@ -101,6 +101,7 @@ pub mod provider_keys;
 mod selected_attestation;
 pub mod timing_log;
 pub mod transcription;
+mod updates;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
 use std::{
