@@ -81,8 +81,20 @@ export interface SessionSources {
   applicationAttached?: boolean;
   /** Why the application is no longer heard while the microphone runs on. */
   applicationEnded?: string;
-  /** Microphone lines dropped as repeats of the application's sound. */
+  /** Microphone lines suppressed as likely repeats of the application. */
   echoDropped?: number;
+  /** Those lines, shown marked until the person keeps or removes each. */
+  echoes?: EchoLine[];
+}
+
+/** A microphone line suppressed as a likely echo of the application. */
+export interface EchoLine {
+  id: string;
+  atMs: number;
+  speaker: string;
+  text: string;
+  /** The person said it was theirs. */
+  kept?: boolean;
 }
 
 /** Both the microphone and an application feed the session. */
@@ -114,9 +126,9 @@ export function applicationEndedText(
   return `Audio from ${sources.application} ${what}. Only your microphone is heard now; Cue processing says why. Stop and start again to hear both.`;
 }
 
-/** Said once the echo guard has dropped microphone lines. */
+/** Said once the echo guard has marked microphone lines. */
 export function echoText(sources: SessionSources | undefined): string | null {
   const dropped = sources?.echoDropped ?? 0;
   if (!dropped) return null;
-  return `${dropped === 1 ? '1 microphone line was' : `${dropped} microphone lines were`} left out as a repeat of ${sources?.application ?? 'the application'}'s sound through your speakers. Headphones avoid this.`;
+  return `${dropped === 1 ? '1 microphone line looks' : `${dropped} microphone lines look`} like a repeat of ${sources?.application ?? 'the application'}'s sound through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.`;
 }

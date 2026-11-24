@@ -171,8 +171,12 @@ windows may be included), not your microphone"; or, for both, "the live audio
 from your microphone and, as a second stream, from *App* (audio from all of its
 windows may be included)", with the cap "counted across both streams". One
 approval covers both streams; turning processing off or Stop ends both. An
-application can join only a session started with it, so an approval never
-covers a source it did not name.
+application can join only a session started with it, and only that exact
+reviewed selection (its listing identity and bundle identifier, never a
+name), once: after it ends, the session takes no other application. An
+approval therefore never covers a source it did not name. With the person's
+key a joining application must spend the session's budget; without it the
+application is refused rather than given a fresh cap.
 
 **Both sides of a call.** In a session with both sources, lines are labelled
 by where they were heard: **You** for the microphone, **Them** for the
@@ -180,14 +184,19 @@ application. The labels are not speaker identity (several people can be on
 either side) and they stay on the Mac: the cue model still receives the
 fixed label "Speaker". A kept meeting writes them, with a sentence saying so.
 When the microphone also hears the application through the speakers, the same
-words arrive twice. A microphone line of three or more words is left out when
-at least 80% of its words occur in application lines timed within 4 seconds
-of it (`engine/sources.rs`); the count is shown with the session. The guard
-cannot catch a microphone copy that arrives before the application's line,
-short lines such as "yes", copies Deepgram recognises very differently, or
-someone in the room speaking the same words; and it can drop a genuine
-microphone line that repeats what the other side just said. Headphones avoid
-the problem. If the application's stream fails, or the application stops or
+words arrive twice. A microphone line is treated as a likely echo only when it
+is a close copy of one application line timed within 4 seconds: at least six
+words, the shorter line at least 70% of the longer, and the longest run of the
+same words in the same order at least 85% of the longer line
+(`engine/sources.rs`). Lines are compared one at a time, never pooled, so
+replies such as "I don't know", "yes I agree" or a repeated figure are kept.
+A likely echo is never silent: it stays in the transcript, marked "Likely an
+echo of Them · not used for cues", with **It was me** and **Remove**, and is
+kept in the meeting marked "You (likely an echo of Them)" unless the person
+removes it. It is never sent to a cue model, even after **It was me**. The
+guard cannot catch a microphone copy that arrives before the application's
+line, short copies, copies Deepgram recognises very differently, or copies
+split across lines; headphones avoid the problem. If the application's stream fails, or the application stops or
 never starts, the session runs on with the microphone and says "Audio from
 *App* stopped. Only your microphone is heard now"; a microphone stream failure
 ends the session and its application as before.

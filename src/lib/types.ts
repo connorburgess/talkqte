@@ -106,6 +106,8 @@ export type Commands = {
   set_overlay: { enabled: boolean };
   /** Include this session's transcript and cues shown in the export. */
   set_keep_meeting: { keep: boolean };
+  /** Keep a line marked as a likely echo as the person's own, or remove it. */
+  resolve_echo_line: { id: string; keep: boolean };
   /** `application`: the review of an application to hear beside the
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string } | undefined;

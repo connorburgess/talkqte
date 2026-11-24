@@ -78,7 +78,7 @@ test('dropped echoes are counted and a stopped application is said plainly', asy
   );
   await expect(
     page.getByText(
-      "2 microphone lines were left out as a repeat of Fictional Call's sound through your speakers. Headphones avoid this.",
+      "2 microphone lines look like a repeat of Fictional Call's sound through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.",
     ),
   ).toBeVisible();
   await page.evaluate(
@@ -117,4 +117,56 @@ test('a microphone-only session keeps its plain wording', async ({ page }) => {
     'Your microphone · transcribed by Deepgram',
   );
   await expect(page.locator('#transcript-panel')).not.toContainText('Them');
+});
+
+test('a line suppressed as a likely echo stays visible, marked, with Keep and Remove', async ({
+  page,
+}) => {
+  await notebook(page);
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources: {
+          ...sources,
+          echoDropped: 1,
+          echoes: [
+            {
+              id: 'c1-0-2',
+              atMs: 1_300,
+              speaker: 'You',
+              text: 'Can you send the revised fictional budget?',
+            },
+          ],
+        },
+        transcript: [
+          {
+            id: 'c1-1-1',
+            atMs: 1_000,
+            speaker: 'Them',
+            text: 'Can you send the revised fictional budget?',
+          },
+          {
+            id: 'c1-0-3',
+            atMs: 2_000,
+            speaker: 'You',
+            text: 'Yes, by Friday.',
+          },
+        ],
+      }),
+    both,
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  const lines = transcript.locator('.transcript-segment');
+  await expect(lines).toHaveCount(3);
+  // In time order, the echo between the two ordinary lines.
+  await expect(lines.nth(1)).toContainText(
+    'Likely an echo of Them · not used for cues',
+  );
+  await lines.nth(1).getByRole('button', { name: 'It was me' }).click();
+  await lines.nth(1).getByRole('button', { name: 'Remove' }).click();
+  expect(await page.evaluate(() => window.captureTest.echoAnswers)).toEqual([
+    { id: 'c1-0-2', keep: true },
+    { id: 'c1-0-2', keep: false },
+  ]);
 });

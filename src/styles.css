@@ -646,6 +646,22 @@ svg {
   line-height: 1.75;
   margin-top: 8px;
 }
+.transcript-segment.is-echo p {
+  color: var(--muted);
+}
+.transcript-echo-label {
+  margin-left: auto;
+  margin-right: var(--space-12);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.transcript-echo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
 .context-panel {
   margin-top: var(--space-8);
   padding: 0 0 var(--space-16);
