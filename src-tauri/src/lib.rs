@@ -1832,6 +1832,8 @@ pub fn run() {
             meeting_history_commands::rename_kept_meeting,
             meeting_history_commands::delete_kept_meeting,
             meeting_history_commands::delete_all_kept_meetings,
+            meeting_history_commands::kept_meeting_export_preview,
+            meeting_history_commands::export_kept_meeting,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,

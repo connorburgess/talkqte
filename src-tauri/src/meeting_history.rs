@@ -191,6 +191,105 @@ impl Meeting {
             .iter()
             .all(|word| haystack.iter().any(|text| text.contains(word.as_str())))
     }
+
+    /// The Markdown a person reviews before saving: title, when, sources,
+    /// the person's notes, kept meeting notes if any, cues shown and the
+    /// transcript. Never anything not kept in the meeting itself.
+    pub fn markdown(&self) -> String {
+        let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let clock = crate::meeting_notes::clock;
+        let mut out = format!("# {}\n\n", flat(&self.title));
+        let started = i64::try_from(self.content.started_at_ms)
+            .ok()
+            .and_then(chrono::DateTime::from_timestamp_millis)
+            .map(|when| when.format("%Y-%m-%d %H:%M UTC").to_string());
+        let source = match (self.content.sources, self.content.application.as_deref()) {
+            (Sources::Microphone, _) => "Microphone".to_string(),
+            (Sources::Application, Some(app)) => format!("Application ({})", flat(app)),
+            (Sources::Application, None) => "Application".to_string(),
+            (Sources::Both, Some(app)) => format!("Microphone and {}", flat(app)),
+            (Sources::Both, None) => "Microphone and application".to_string(),
+        };
+        if let Some(started) = started {
+            out.push_str(&format!(
+                "Started {started} · Length {} · {source}\n",
+                clock(self.content.duration_ms)
+            ));
+        } else {
+            out.push_str(&format!(
+                "Length {} · {source}\n",
+                clock(self.content.duration_ms)
+            ));
+        }
+        out.push_str("\n## Notes\n\n");
+        if self.content.notes.trim().is_empty() {
+            out.push_str("None.\n");
+        } else {
+            out.push_str(&self.content.notes);
+            if !self.content.notes.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        if let Some(kept) = self.content.meeting_notes.as_deref() {
+            out.push('\n');
+            out.push_str(kept);
+            if !kept.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out.push_str("\n## Cues shown\n\n");
+        if self.content.cues.is_empty() {
+            out.push_str("None.\n");
+        }
+        for cue in &self.content.cues {
+            out.push_str(&format!(
+                "- {} · {}: {}",
+                clock(cue.at_ms),
+                flat(&cue.kind),
+                flat(&cue.question)
+            ));
+            if !cue.evidence.trim().is_empty() {
+                out.push_str(&format!(" (from: \"{}\")", flat(&cue.evidence)));
+            }
+            out.push('\n');
+        }
+        out.push_str("\n## Transcript\n\n");
+        if let Some(provider) = self.content.transcribed_by.as_deref() {
+            out.push_str(&format!(
+                "Transcribed by {}. Speakers are not identified.\n\n",
+                flat(provider)
+            ));
+        }
+        if self.content.sources == Sources::Both {
+            let from = self
+                .content
+                .application
+                .as_deref()
+                .map(flat)
+                .unwrap_or_else(|| "the application".to_string());
+            out.push_str(&format!(
+                "You marks a line heard by this Mac's microphone and Them a line from {from}'s audio. They say where a line was heard, not who said it.\n\n"
+            ));
+        }
+        if self.content.transcript.is_empty() {
+            out.push_str("None.\n");
+        }
+        for line in &self.content.transcript {
+            let label = match (self.content.sources, line.echo, line.label) {
+                (Sources::Both, true, _) => " You (likely an echo of Them):".to_string(),
+                (Sources::Both, false, Some(Label::You)) => " You:".to_string(),
+                (Sources::Both, false, Some(Label::Them)) => " Them:".to_string(),
+                _ => String::new(),
+            };
+            out.push_str(&format!(
+                "- {}{} {}\n",
+                clock(line.at_ms),
+                label,
+                flat(&line.text)
+            ));
+        }
+        out
+    }
 }
 
 fn chars(text: &str) -> usize {

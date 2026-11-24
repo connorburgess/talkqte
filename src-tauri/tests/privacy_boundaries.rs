@@ -128,6 +128,8 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-rename-kept-meeting",
         "allow-delete-kept-meeting",
         "allow-delete-all-kept-meetings",
+        "allow-kept-meeting-export-preview",
+        "allow-export-kept-meeting",
     ]);
     assert!(
         notebook_only.is_subset(&main),

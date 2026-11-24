@@ -1,7 +1,7 @@
 // Fictional kept meetings for browser tests: an in-memory stand-in for the
 // Rust history commands. It writes nothing; storage, permissions, versions
 // and bounds are tested in Rust.
-import type { Snapshot } from '../../src/lib/types';
+import { clockTime, type Snapshot } from '../../src/lib/types';
 import type {
   HistoryAvailability,
   KeptMeeting,
@@ -18,6 +18,8 @@ export const commands = [
   'rename_kept_meeting',
   'delete_kept_meeting',
   'delete_all_kept_meetings',
+  'kept_meeting_export_preview',
+  'export_kept_meeting',
 ];
 
 /** Every command the notebook invoked, with its arguments. */
@@ -29,6 +31,10 @@ let next = 0;
 /** The session the last keep came from, and what it held then. */
 let sessionKept: { id: string; notes: string; session: number } | null = null;
 let failNext: string | null = null;
+let unreadable = 0;
+let pendingExport: string | null = null;
+const exported: string[] = [];
+let cancelNextExport = false;
 
 const summary = (meeting: KeptMeeting): KeptSummary => ({
   id: meeting.id,
@@ -140,6 +146,7 @@ export function command(
             meeting.notes,
             meeting.meetingNotes ?? '',
             ...meeting.transcript.map((line) => line.text),
+            ...meeting.cues.flatMap((cue) => [cue.question, cue.evidence]),
           ]
             .join('\n')
             .toLowerCase();
@@ -147,7 +154,7 @@ export function command(
         })
         .sort((a, b) => b.startedAtMs - a.startedAtMs)
         .map(summary);
-      return { availability, meetings: found, unreadable: 0 };
+      return { availability, meetings: found, unreadable };
     }
     case 'open_kept_meeting': {
       const meeting = meetings.find(
@@ -162,8 +169,9 @@ export function command(
       if (!meeting) throw 'That meeting is no longer kept.';
       if (!title.trim())
         throw 'Give the meeting a title of up to 200 characters.';
-      meeting.title = title.trim();
+      meeting.title = title.trim().replace(/\s+/g, ' ');
       meeting.revision += 1;
+      pendingExport = null;
       return summary(meeting);
     }
     case 'delete_kept_meeting': {
@@ -172,14 +180,95 @@ export function command(
         throw 'That meeting is no longer kept.';
       meetings = meetings.filter((item) => item.id !== id);
       if (sessionKept?.id === id) sessionKept = null;
+      pendingExport = null;
       return null;
     }
     case 'delete_all_kept_meetings': {
       const count = meetings.length;
       meetings = [];
       sessionKept = null;
+      unreadable = 0;
       availability = 'on';
+      pendingExport = null;
       return count;
+    }
+    case 'kept_meeting_export_preview': {
+      const { id } = args as { id: string };
+      const meeting = meetings.find((item) => item.id === id);
+      if (!meeting) throw 'That meeting is no longer kept.';
+      const flat = (text: string) => text.trim().replace(/\s+/g, ' ');
+      const source =
+        meeting.sources === 'microphone'
+          ? 'Microphone'
+          : meeting.sources === 'application'
+            ? meeting.application
+              ? `Application (${flat(meeting.application)})`
+              : 'Application'
+            : meeting.application
+              ? `Microphone and ${flat(meeting.application)}`
+              : 'Microphone and application';
+      const lines = [
+        `# ${flat(meeting.title)}`,
+        '',
+        `Length ${clockTime(meeting.durationMs)} · ${source}`,
+        '',
+        '## Notes',
+        '',
+        meeting.notes.trim() ? meeting.notes : 'None.',
+      ];
+      if (meeting.meetingNotes !== undefined) {
+        lines.push('', meeting.meetingNotes);
+      }
+      lines.push('', '## Cues shown', '');
+      if (meeting.cues.length === 0) {
+        lines.push('None.');
+      } else {
+        for (const cue of meeting.cues) {
+          const ev = cue.evidence.trim()
+            ? ` (from: "${flat(cue.evidence)}")`
+            : '';
+          lines.push(
+            `- ${clockTime(cue.atMs)} · ${flat(cue.kind)}: ${flat(cue.question)}${ev}`,
+          );
+        }
+      }
+      lines.push('', '## Transcript', '');
+      if (meeting.transcribedBy) {
+        lines.push(
+          `Transcribed by ${flat(meeting.transcribedBy)}. Speakers are not identified.`,
+          '',
+        );
+      }
+      if (meeting.transcript.length === 0) {
+        lines.push('None.');
+      } else {
+        for (const line of meeting.transcript) {
+          const label =
+            meeting.sources === 'both'
+              ? line.echo
+                ? ' You (likely an echo of Them):'
+                : line.label === 'you'
+                  ? ' You:'
+                  : line.label === 'them'
+                    ? ' Them:'
+                    : ''
+              : '';
+          lines.push(`- ${clockTime(line.atMs)}${label} ${flat(line.text)}`);
+        }
+      }
+      pendingExport = `${lines.join('\n')}\n`;
+      return pendingExport;
+    }
+    case 'export_kept_meeting': {
+      if (!pendingExport)
+        throw 'Review the export before choosing a destination.';
+      if (cancelNextExport) {
+        cancelNextExport = false;
+        return false;
+      }
+      exported.push(pendingExport);
+      pendingExport = null;
+      return true;
     }
   }
   throw new Error(`unknown history command ${name}`);
@@ -190,9 +279,12 @@ declare global {
     historyTest: {
       calls: typeof calls;
       meetings: () => KeptMeeting[];
+      exports: () => string[];
       add: (meeting: Omit<KeptMeeting, 'id' | 'revision'>) => string;
       setAvailability: (value: HistoryAvailability) => void;
+      setUnreadable: (count: number) => void;
       failNext: (message: string) => void;
+      cancelNextExport: () => void;
     };
   }
 }
@@ -200,6 +292,7 @@ declare global {
 window.historyTest = {
   calls,
   meetings: () => structuredClone(meetings),
+  exports: () => [...exported],
   add: (meeting) => {
     const id = (++next).toString(16).padStart(32, '0');
     meetings.push({ ...meeting, id, revision: 1 });
@@ -208,7 +301,13 @@ window.historyTest = {
   setAvailability: (value) => {
     availability = value;
   },
+  setUnreadable: (count) => {
+    unreadable = count;
+  },
   failNext: (message) => {
     failNext = message;
+  },
+  cancelNextExport: () => {
+    cancelNextExport = true;
   },
 };

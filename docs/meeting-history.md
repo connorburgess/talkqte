@@ -25,6 +25,7 @@ Nothing is kept unless the person keeps that meeting.
   on disk until the person chooses **Update kept meeting**, which appears only
   when the session differs from what was kept. A new session ends that link:
   a kept meeting is only ever updated from the session it came from.
+- **Meetings page (`src/components/MeetingHistory.tsx`).** Lists kept meetings newest first, searches across titles, notes, kept meeting notes, cues and transcript text, opens any meeting read-only (metadata, notes, kept meeting notes, cues shown and transcript with `You`/`Them` and echo labels), renames a meeting inline, deletes one with an inline confirmation, and exports a kept meeting as Markdown through the same preview-before-destination dialog.
 - The export review's **Also keep this meeting** is unchanged: it only
   decides whether that one Markdown export includes the transcript and cues.
 
@@ -113,6 +114,8 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
 | `rename_kept_meeting`         | A new title                                                                                            |
 | `delete_kept_meeting`         | Deletes one for good                                                                                   |
 | `delete_all_kept_meetings`    | Deletes the whole folder                                                                               |
+| `kept_meeting_export_preview` | Builds the Markdown preview for one kept meeting and holds it for save                                 |
+| `export_kept_meeting`         | Saves the exact reviewed Markdown for a kept meeting through the native dialog                         |
 
 ## Evidence
 
@@ -122,7 +125,8 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
   version-less, oversized, foreign and out-of-bounds files neither shown nor
   rewritten, ids and titles checked before any write, a full history refused,
   update keeps the title, lab runs and a missing folder read and write
-  nothing, every lab setting turns it off, a fixed version-1 file is read;
+  nothing, every lab setting turns it off, a fixed version-1 file is read,
+  and kept-meeting Markdown export omits unkept fields;
   the engine offers nothing before the end or without a transcript, drops
   provider speaker labels, keeps You/Them and echo marks with both sources,
   and keeps the application's name only when asked.
@@ -130,7 +134,11 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
   commands): nothing is kept without **Keep meeting**, the title and the
   application-name choice, a later notes change kept only through **Update
   kept meeting**, a failed keep, the Settings offer and **Delete all
-  meetings** confirmation, and a lab run.
+  meetings** confirmation, a lab run, and the **Meetings** page (newest-first
+  list, search, read-only detail, rename, reviewed Markdown export, delete
+  confirmation, narrow layout, unreadable/newer/lab-run notices).
+- `tests/accessibility.spec.ts`: automated axe-core checks on the **Meetings**
+  list, opened meeting detail and export review dialog.
 
 ## What a real run must confirm
 

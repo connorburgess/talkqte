@@ -51,6 +51,8 @@ fn main() {
             "rename_kept_meeting",
             "delete_kept_meeting",
             "delete_all_kept_meetings",
+            "kept_meeting_export_preview",
+            "export_kept_meeting",
             "discard_meeting_notes",
             "meeting_notes_model",
             "set_meeting_notes_model",

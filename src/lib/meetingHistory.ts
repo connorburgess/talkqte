@@ -127,6 +127,16 @@ export function deleteAllKeptMeetings() {
   return invoke<number>('delete_all_kept_meetings');
 }
 
+export function keptMeetingExportPreview(id: string) {
+  if (!desktop) return browserOnly();
+  return invoke<string>('kept_meeting_export_preview', { id });
+}
+
+export function exportKeptMeeting() {
+  if (!desktop) return browserOnly();
+  return invoke<boolean>('export_kept_meeting');
+}
+
 /** The default title: the meeting's date and time, in the person's locale. */
 export function defaultTitle(startedAtMs: number) {
   const when = new Date(startedAtMs);
