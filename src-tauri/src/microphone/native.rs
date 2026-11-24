@@ -169,7 +169,7 @@ pub(super) fn build_stream(
 /// (`Xrun`), a refused real-time priority or a rerouted default leave the
 /// stream running: ending a meeting for a glitch would lose more than the
 /// glitch did. Audio that really stops is still caught by the input timeout.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn ends_capture(kind: cpal::ErrorKind) -> bool {
     !matches!(
         kind,
@@ -177,7 +177,7 @@ fn ends_capture(kind: cpal::ErrorKind) -> bool {
     )
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", windows, target_os = "linux")))]
 mod tests {
     use super::ends_capture;
     use cpal::ErrorKind;
