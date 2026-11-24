@@ -28,6 +28,9 @@ struct KeepingState {
     /// For this launch only until the settings file holds it.
     offer: bool,
     kept: Option<Kept>,
+    /// The Markdown previewed from the Meetings view, held so the save
+    /// dialog writes exactly what the person reviewed.
+    export: Option<String>,
 }
 
 struct Kept {
@@ -43,6 +46,7 @@ impl Default for Keeping {
         Self(Mutex::new(KeepingState {
             offer: true,
             kept: None,
+            export: None,
         }))
     }
 }
@@ -264,6 +268,7 @@ pub(crate) async fn rename_kept_meeting(
         if let Some(kept) = keeping.kept.as_mut().filter(|kept| kept.id == summary.id) {
             kept.title = summary.title.clone();
         }
+        keeping.export = None;
     }
     Ok(summary)
 }
@@ -283,6 +288,7 @@ pub(crate) async fn delete_kept_meeting(
         if keeping.kept.as_ref().is_some_and(|kept| kept.id == id) {
             keeping.kept = None;
         }
+        keeping.export = None;
     }
     Ok(())
 }
@@ -298,6 +304,66 @@ pub(crate) async fn delete_all_kept_meetings(
         .map_err(message)?;
     if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
         keeping.kept = None;
+        keeping.export = None;
     }
     Ok(count)
+}
+
+#[tauri::command]
+pub(crate) async fn kept_meeting_export_preview(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<String, String> {
+    main_only(&window)?;
+    let meeting = blocking(&app, move |store| store.open_meeting(&id))
+        .await?
+        .map_err(message)?;
+    let markdown = meeting.markdown();
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = Some(markdown.clone());
+    }
+    Ok(markdown)
+}
+
+#[tauri::command]
+pub(crate) async fn export_kept_meeting(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<bool, String> {
+    main_only(&window)?;
+    let markdown = app
+        .state::<Keeping>()
+        .0
+        .lock()
+        .map_err(|_| "Kept meetings are unavailable.")?
+        .export
+        .clone()
+        .ok_or("Review the export before choosing a destination.")?;
+    let handle = app.clone();
+    let saved = tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(file) = handle
+            .dialog()
+            .file()
+            .add_filter("Markdown", &["md"])
+            .set_file_name("talkqte-meeting.md")
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = file
+            .into_path()
+            .map_err(|_| "Choose a local file destination.")?;
+        crate::export_file::write(&path, &markdown)?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "Could not open the save dialog.")??;
+    if saved {
+        if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+            keeping.export = None;
+        }
+    }
+    Ok(saved)
 }

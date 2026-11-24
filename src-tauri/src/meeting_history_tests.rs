@@ -434,3 +434,54 @@ fn a_version_one_meeting_file_is_read() {
     assert!(meeting.content.transcript[1].echo);
     assert_eq!(meeting.content.transcript[2].label, Some(Label::Them));
 }
+
+#[test]
+fn a_kept_meeting_exports_notes_cues_and_transcript_without_unkept_fields() {
+    let folder = Folder::new("export");
+    let store = folder.store();
+    let mut both = content(1_795_000_000_000, "Legal said review takes two days.");
+    both.sources = Sources::Both;
+    both.transcript = vec![
+        Line {
+            at_ms: 4_000,
+            label: Some(Label::You),
+            echo: false,
+            text: "Can we ship Friday?".into(),
+        },
+        Line {
+            at_ms: 5_000,
+            label: Some(Label::You),
+            echo: true,
+            text: "Legal said review takes two days.".into(),
+        },
+        Line {
+            at_ms: 5_100,
+            label: Some(Label::Them),
+            echo: false,
+            text: "Legal said review takes two days.".into(),
+        },
+    ];
+    let kept = store.keep("Orchard review", both).unwrap();
+    let markdown = store.open_meeting(&kept.id).unwrap().markdown();
+    assert!(markdown.starts_with("# Orchard review\n\n"));
+    assert!(markdown.contains("Length 30:00 · Microphone and application"));
+    assert!(!markdown.contains("Fictional Call"));
+    assert!(markdown.contains("Bring the fictional ladder."));
+    assert!(markdown.contains("## Decisions\n\n- Review takes two days."));
+    assert!(markdown.contains("- 00:05 · Timing: What date should we aim for?"));
+    assert!(markdown.contains("Transcribed by Deepgram. Speakers are not identified."));
+    assert!(markdown.contains("the application's audio"));
+    assert!(markdown.contains("- 00:04 You: Can we ship Friday?"));
+    assert!(markdown
+        .contains("- 00:05 You (likely an echo of Them): Legal said review takes two days."));
+    assert!(markdown.contains("- 00:05 Them: Legal said review takes two days."));
+
+    let mut named = content(1_795_000_000_000, "Hello.");
+    named.sources = Sources::Both;
+    named.application = Some("Fictional Call".into());
+    named.transcript[0].label = Some(Label::Them);
+    let named_summary = store.keep("Named call", named).unwrap();
+    let named_md = store.open_meeting(&named_summary.id).unwrap().markdown();
+    assert!(named_md.contains("Microphone and Fictional Call"));
+    assert!(named_md.contains("Fictional Call's audio"));
+}

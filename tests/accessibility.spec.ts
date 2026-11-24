@@ -166,6 +166,32 @@ test('an ended session, its meeting notes offer and the export review have no au
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   expect(await violations(page), 'export review').toEqual([]);
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => {
+    window.historyTest.add({
+      title: 'Fictional orchard sync',
+      startedAtMs: Date.UTC(2026, 10, 4, 9),
+      durationMs: 600_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'The keys are in the blue tin.' }],
+      notes: 'Bring the ladder.',
+      cues: [],
+    });
+  });
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Kept meetings', level: 1 }),
+  ).toBeVisible();
+  expect(await violations(page), 'meetings list').toEqual([]);
+  await page.getByRole('button', { name: /Fictional orchard sync/ }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Fictional orchard sync', level: 1 }),
+  ).toBeVisible();
+  expect(await violations(page), 'kept meeting detail').toEqual([]);
+  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await violations(page), 'kept meeting export').toEqual([]);
 });
 
 test('the companion with a cue and with the call-starting offer has no automated accessibility violations', async ({

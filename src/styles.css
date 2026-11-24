@@ -1475,6 +1475,8 @@ svg {
   }
   .meeting-list nav {
     margin: 0;
+    grid-auto-flow: column;
+    gap: 4px;
   }
   .meeting-list-content {
     grid-column: 1 / -1;

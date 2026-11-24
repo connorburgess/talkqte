@@ -9,6 +9,7 @@ import {
   CloudUpload,
   EyeOff,
   FileText,
+  History,
   MessageCircle,
   Mic,
   Pause,
@@ -40,6 +41,7 @@ import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
+import { MeetingHistory } from './components/MeetingHistory';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
 import {
@@ -643,7 +645,10 @@ function Notebook() {
       }
     });
   };
-  const [view, setView] = useState<'notebook' | 'settings'>('notebook');
+  const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
+    'notebook',
+  );
+  const [historyRevision, setHistoryRevision] = useState(0);
   // The menu bar's Start session…: the notebook with its ordinary start in
   // reach. Nothing is chosen, listed or started.
   const [startRequested, setStartRequested] = useState(0);
@@ -1248,6 +1253,14 @@ function Notebook() {
               <BookOpen size={19} />
               Notebook
             </button>
+            <button
+              className={view === 'meetings' ? 'nav-item selected' : 'nav-item'}
+              aria-current={view === 'meetings' ? 'page' : undefined}
+              onClick={() => setView('meetings')}
+            >
+              <History size={19} />
+              Meetings
+            </button>
           </nav>
           {view === 'notebook' && (
             <div className="meeting-list-content">
@@ -1305,8 +1318,20 @@ function Notebook() {
       >
         <header className="toolbar">
           <div className="breadcrumb">
-            <BookOpen size={16} />
-            <span>{view === 'notebook' ? 'Notebook' : 'Settings'}</span>
+            {view === 'meetings' ? (
+              <History size={16} />
+            ) : view === 'settings' ? (
+              <Settings size={16} />
+            ) : (
+              <BookOpen size={16} />
+            )}
+            <span>
+              {view === 'notebook'
+                ? 'Notebook'
+                : view === 'meetings'
+                  ? 'Meetings'
+                  : 'Settings'}
+            </span>
             {view === 'notebook' && state.live && (
               <>
                 <ChevronRight size={14} />
@@ -1664,7 +1689,10 @@ function Notebook() {
               )}
 
             <MeetingNotes snapshot={state} />
-            <KeepInHistory snapshot={state} />
+            <KeepInHistory
+              snapshot={state}
+              onKept={() => setHistoryRevision((r) => r + 1)}
+            />
 
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}
@@ -2127,6 +2155,12 @@ function Notebook() {
           </div>
         )}
 
+        {view === 'meetings' && (
+          <div className="secondary-page history-page">
+            <MeetingHistory refreshKey={historyRevision} />
+          </div>
+        )}
+
         {view === 'settings' && (
           <div className="secondary-page settings-page">
             <h1>Make room for your conversation.</h1>
@@ -2374,7 +2408,9 @@ function Notebook() {
                 </p>
               </div>
             </section>
-            <MeetingHistorySettings />
+            <MeetingHistorySettings
+              onDeleted={() => setHistoryRevision((r) => r + 1)}
+            />
             <SavedSettings
               onReset={() => {
                 setPreferredListWidth(null);
