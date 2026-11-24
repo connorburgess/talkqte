@@ -364,6 +364,33 @@ test("each way transcription can stop with the person's own key says what happen
   }
 });
 
+test('the notebook says the transcription cap is near before the session ends on it, and announces it once', async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await startLive(page);
+  const publish = (minutesLeft: number) =>
+    page.evaluate(
+      (minutesLeft) =>
+        window.liveTest.publish({
+          transcription: { provider: 'Deepgram', minutesLeft },
+        } as never),
+      minutesLeft,
+    );
+  await publish(10);
+  const said =
+    "About 10 minutes of transcription are left before this session's 120-minute cap; then the session ends.";
+  await expect(session(page)).toContainText(said);
+  const notice = page.getByRole('status').filter({ hasText: 'cap; then' });
+  await expect(notice).toContainText(said);
+  await publish(1);
+  await expect(session(page)).toContainText(
+    "About 1 minute of transcription is left before this session's 120-minute cap",
+  );
+  // The countdown is shown, not read out again each minute.
+  await expect(notice).toContainText('About 10 minutes');
+});
+
 test('a live launch says where audio goes in Settings, offers no speech model, and says when a lab run ended or audio was dropped', async ({
   page,
 }) => {

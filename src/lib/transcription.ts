@@ -11,6 +11,23 @@ export interface CloudTranscription {
    * (ms) lost with the failed ones. */
   reconnects?: number;
   lostMs?: number;
+  /** Minutes of the meeting left before the session's transcription cap,
+   * once ten or fewer remain. */
+  minutesLeft?: number;
+}
+
+/** Said as the session's transcription cap comes near, so a meeting does
+ * not end on it unannounced. */
+export function transcriptionLowText(
+  transcription: CloudTranscription | undefined,
+): string | null {
+  const left = transcription?.minutesLeft;
+  if (left === undefined || transcription?.stopped) return null;
+  const when =
+    left <= 0
+      ? 'Transcription is about to reach'
+      : `About ${left} ${left === 1 ? 'minute' : 'minutes'} of transcription ${left === 1 ? 'is' : 'are'} left before`;
+  return `${when} this session's 120-minute cap; then the session ends. With your microphone and an application, each minute of the meeting uses two. Stop and start a new session to continue after it.`;
 }
 
 const STOP_REASONS: Record<string, string> = {
