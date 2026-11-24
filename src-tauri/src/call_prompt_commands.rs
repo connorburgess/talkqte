@@ -5,7 +5,9 @@ use crate::{
     call_prompt::{Answer, Settings},
     AppState,
 };
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     (window.label() == "main")
@@ -27,7 +29,7 @@ pub(crate) fn call_prompt_settings(
     Ok(runtime.call_prompt.settings().clone())
 }
 
-/// Turn the prompt on or off for this launch. Off stops every read of the
+/// Turn the prompt on or off; the choice is saved. Off stops every read of the
 /// microphone's in-use state and the frontmost application.
 #[tauri::command]
 pub(crate) fn set_call_prompt(
@@ -42,6 +44,7 @@ pub(crate) fn set_call_prompt(
         if runtime.call_prompt.set_enabled(enabled) {
             changed(&app, &mut runtime);
         }
+        crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
         runtime.call_prompt.settings().clone()
     };
     crate::companion::refresh(&app);
@@ -51,11 +54,13 @@ pub(crate) fn set_call_prompt(
 #[tauri::command]
 pub(crate) fn clear_call_prompt_apps(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<Settings, String> {
     main_only(&window)?;
     let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
     runtime.call_prompt.clear_not_for();
+    crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
     Ok(runtime.call_prompt.settings().clone())
 }
 
@@ -73,18 +78,16 @@ pub(crate) fn respond_to_call_prompt(
         let start = runtime
             .call_prompt
             .answer(id, answer, std::time::Instant::now());
+        // Not for this app and Don't ask again are saved choices.
+        crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
         changed(&app, &mut runtime);
         start
     };
     crate::companion::refresh(&app);
     if let Some(preselect) = start {
-        if let Some(main) = app.get_webview_window("main") {
-            let _ = main.show();
-            let _ = main.unminimize();
-            // The person clicked Start: bringing the notebook forward is
-            // what they asked for.
-            let _ = main.set_focus();
-        }
+        // The person clicked Start: bringing the notebook forward, from the
+        // menu bar if it was closed there, is what they asked for.
+        crate::menu_bar::show_notebook(&app);
         // The name and bundle identifier go to the notebook only.
         let _ = app.emit_to("main", "call-prompt:start", preselect);
     }
