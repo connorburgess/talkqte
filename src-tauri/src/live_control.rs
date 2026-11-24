@@ -234,6 +234,9 @@ impl Runtime {
         let mut engine = carry_over(&self.engine, crate::live_engine(&ticket.sources));
         engine.start()?;
         engine.set_sources(ticket.sources.clone());
+        // The last session's meeting notes, if still being written, stop:
+        // their result would belong to a session that is gone.
+        self.engine.cancel_meeting_notes();
         #[cfg(all(
             debug_assertions,
             any(feature = "claude-cli", feature = "lab-evaluator"),
