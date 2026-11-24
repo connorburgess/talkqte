@@ -29,7 +29,7 @@ import {
   type GranolaStatus,
 } from './lib/types';
 
-import { CueCard } from './components/Question';
+import { CueCard, cueAnnouncement } from './components/Question';
 import {
   ProcessingControl,
   processingIssueText,
@@ -233,6 +233,8 @@ function FloatingQuestion() {
   }, [busy, cueId]);
   return (
     <main className="floating-surface" aria-label="Meeting companion">
+      {/* The window's title for heading navigation; the bar shows none. */}
+      <h1 className="visually-hidden">TalkQTE companion</h1>
       <div
         className={`companion-shell${edge === 'bottom' ? ' is-bottom' : ''}`}
       >
@@ -716,6 +718,40 @@ function Notebook() {
       state.live && state.status === 'ended' ? state.focus.join('\n') : null,
     );
   }, [state?.live, state?.status]);
+  // Said once each to assistive technology, through regions that stay
+  // mounted: a live region added together with its words is often not read.
+  // A new cue is read; its countdown, a hold or an answer are not.
+  const [cueNotice, setCueNotice] = useState('');
+  const announcedCue = useRef<string | null>(null);
+  useEffect(() => {
+    const cue = state?.cue;
+    if (!cue) {
+      setCueNotice('');
+      return;
+    }
+    if (announcedCue.current === cue.id) return;
+    announcedCue.current = cue.id;
+    setCueNotice(cueAnnouncement(cue));
+  }, [state?.cue?.id]);
+  const sessionWas = useRef<string | null>(null);
+  useEffect(() => {
+    const now = state?.live ? (state.status ?? null) : null;
+    if (sessionWas.current === 'running' && now === 'ended')
+      setNotice('Live session ended.');
+    sessionWas.current = now;
+  }, [state?.live, state?.status]);
+  // The echo count changes with every marked line; only the first is said.
+  const echoesSaid = useRef(false);
+  useEffect(() => {
+    const text = echoText(state?.sources);
+    if (!text) {
+      echoesSaid.current = false;
+      return;
+    }
+    if (echoesSaid.current) return;
+    echoesSaid.current = true;
+    setNotice(text);
+  }, [state?.sources?.echoDropped]);
   const suggestionList = useRef<HTMLFieldSetElement>(null);
   useEffect(() => {
     if (suggestions === null || !focusSuggestions.current) return;
@@ -1452,9 +1488,9 @@ function Notebook() {
                   {applicationEndedText(state.sources) && (
                     <p role="alert">{applicationEndedText(state.sources)}</p>
                   )}
-                  {echoText(state.sources) && (
-                    <p role="status">{echoText(state.sources)}</p>
-                  )}
+                  {/* Said once through the notice region; the count is
+                      not re-read as it grows. */}
+                  {echoText(state.sources) && <p>{echoText(state.sources)}</p>}
                   {transcriptionDropText(state.transcription) && (
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
@@ -2294,6 +2330,9 @@ function Notebook() {
         )}
         <div className="visually-hidden" role="status">
           {notice}
+        </div>
+        <div className="visually-hidden" role="status" aria-label="Cue">
+          {cueNotice}
         </div>
         <p className="visually-hidden" id="panel-resize-help">
           Drag to resize. Left and right arrows adjust width; Home and End use
