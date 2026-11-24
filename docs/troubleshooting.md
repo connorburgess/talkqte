@@ -57,6 +57,13 @@ What the app does in each case with your own keys, as checked by the automated t
 | The Keychain is locked or refuses access | At start: "Your Anthropic key could not be read from the Keychain. Check it in Settings." (or Deepgram). Mid-session, a new transcription connection stops at once ("your Deepgram key could not be read from the Keychain, or it was removed"), and cues stop ("your Anthropic key could not be read from the Keychain, or it was removed"). | Unlock the login Keychain or allow access, then start again. |
 | The disk is full when you export | "There is not enough space to save the file. Free some space or choose another disk; nothing was saved and the export is still here." No partial file is left and a file being replaced is untouched. | Free space or choose another disk, then choose the destination again. |
 | Meeting notes fail | Offline (no connection could be made): "Anthropic could not be reached, so nothing was sent." and you can try again. Any other failure uses the meeting's one request. | Reconnect and choose **Write meeting notes…** again. |
+## Long sessions
+
+| You see | What it means | What to do |
+| --- | --- | --- |
+| "About 10 minutes of transcription are left before this session's 120-minute cap; then the session ends." | A session may send 120 minutes of audio to Deepgram. With your microphone and an application, both streams count, so a two-source meeting reaches the cap after about an hour. The notice counts down from ten minutes of meeting left and is read out once. | Stop and start a new session to continue after the cap. |
+| Cues stop partway through a busy meeting with "this session's request limit was reached" | A session sends at most 400 cue requests, at least two seconds apart. In a scripted two-source hour with a line about every three seconds, the limit was reached after about 22 minutes; quieter meetings last longer. The transcript continues. | Start a new session for more cues. The limit is an open owner decision ([own-key cues](own-key-cues.md#caps-and-the-spend-estimate)). |
+| The transcript shows only the most recent lines | The notebook shows the last 400 lines. A kept meeting's export and meeting notes still use the whole meeting, up to 4,000 lines (about two hours of talk). | Nothing. Past 4,000 lines the export says its start is not included, and meeting notes are refused rather than written from part of the meeting. |
 
 ## Speech model left from an earlier version
 

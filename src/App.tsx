@@ -69,6 +69,7 @@ import {
   sourcesHeading,
   transcribedWhere,
   transcriptionDropText,
+  transcriptionLowText,
   transcriptionReconnectText,
   transcriptionStopText,
 } from './lib/transcription';
@@ -790,6 +791,18 @@ function Notebook() {
       state.live && state.status === 'ended' ? state.focus.join('\n') : null,
     );
   }, [state?.live, state?.status]);
+  // The cap's countdown is said when it first appears, not every minute.
+  const lowSaid = useRef(false);
+  const lowText = transcriptionLowText(state?.transcription);
+  useEffect(() => {
+    if (!lowText) {
+      lowSaid.current = false;
+      return;
+    }
+    if (lowSaid.current) return;
+    lowSaid.current = true;
+    setNotice(lowText);
+  }, [lowText]);
   // Said once each to assistive technology, through regions that stay
   // mounted: a live region added together with its words is often not read.
   // A new cue is read; its countdown, a hold or an answer are not.
@@ -1567,6 +1580,11 @@ function Notebook() {
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
                     </p>
+                  )}
+                  {/* Changes each minute: said once, through the notice
+                      region, when it first appears. */}
+                  {transcriptionLowText(state.transcription) && (
+                    <p>{transcriptionLowText(state.transcription)}</p>
                   )}
                   {transcriptionReconnectText(state.transcription) && (
                     <p role="status">
