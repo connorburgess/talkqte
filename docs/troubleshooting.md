@@ -95,4 +95,4 @@ There is no support service for this prototype. Open an issue on the [GitHub rep
 - the steps that led to it, using fictional content only;
 - for microphone and live-session problems, the input device and whether headphones were in use.
 
-Do not include meeting content, transcripts, or recordings. The app writes no diagnostic file; describe what you saw.
+Do not include meeting content, transcripts, or recordings. The app writes no diagnostic file. **Settings → Diagnostics → Show diagnostics** shows the app version, your settings, whether each key is set and the fixed codes of what last went wrong, with nothing from a meeting; read it, choose **Copy diagnostics** and paste it into the issue.

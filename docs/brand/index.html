@@ -6735,6 +6735,49 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                   >Disclosures</span
                 >
               </div>
+              <div class="panel-setting-row">
+                <div style="max-width: 56ch">
+                  <strong class="panel-h3">Diagnostics</strong>
+                  <p class="panel-muted" style="margin-top: 4px">
+                    For a problem report: the app version, your settings,
+                    whether each key is set, and the fixed codes of what last
+                    went wrong. It contains nothing from a meeting. Nothing is
+                    sent; you read it, then copy it.
+                  </p>
+                  <p class="panel-muted" style="margin-top: 8px">
+                    State 1: <strong>Show diagnostics</strong> (secondary). State
+                    2: the report in a mono block on the band background with a
+                    full 1px hairline, focused, then
+                    <strong>Copy diagnostics</strong> (primary) and
+                    <strong>Refresh</strong>. State 3: a polite status line,
+                    "Copied. Paste it into your report." or "Could not copy.
+                    Select the text above and copy it yourself."
+                  </p>
+                  <pre
+                    style="
+                      margin-top: 8px;
+                      padding: 12px;
+                      font-family: var(--g-mono, ui-monospace, monospace);
+                      font-size: 12px;
+                      line-height: 1.5;
+                      white-space: pre-wrap;
+                      background: var(--g-band, #f3f5f7);
+                      border: 1px solid var(--g-line, #d3d9e2);
+                      border-radius: 2px;
+                    "
+>TalkQTE: 0.1 alpha
+Build: desktop
+Deepgram key: set, checked
+Anthropic key: set
+Session: live
+Transcription stopped: stalled
+Transcription reconnects: 2
+Cue processing stopped: -</pre>
+                </div>
+                <span class="mono-label" style="color: var(--g-muted)"
+                  >Diagnostics.tsx</span
+                >
+              </div>
             </article>
 
             <!-- 11. Settings · Your API keys (merged ProviderKeys.tsx + Transcription language) -->
