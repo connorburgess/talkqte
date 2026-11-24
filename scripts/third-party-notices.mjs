@@ -8,6 +8,10 @@
 //
 //   node scripts/third-party-notices.mjs           write the file
 //   node scripts/third-party-notices.mjs --check   fail if it would change
+//   node scripts/third-party-notices.mjs --target <rust-target> --out <file>
+//       write the notices for another platform's build (CI puts the Windows
+//       and Ubuntu ones beside their unsigned installers; they are not
+//       committed or checked)
 //
 // The file is committed so a change in what ships is visible in review, and
 // the release pre-flight refuses a bundle whose copy is missing or stale.
@@ -34,6 +38,8 @@ export const RUST_FEATURES = [];
  * IGNORED_NOTICES, so a new one cannot be skipped without a decision. */
 const VENDORED_NOTICES = {
   'regex-syntax': ['src/unicode_tables/LICENSE-UNICODE'],
+  // A copy of spin's lazy initialiser (Windows and Linux builds only).
+  'tracing-core': ['src/spin/LICENSE'],
   ring: [
     'src/polyfill/once_cell/LICENSE-APACHE',
     'src/polyfill/once_cell/LICENSE-MIT',
@@ -45,6 +51,13 @@ const VENDORED_NOTICES = {
 const IGNORED_NOTICES = {
   // Linux desktop-portal backend; the macOS build uses the AppKit backend.
   rfd: ['src/backend/xdg_desktop_portal/window_identifier/LICENSE'],
+  // libdbus's own source, compiled only with the crate's `vendored` feature,
+  // which nothing enables (the lockfile gives libdbus-sys no C compiler):
+  // Linux builds link the system's libdbus instead.
+  'libdbus-sys': [
+    'vendor/dbus/COPYING',
+    'vendor/dbus/cmake/modules/COPYING-CMAKE-SCRIPTS',
+  ],
 };
 
 const NOTICE_FILE = /^(licen[sc]e|copying|notice|unlicense|copyright)/i;
@@ -288,7 +301,7 @@ function toolchainComponent(root) {
 }
 
 /** The notices file for the given components. Pure, so it can be tested. */
-export function render(components, inputs) {
+export function render(components, inputs, target = RUST_TARGET) {
   const texts = new Map();
   for (const component of components)
     for (const notice of component.notices) {
@@ -323,16 +336,23 @@ export function render(components, inputs) {
     inputs,
     ...(RUST_FEATURES.length
       ? [
-          `Scope: Rust crates linked for ${RUST_TARGET} with the ${RUST_FEATURES.join(', ')} feature${RUST_FEATURES.length === 1 ? '' : 's'}`,
+          `Scope: Rust crates linked for ${target} with the ${RUST_FEATURES.join(', ')} feature${RUST_FEATURES.length === 1 ? '' : 's'}`,
           '(a build without that feature links a subset), the Rust standard library,',
         ]
       : [
-          `Scope: Rust crates linked for ${RUST_TARGET} with the default features (no`,
+          `Scope: Rust crates linked for ${target} with the default features (no`,
           'optional features; development builds link more), the Rust standard library,',
         ]),
     'and the JavaScript packages and bundled fonts in the frontend bundle. The',
-    'system web view and macOS frameworks are part of the operating system and are',
-    'not listed.',
+    ...(target === RUST_TARGET
+      ? [
+          'system web view and macOS frameworks are part of the operating system and are',
+          'not listed.',
+        ]
+      : [
+          'system web view (WebView2 or WebKitGTK) and other system libraries come with',
+          'the operating system or its packages and are not listed.',
+        ]),
     '',
     'Declared licences',
     '-----------------',
@@ -368,7 +388,7 @@ export function render(components, inputs) {
   return `${lines.join('\n')}\n`;
 }
 
-export async function generate(root = REPOSITORY) {
+export async function generate(root = REPOSITORY, target = RUST_TARGET) {
   const cargo = (...args) =>
     execFileSync(
       'cargo',
@@ -384,19 +404,13 @@ export async function generate(root = REPOSITORY) {
       { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
     );
   const metadata = JSON.parse(
-    cargo(
-      'metadata',
-      '--format-version',
-      '1',
-      '--filter-platform',
-      RUST_TARGET,
-    ),
+    cargo('metadata', '--format-version', '1', '--filter-platform', target),
   );
   const linked = parseTree(
     cargo(
       'tree',
       '--target',
-      RUST_TARGET,
+      target,
       '--edges',
       'normal,no-proc-macro',
       '--prefix',
@@ -413,10 +427,31 @@ export async function generate(root = REPOSITORY) {
       ...bundledFontComponents(root),
     ],
     inputsLine(root),
+    target,
   );
 }
 
-if (isMain(import.meta.url)) {
+/** The value after `name` on the command line, or null. */
+function option(name) {
+  const at = process.argv.indexOf(name);
+  return at === -1 ? null : (process.argv[at + 1] ?? null);
+}
+
+if (isMain(import.meta.url) && option('--target')) {
+  const target = option('--target');
+  const out = option('--out');
+  if (!out) {
+    console.error('third-party notices: --target needs --out <file>');
+    process.exit(1);
+  }
+  try {
+    writeFileSync(out, await generate(REPOSITORY, target));
+  } catch (error) {
+    console.error(`third-party notices: ${error.message}`);
+    process.exit(1);
+  }
+  console.log(`Wrote the ${target} notices to ${out}`);
+} else if (isMain(import.meta.url)) {
   const check = process.argv.includes('--check');
   const path = join(REPOSITORY, NOTICES_PATH);
   let fresh;

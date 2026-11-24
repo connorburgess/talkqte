@@ -383,6 +383,18 @@ mockIPC(
         () => historySession,
       );
     switch (command) {
+      case 'platform_capabilities': {
+        // The macOS build unless a test names Windows or Linux.
+        const os = new URLSearchParams(location.search).get('platform');
+        const other = os === 'windows' || os === 'linux';
+        return {
+          os: other ? os : 'macos',
+          microphone: true,
+          applicationAudio: !other,
+          callPrompt: !other,
+          companionOverFullScreen: !other,
+        };
+      }
       case 'application_audio':
         // Record what the notebook asked for; answer as the fictional host
         // when a test has set one up.

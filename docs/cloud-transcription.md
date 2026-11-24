@@ -35,7 +35,10 @@ its replacements only, so another start cannot replace or reuse it. An
 application started into a microphone session (both sides of a call) opens its
 own stream, but spends that session's budget: the 120 minutes are counted
 across both streams, so two streams at once use them twice as fast, as
-Deepgram bills each stream. A session for an application alone has a budget
+Deepgram bills each stream. From ten minutes of meeting left (counting both
+streams when both are heard) the notebook says how many minutes remain before
+the session ends on the cap; it is read out once, when it first appears. A
+session for an application alone has no such notice yet; it has a budget
 of its own, being a session of its own. The caps are per session only: there is
 no per-launch or per-day cap with the person's key. A 401 or 403 marks the key rejected, so Settings
 says so and the next start is refused with "Deepgram rejected your API key.

@@ -7,10 +7,20 @@ export type KeyProvider = 'deepgram' | 'anthropic';
 
 /** What the notebook may know about a key; never the key itself. */
 export interface KeyStatus {
-  /** `unreadable`: the Keychain could not be read, so it is not known. */
+  /** `unreadable`: the key store could not be read, so it is not known. */
   state: 'notSet' | 'set' | 'rejected' | 'unreadable';
   /** The provider accepted it at the last check in this app run. */
   verified: boolean;
+}
+
+/** The system store that keeps the keys. `memory` is tests only. */
+export type KeyStoreKind =
+  'keychain' | 'credentialManager' | 'secretService' | 'memory';
+
+export interface KeyStore {
+  kind: KeyStoreKind;
+  /** False when this system has no such store, so keys cannot be saved. */
+  available: boolean;
 }
 
 export interface KeysStatus {
@@ -18,6 +28,36 @@ export interface KeysStatus {
   anthropic: KeyStatus;
   /** Either key is not set: what a first-run screen asks for. */
   anyMissing: boolean;
+  /** Absent only from a payload older than this field. */
+  store?: KeyStore;
+}
+
+/** How the notebook names each store in a sentence ("kept in …"). */
+export function keyStoreName(kind: KeyStoreKind | undefined) {
+  switch (kind) {
+    case 'credentialManager':
+      return 'Windows Credential Manager';
+    case 'secretService':
+      return 'your desktop keyring';
+    case 'memory':
+      return 'memory until you quit';
+    default:
+      return "your Mac's Keychain";
+  }
+}
+
+/** The short label for a store, as on a setup chip. */
+export function keyStoreLabel(kind: KeyStoreKind | undefined) {
+  switch (kind) {
+    case 'credentialManager':
+      return 'Windows Credential Manager';
+    case 'secretService':
+      return 'Desktop keyring';
+    case 'memory':
+      return 'Memory only';
+    default:
+      return 'macOS Keychain';
+  }
 }
 
 /** This session's use of the Anthropic key; an estimate, not a bill. */
@@ -47,6 +87,7 @@ function previewStatus(): KeysStatus {
     deepgram,
     anthropic,
     anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    store: { kind: 'keychain', available: true },
   };
 }
 

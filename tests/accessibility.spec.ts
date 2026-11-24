@@ -77,10 +77,13 @@ test('the notebook, the review and a two-source session with a cue have no autom
   page,
 }) => {
   await standIn(page, '/?live&processor&keys=set');
+  const startLive = page.getByRole('button', {
+    name: 'Start live session',
+    exact: true,
+  });
+  await expect(startLive).toBeVisible();
   expect(await violations(page), 'before a session').toEqual([]);
-  await page
-    .getByRole('button', { name: 'Start live session', exact: true })
-    .click();
+  await startLive.click();
   const panel = page.getByRole('region', {
     name: 'Cue processing',
     exact: true,

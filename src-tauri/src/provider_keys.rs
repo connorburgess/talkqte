@@ -1,8 +1,13 @@
 //! The person's own provider keys: one Deepgram key for transcription and one
 //! Anthropic API key for cue decisions.
 //!
-//! Keys live only in the macOS Keychain, as generic passwords under the
-//! service [`SERVICE`]. They are never written to a file, never logged, never
+//! Keys live only in the system's secret store under the service
+//! [`SERVICE`]: the login Keychain on macOS (generic passwords), Windows
+//! Credential Manager (generic credentials, [`windows`]) and the desktop
+//! keyring through the Secret Service on Linux ([`secret_service`]). Where
+//! there is no such store (a Linux system without a keyring), keys cannot be
+//! saved and the notebook says so; they are never kept anywhere else. They
+//! are never written to a file, never logged, never
 //! put in an error and never sent back to the webview: the notebook receives
 //! only whether each key is set, set and checked, or rejected. A key's shape
 //! is checked before it is stored. Checking a key is an explicit action that
@@ -14,6 +19,11 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Mutex, time::Duration};
 use zeroize::Zeroizing;
+
+#[cfg(target_os = "linux")]
+pub mod secret_service;
+#[cfg(windows)]
+pub mod windows;
 
 /// The Keychain service every TalkQTE provider key is stored under.
 pub const SERVICE: &str = "app.talkqte.provider-key";
@@ -109,6 +119,8 @@ pub fn validate(provider: Provider, text: &str) -> Result<Secret, KeyError> {
 pub enum KeyError {
     Shape(Provider),
     Store,
+    /// There is no secret store on this system to keep keys in.
+    NoStore,
     NotSet(Provider),
     Unreachable(Provider),
 }
@@ -122,7 +134,10 @@ impl KeyError {
             Self::Shape(Provider::Deepgram) => {
                 "That does not look like a Deepgram API key. It is letters and digits only."
             }
-            Self::Store => "The Keychain could not be used. Nothing was changed.",
+            Self::Store => store_failure_message(),
+            Self::NoStore => {
+                "This system has no keyring TalkQTE can use, so keys cannot be saved here yet. Nothing was changed."
+            }
             Self::NotSet(Provider::Anthropic) => "No Anthropic key is set.",
             Self::NotSet(Provider::Deepgram) => "No Deepgram key is set.",
             Self::Unreachable(Provider::Anthropic) => {
@@ -141,12 +156,48 @@ impl From<KeyError> for String {
     }
 }
 
-/// A store that could not be used. It carries no detail by design.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StoreError;
+/// What the store failure message names, per platform.
+fn store_failure_message() -> &'static str {
+    if cfg!(windows) {
+        "Windows Credential Manager could not be used. Nothing was changed."
+    } else if cfg!(target_os = "linux") {
+        "The keyring could not be used. Unlock it or allow access, then try again. Nothing was changed."
+    } else {
+        "The Keychain could not be used. Nothing was changed."
+    }
+}
 
-/// Where keys are kept. The app uses the Keychain; tests use memory.
+/// A store that could not be used. It carries no detail by design beyond
+/// whether a store exists at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreError {
+    /// The store exists but refused or failed the operation.
+    Failed,
+    /// There is no store on this system (no keyring service to reach).
+    Unavailable,
+}
+
+/// Which secret store keeps the keys, as the notebook names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StoreKind {
+    Keychain,
+    CredentialManager,
+    SecretService,
+    /// Held in memory only: tests, and platforms with no store implemented.
+    Memory,
+}
+
+/// Where keys are kept: the platform's store in the app; memory in tests.
 pub trait SecretStore: Send + Sync {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Memory
+    }
+    /// Whether a key is stored, without needing to read it where the store
+    /// can tell (no unlock prompt just to show the settings).
+    fn contains(&self, account: &str) -> Result<bool, StoreError> {
+        Ok(self.get(account)?.is_some())
+    }
     fn get(&self, account: &str) -> Result<Option<Secret>, StoreError>;
     fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError>;
     fn delete(&self, account: &str) -> Result<(), StoreError>;
@@ -158,16 +209,20 @@ pub struct Keychain;
 
 #[cfg(target_os = "macos")]
 impl SecretStore for Keychain {
+    fn kind(&self) -> StoreKind {
+        StoreKind::Keychain
+    }
+
     fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
         use security_framework::passwords::get_generic_password;
         match get_generic_password(SERVICE, account) {
             Ok(bytes) => {
                 let bytes = Zeroizing::new(bytes);
-                let text = std::str::from_utf8(&bytes).map_err(|_| StoreError)?;
+                let text = std::str::from_utf8(&bytes).map_err(|_| StoreError::Failed)?;
                 Ok(Some(Secret(Zeroizing::new(text.to_string()))))
             }
             Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-            Err(_) => Err(StoreError),
+            Err(_) => Err(StoreError::Failed),
         }
     }
 
@@ -177,14 +232,14 @@ impl SecretStore for Keychain {
             account,
             secret.expose().as_bytes(),
         )
-        .map_err(|_| StoreError)
+        .map_err(|_| StoreError::Failed)
     }
 
     fn delete(&self, account: &str) -> Result<(), StoreError> {
         match security_framework::passwords::delete_generic_password(SERVICE, account) {
             Ok(()) => Ok(()),
             Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
-            Err(_) => Err(StoreError),
+            Err(_) => Err(StoreError::Failed),
         }
     }
 }
@@ -193,14 +248,14 @@ impl SecretStore for Keychain {
 #[cfg(target_os = "macos")]
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
-/// Keys held in memory only: tests, and platforms without a Keychain, where
-/// nothing is kept past quit.
+/// Keys held in memory only, where nothing is kept past quit: tests, and a
+/// platform with no store implemented (none that TalkQTE builds for).
 #[derive(Default)]
 pub struct MemoryStore(Mutex<Vec<(String, Secret)>>);
 
 impl SecretStore for MemoryStore {
     fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
-        let items = self.0.lock().map_err(|_| StoreError)?;
+        let items = self.0.lock().map_err(|_| StoreError::Failed)?;
         Ok(items
             .iter()
             .find(|(name, _)| name == account)
@@ -208,7 +263,7 @@ impl SecretStore for MemoryStore {
     }
 
     fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
-        let mut items = self.0.lock().map_err(|_| StoreError)?;
+        let mut items = self.0.lock().map_err(|_| StoreError::Failed)?;
         items.retain(|(name, _)| name != account);
         items.push((account.to_string(), secret.clone()));
         Ok(())
@@ -217,7 +272,7 @@ impl SecretStore for MemoryStore {
     fn delete(&self, account: &str) -> Result<(), StoreError> {
         self.0
             .lock()
-            .map_err(|_| StoreError)?
+            .map_err(|_| StoreError::Failed)?
             .retain(|(name, _)| name != account);
         Ok(())
     }
@@ -244,6 +299,16 @@ pub struct KeyStatus {
     pub verified: bool,
 }
 
+/// Which store holds the keys, and whether this system has it at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreStatus {
+    pub kind: StoreKind,
+    /// False when there is no store to use on this system: both keys then
+    /// read as unreadable and none can be saved.
+    pub available: bool,
+}
+
 /// Both keys' states, the whole payload the notebook receives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -252,6 +317,7 @@ pub struct KeysStatus {
     pub anthropic: KeyStatus,
     /// At least one key is not set: what a first-run screen asks for.
     pub any_missing: bool,
+    pub store: StoreStatus,
 }
 
 /// The provider's answer to a key check.
@@ -303,17 +369,17 @@ impl Keys {
         }
         let present = self
             .store
-            .get(provider.account())
-            .map_err(|_| KeyError::Store)?
-            .is_some();
+            .contains(provider.account())
+            .map_err(store_error)?;
         self.memo()[provider.index()].present = Some(present);
         Ok(present)
     }
 
-    fn key_status(&self, provider: Provider) -> KeyStatus {
+    fn key_status(&self, provider: Provider) -> (KeyStatus, bool) {
         let present = self.present(provider);
+        let no_store = present == Err(KeyError::NoStore);
         let memo = self.memo()[provider.index()];
-        KeyStatus {
+        let status = KeyStatus {
             state: match (present, memo.rejected) {
                 (Err(_), _) => KeyState::Unreadable,
                 (Ok(false), _) => KeyState::NotSet,
@@ -321,7 +387,8 @@ impl Keys {
                 (Ok(true), false) => KeyState::Set,
             },
             verified: present == Ok(true) && memo.verified && !memo.rejected,
-        }
+        };
+        (status, no_store)
     }
 
     /// Both keys' states, read from the store again, so a key deleted or
@@ -330,12 +397,16 @@ impl Keys {
         for memo in self.memo().iter_mut() {
             memo.present = None;
         }
-        let deepgram = self.key_status(Provider::Deepgram);
-        let anthropic = self.key_status(Provider::Anthropic);
+        let (deepgram, deepgram_no_store) = self.key_status(Provider::Deepgram);
+        let (anthropic, anthropic_no_store) = self.key_status(Provider::Anthropic);
         KeysStatus {
             deepgram,
             anthropic,
             any_missing: deepgram.state == KeyState::NotSet || anthropic.state == KeyState::NotSet,
+            store: StoreStatus {
+                kind: self.store.kind(),
+                available: !(deepgram_no_store || anthropic_no_store),
+            },
         }
     }
 
@@ -345,7 +416,7 @@ impl Keys {
         let secret = validate(provider, text)?;
         self.store
             .set(provider.account(), &secret)
-            .map_err(|_| KeyError::Store)?;
+            .map_err(store_error)?;
         self.memo()[provider.index()] = Memo {
             present: Some(true),
             rejected: false,
@@ -355,9 +426,7 @@ impl Keys {
     }
 
     pub fn remove(&self, provider: Provider) -> Result<KeysStatus, KeyError> {
-        self.store
-            .delete(provider.account())
-            .map_err(|_| KeyError::Store)?;
+        self.store.delete(provider.account()).map_err(store_error)?;
         self.memo()[provider.index()] = Memo {
             present: Some(false),
             rejected: false,
@@ -369,10 +438,7 @@ impl Keys {
     /// The stored key, for the one request that uses it. Never returned to
     /// the webview.
     pub fn get(&self, provider: Provider) -> Result<Secret, KeyError> {
-        let secret = self
-            .store
-            .get(provider.account())
-            .map_err(|_| KeyError::Store)?;
+        let secret = self.store.get(provider.account()).map_err(store_error)?;
         self.memo()[provider.index()].present = Some(secret.is_some());
         secret.ok_or(KeyError::NotSet(provider))
     }
@@ -404,6 +470,13 @@ impl Keys {
         let mut memo = self.memo();
         memo[provider.index()].rejected = true;
         memo[provider.index()].verified = false;
+    }
+}
+
+fn store_error(error: StoreError) -> KeyError {
+    match error {
+        StoreError::Failed => KeyError::Store,
+        StoreError::Unavailable => KeyError::NoStore,
     }
 }
 
@@ -450,14 +523,18 @@ impl Probe for NetworkProbe {
     }
 }
 
-/// This app run's keys: the Keychain in the app, memory in tests, so no test
-/// can read or change a real key.
+/// This app run's keys: the platform's store in the app, memory in tests,
+/// so no test can read or change a real key.
 pub fn global() -> &'static Keys {
     static KEYS: std::sync::OnceLock<Keys> = std::sync::OnceLock::new();
     KEYS.get_or_init(|| {
         #[cfg(all(target_os = "macos", not(test)))]
         let store: Box<dyn SecretStore> = Box::new(Keychain);
-        #[cfg(not(all(target_os = "macos", not(test))))]
+        #[cfg(all(windows, not(test)))]
+        let store: Box<dyn SecretStore> = Box::new(windows::CredentialManager::new(SERVICE));
+        #[cfg(all(target_os = "linux", not(test)))]
+        let store: Box<dyn SecretStore> = Box::new(secret_service::SecretService::new(SERVICE));
+        #[cfg(any(test, not(any(target_os = "macos", windows, target_os = "linux"))))]
         let store: Box<dyn SecretStore> = Box::new(MemoryStore::default());
         #[cfg(not(test))]
         let probe: Box<dyn Probe> = Box::new(NetworkProbe);
@@ -497,20 +574,20 @@ mod tests {
     impl SecretStore for Recording {
         fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
             if *self.fail.lock().unwrap() {
-                return Err(StoreError);
+                return Err(StoreError::Failed);
             }
             self.inner.get(account)
         }
         fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
             if *self.fail.lock().unwrap() {
-                return Err(StoreError);
+                return Err(StoreError::Failed);
             }
             self.writes.lock().unwrap().push(format!("set {account}"));
             self.inner.set(account, secret)
         }
         fn delete(&self, account: &str) -> Result<(), StoreError> {
             if *self.fail.lock().unwrap() {
-                return Err(StoreError);
+                return Err(StoreError::Failed);
             }
             self.writes
                 .lock()
@@ -559,6 +636,10 @@ mod tests {
                 deepgram: not_set(),
                 anthropic: not_set(),
                 any_missing: true,
+                store: StoreStatus {
+                    kind: StoreKind::Memory,
+                    available: true,
+                },
             }
         );
         assert_eq!(
@@ -567,9 +648,69 @@ mod tests {
                 "deepgram": {"state": "notSet", "verified": false},
                 "anthropic": {"state": "notSet", "verified": false},
                 "anyMissing": true,
+                "store": {"kind": "memory", "available": true},
             })
         );
         assert!(probe.0.lock().unwrap().is_empty());
+    }
+
+    /// A system with no secret store (Linux without a keyring service): both
+    /// keys read as unreadable rather than missing, so first-run setup does
+    /// not ask for keys it cannot keep; saving one is refused with a message
+    /// that says why; nothing is kept anywhere else.
+    #[test]
+    fn without_a_store_keys_cannot_be_saved_and_the_status_says_so() {
+        struct NoStore;
+        impl SecretStore for NoStore {
+            fn kind(&self) -> StoreKind {
+                StoreKind::SecretService
+            }
+            fn get(&self, _: &str) -> Result<Option<Secret>, StoreError> {
+                Err(StoreError::Unavailable)
+            }
+            fn set(&self, _: &str, _: &Secret) -> Result<(), StoreError> {
+                Err(StoreError::Unavailable)
+            }
+            fn delete(&self, _: &str) -> Result<(), StoreError> {
+                Err(StoreError::Unavailable)
+            }
+        }
+        let probe = Scripted(Arc::default(), ProbeResult::Accepted);
+        let keys = Keys::new(Box::new(NoStore), Box::new(probe.clone()));
+        let status = keys.status();
+        assert_eq!(status.deepgram.state, KeyState::Unreadable);
+        assert_eq!(status.anthropic.state, KeyState::Unreadable);
+        assert!(!status.any_missing);
+        assert_eq!(
+            status.store,
+            StoreStatus {
+                kind: StoreKind::SecretService,
+                available: false,
+            }
+        );
+        let refused = keys.set(Provider::Deepgram, DEEPGRAM).unwrap_err();
+        assert_eq!(refused, KeyError::NoStore);
+        assert_eq!(
+            refused.message(),
+            "This system has no keyring TalkQTE can use, so keys cannot be saved here yet. Nothing was changed."
+        );
+        assert_eq!(keys.test(Provider::Deepgram), Err(KeyError::NoStore));
+        assert_eq!(keys.get(Provider::Anthropic).err(), Some(KeyError::NoStore));
+        assert!(probe.0.lock().unwrap().is_empty());
+    }
+
+    /// A store that failed (locked or refused) is not the same as no store.
+    #[test]
+    fn a_failing_store_is_still_available() {
+        let (keys, store, _) = keys(ProbeResult::Accepted);
+        *store.fail.lock().unwrap() = true;
+        let status = keys.status();
+        assert_eq!(status.deepgram.state, KeyState::Unreadable);
+        assert!(status.store.available);
+        assert_eq!(
+            keys.set(Provider::Deepgram, DEEPGRAM).unwrap_err(),
+            KeyError::Store
+        );
     }
 
     #[test]
@@ -740,9 +881,20 @@ mod tests {
         assert_eq!(keys.get(Provider::Anthropic).unwrap_err(), KeyError::Store);
         *store.fail.lock().unwrap() = false;
         assert_eq!(keys.status().anthropic.state, KeyState::NotSet);
+        #[cfg(target_os = "macos")]
         assert_eq!(
             KeyError::Store.message(),
             "The Keychain could not be used. Nothing was changed."
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            KeyError::Store.message(),
+            "Windows Credential Manager could not be used. Nothing was changed."
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            KeyError::Store.message(),
+            "The keyring could not be used. Unlock it or allow access, then try again. Nothing was changed."
         );
     }
 

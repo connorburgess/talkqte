@@ -24,7 +24,14 @@ const MAX_NOTE_CHARS: usize = 20_000;
 const MAX_SEGMENT_CHARS: usize = 1_000;
 const MAX_SPEAKER_CHARS: usize = 80;
 const MAX_SEGMENT_ID_BYTES: usize = 64;
+/// Lines the notebook shows and the cue rules look back over. Every snapshot
+/// carries them, so they stay few.
 const MAX_TRANSCRIPT_SEGMENTS: usize = 400;
+/// Lines of the whole meeting kept for a kept meeting's export and for
+/// meeting notes: as many as one notes request can take, about two hours of
+/// talk, which the 120-minute audio cap stays within. Past it the oldest go,
+/// and both say so rather than leave out the start in silence.
+const MAX_MEETING_LINES: usize = 4_000;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -535,7 +542,31 @@ pub struct CloudTranscription {
     pub reconnects: u32,
     #[serde(skip_serializing_if = "is_zero")]
     pub lost_ms: u64,
+    /// Whole minutes of the meeting left before this session's transcription
+    /// budget runs out, once at most [`LOW_TRANSCRIPTION_MINUTES`] remain.
+    /// With both sources heard, each minute of the meeting spends two.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes_left: Option<u64>,
 }
+
+/// What a session has grown to; see [`Engine::growth`].
+#[cfg(test)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Growth {
+    pub transcript: usize,
+    pub meeting: usize,
+    pub meeting_cut: bool,
+    pub echoes: usize,
+    pub echo_recent: usize,
+    pub shown_cues: usize,
+    pub asked_lines: usize,
+    pub dismissed_sources: usize,
+    pub last_shown: usize,
+    pub snapshot_bytes: usize,
+}
+
+/// From how many minutes left the notebook says the cap is near.
+pub const LOW_TRANSCRIPTION_MINUTES: u64 = 10;
 
 fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -620,6 +651,11 @@ pub struct Engine {
     /// Recent application lines, so a microphone line that repeats them
     /// through the speakers can be dropped.
     echo: sources::EchoGuard,
+    /// Every line of this session, beyond the few the notebook shows, for
+    /// the export of a kept meeting and for meeting notes. In memory only.
+    meeting: Vec<Segment>,
+    /// Earlier lines of this session went past [`MAX_MEETING_LINES`].
+    meeting_cut: bool,
     /// Lines that asked the user a question by name this session. A model
     /// cue citing one would repeat the "Asked you" cue, so it is not shown.
     asked_lines: Vec<String>,
@@ -733,6 +769,8 @@ impl Engine {
             cooldown_until: 0,
             line_floor: [0; 2],
             echo: sources::EchoGuard::default(),
+            meeting: Default::default(),
+            meeting_cut: false,
             asked_lines: vec![],
             model_pause_until: 0,
             dismissed_sources: vec![],
@@ -861,6 +899,8 @@ impl Engine {
         self.cooldown_until = 0;
         self.line_floor = [0; 2];
         self.echo.clear();
+        self.meeting.clear();
+        self.meeting_cut = false;
         self.asked_lines.clear();
         self.model_pause_until = 0;
         self.dismissed_sources.clear();
@@ -874,6 +914,7 @@ impl Engine {
                 dropped_audio: false,
                 reconnects: 0,
                 lost_ms: 0,
+                minutes_left: None,
             });
         self.state.sources = self
             .state
@@ -1034,6 +1075,58 @@ impl Engine {
             .filter(|transcription| !transcription.dropped_audio)
         {
             transcription.dropped_audio = true;
+            self.changed();
+        }
+    }
+
+    /// The sizes of what a session grows, for the sustained-operation check.
+    #[cfg(test)]
+    pub(crate) fn growth(&self) -> Growth {
+        Growth {
+            transcript: self.state.transcript.len(),
+            meeting: self.meeting.len(),
+            meeting_cut: self.meeting_cut,
+            echoes: self
+                .state
+                .sources
+                .as_ref()
+                .map_or(0, |status| status.echoes.len()),
+            echo_recent: self.echo.len(),
+            shown_cues: self.shown_cues.len(),
+            asked_lines: self.asked_lines.len(),
+            dismissed_sources: self.dismissed_sources.len(),
+            last_shown: self.last_shown.len(),
+            snapshot_bytes: serde_json::to_vec(&self.state).map_or(0, |bytes| bytes.len()),
+        }
+    }
+
+    /// Records how much of `session`'s transcription budget is left, so the
+    /// notebook can say the cap is near before the session ends on it. Only
+    /// a change of whole minutes, within the last ten, changes the snapshot.
+    pub fn cloud_transcription_left(&mut self, session: u64, left: std::time::Duration) {
+        if session != self.generation || self.state.status != Status::Running {
+            return;
+        }
+        // Both sources heard at once spend the budget twice as fast.
+        let streams = match self.state.sources.as_ref() {
+            Some(status)
+                if status.sources.both_sources()
+                    && status.application_attached
+                    && status.application_ended.is_none() =>
+            {
+                2
+            }
+            _ => 1,
+        };
+        let minutes = (left.as_secs() / streams).div_ceil(60);
+        let shown = (minutes <= LOW_TRANSCRIPTION_MINUTES).then_some(minutes);
+        if let Some(transcription) = self
+            .state
+            .transcription
+            .as_mut()
+            .filter(|transcription| transcription.minutes_left != shown)
+        {
+            transcription.minutes_left = shown;
             self.changed();
         }
     }
@@ -1256,6 +1349,11 @@ impl Engine {
         if self.state.transcript.len() > MAX_TRANSCRIPT_SEGMENTS {
             let excess = self.state.transcript.len() - MAX_TRANSCRIPT_SEGMENTS;
             self.state.transcript.drain(..excess);
+        }
+        self.meeting.push(segment.clone());
+        if self.meeting.len() > MAX_MEETING_LINES {
+            self.meeting.remove(0);
+            self.meeting_cut = true;
         }
         self.reconcile_evaluated_sources();
         // Any mention counts as the conversation touching a focus line, even
@@ -2089,9 +2187,14 @@ impl Engine {
         include_notes: bool,
     ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
         self.meeting_notes_open()?;
+        // Notes that silently miss the start of a meeting are worse than
+        // none.
+        if self.meeting_cut {
+            return Err(crate::meeting_notes::Refusal::TooLong);
+        }
         let prepared = crate::meeting_notes::prepare(
             crate::meeting_notes::notes_model(),
-            &self.state.transcript,
+            &self.meeting,
             include_notes.then_some(self.state.notes.as_str()),
         )?;
         prepared.check_cap()?;
@@ -2238,9 +2341,13 @@ impl Engine {
             .sources
             .as_ref()
             .map_or(&[][..], |status| status.echoes.as_slice());
+        if self.meeting_cut {
+            out.push_str(&format!(
+                "The start of this meeting is not included: a meeting keeps its last {MAX_MEETING_LINES} lines.\n\n"
+            ));
+        }
         let mut lines: Vec<(&Segment, Option<bool>)> = self
-            .state
-            .transcript
+            .meeting
             .iter()
             .map(|line| (line, None))
             .chain(echoes.iter().map(|echo| (&echo.line, Some(echo.kept))))
@@ -3463,6 +3570,7 @@ mod tests {
             dropped_audio: false,
             reconnects: 0,
             lost_ms: 0,
+            minutes_left: None,
         });
         let session = engine.session();
         engine.cloud_transcription_stopped(session + 1, "network");
