@@ -30,6 +30,11 @@ let hold = false;
 let release: (() => void) | undefined;
 let failNext: string | null = null;
 let refuseNext: string | null = null;
+let cancelled = false;
+
+/** Stands in for Rust's digest of exactly what would be sent. */
+const fingerprint = (current: Snapshot, include: boolean) =>
+  `fictional-${current.transcript.length}-${model}-${include ? current.notes : ''}`;
 
 const fictionalDraft: MeetingNotesDraft = {
   markdown:
@@ -89,6 +94,7 @@ export async function command(
         destination:
           'the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account',
         cueSpentMicroUsd: 12_000,
+        fingerprint: fingerprint(current, include),
       };
       if (include)
         plan.noteLines = current.notes
@@ -102,10 +108,22 @@ export async function command(
         refuseNext = null;
         throw refusal;
       }
+      const { includeNotes, fingerprint: confirmed } = args as {
+        includeNotes: boolean;
+        fingerprint: string;
+      };
+      if (confirmed !== fingerprint(current, includeNotes))
+        throw 'What would be sent has changed since you looked (the transcript, your notes or the notes setting). Review it again. Nothing was sent.';
+      cancelled = false;
       await publish({ meetingNotes: 'writing' });
       if (hold) {
         hold = false;
         await new Promise<void>((resolve) => (release = resolve));
+      }
+      // Stop waiting while the key was being read: nothing is sent.
+      if (cancelled) {
+        await publish({ meetingNotes: 'none' });
+        throw 'Stopped before anything was sent. Nothing was sent.';
       }
       if (failNext) {
         failure = failNext;
@@ -118,8 +136,7 @@ export async function command(
       return draft;
     }
     case 'cancel_meeting_notes':
-      failNext =
-        'Cancelled. What was already sent may still be billed. No notes were written, and nothing else will be sent for this meeting.';
+      cancelled = true;
       release?.();
       return;
     case 'meeting_notes_result':
@@ -127,7 +144,7 @@ export async function command(
         ...(draft && phase === 'draft' ? { draft } : {}),
         ...(failure && phase === 'failed' ? { failure } : {}),
         ...(kept && phase === 'kept' ? { kept } : {}),
-        spentMicroUsd: 41_000,
+        ...(draft && phase === 'draft' ? { spentMicroUsd: 41_000 } : {}),
       };
     case 'keep_meeting_notes':
       kept = (args as { markdown: string }).markdown;

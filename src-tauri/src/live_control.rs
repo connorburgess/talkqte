@@ -221,6 +221,9 @@ impl Runtime {
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
         let mut engine = carry_over(&self.engine, crate::live_engine());
         engine.start()?;
+        // The last session's meeting notes, if still being written, stop:
+        // their result would belong to a session that is gone.
+        self.engine.cancel_meeting_notes();
         #[cfg(all(
             debug_assertions,
             any(feature = "claude-cli", feature = "lab-evaluator"),

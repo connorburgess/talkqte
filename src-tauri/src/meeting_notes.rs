@@ -10,9 +10,12 @@
 //! The system prompt, the reply schema, the bounds and the fictional cases
 //! the tests use all live in `scripts/fixtures/meeting-notes.json`. The reply
 //! is checked against the schema and against the lines that were sent: every
-//! item cites lines that exist, and an owner or a due date must appear in the
-//! lines the item cites. A reply that fails any check is shown as failed and
-//! never repaired.
+//! item cites lines that exist, and an owner or a due date is accepted only
+//! when its words appear, as whole words, in the lines the item cites. That
+//! proves the words were said, not that the person took the task. A reply
+//! that fails any check is shown as failed and never repaired. Model text is
+//! neutralised before it becomes editable, so no link, image or HTML from the
+//! reply reaches the export.
 //!
 //! The network path is the cue path's: the fixed Messages API host over TLS
 //! with certificate validation, no redirects, one overall timeout and a bound
@@ -28,7 +31,7 @@ use serde_json::{json, Value};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex, OnceLock,
+        Arc, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -140,6 +143,10 @@ pub enum Refusal {
     KeyNotSet,
     KeyRejected,
     KeyUnreadable,
+    /// What would be sent differs from the plan the person confirmed.
+    Changed,
+    /// The person chose Stop waiting before anything was sent.
+    Cancelled,
 }
 
 impl Refusal {
@@ -154,6 +161,8 @@ impl Refusal {
             Self::KeyNotSet => "keyNotSet",
             Self::KeyRejected => "keyRejected",
             Self::KeyUnreadable => "keyUnreadable",
+            Self::Changed => "changed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -164,10 +173,12 @@ impl Refusal {
             Self::NotEnded => "Meeting notes can be written once a live session has ended. Nothing was sent.",
             Self::AlreadySent => "Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.",
             Self::Writing => "Notes for this meeting are already being written. Nothing else was sent.",
-            Self::SpendCap => "This request could cost more than the $1.00 limit for one meeting's notes. Nothing was sent.",
+            Self::SpendCap => "At its worst, this request could cost more than the $1.00 limit for one meeting's notes. A lower-cost model for meeting notes in Settings may fit. Nothing was sent.",
             Self::KeyNotSet => "Add your Anthropic API key in Settings to write meeting notes. Nothing was sent.",
             Self::KeyRejected => "Anthropic rejected your key. Replace it in Settings. Nothing was sent.",
             Self::KeyUnreadable => "Your Anthropic key could not be read from the Keychain. Nothing was sent.",
+            Self::Changed => "What would be sent has changed since you looked (the transcript, your notes or the notes setting). Review it again. Nothing was sent.",
+            Self::Cancelled => "Stopped before anything was sent. Nothing was sent.",
         }
     }
 }
@@ -205,8 +216,10 @@ impl Invalid {
             Self::ItemText => "an item was empty or too long",
             Self::Uncited => "an item cited no line, or too many",
             Self::UnknownLine => "an item cited a line that was not sent",
-            Self::OwnerNotInLines => "an action item named an owner that its lines do not mention",
-            Self::DueNotInLines => "an action item gave a date that its lines do not mention",
+            Self::OwnerNotInLines => {
+                "an action item gave an owner whose name is not in the lines it cites"
+            }
+            Self::DueNotInLines => "an action item gave a date that is not in the lines it cites",
         }
     }
 }
@@ -267,6 +280,8 @@ impl Failure {
 /// What will be sent, ready for the confirmation and the request.
 #[derive(Clone, Debug)]
 pub struct Prepared {
+    /// Set by Stop waiting for this request only.
+    cancel: Arc<AtomicBool>,
     model: Model,
     lines: Vec<Line>,
     user: String,
@@ -292,6 +307,9 @@ pub struct Plan {
     pub worst_micro_usd: u64,
     pub spend_cap_micro_usd: u64,
     pub destination: &'static str,
+    /// Identifies exactly what would be sent: a confirmation names it, and a
+    /// request whose input differs is refused.
+    pub fingerprint: String,
 }
 
 /// Session time as the export writes it.
@@ -374,6 +392,7 @@ pub fn prepare(
     };
     let duration_ms = spoken.last().map(|line| line.at_ms).unwrap_or(0);
     Ok(Prepared {
+        cancel: Arc::default(),
         model,
         lines,
         user,
@@ -402,13 +421,25 @@ impl Prepared {
         system_prompt().len() + self.user.len() + schema().to_string().len()
     }
 
-    /// As the cue path estimates its worst case: about two bytes per token
-    /// for what is sent plus 1,500 tokens for the structured-output prompt,
-    /// at the input price, plus the whole output bound.
+    /// An estimated worst case: one token per byte of everything sent (text
+    /// rarely uses more) plus 1,500 tokens for the structured-output prompt,
+    /// at the input price (nothing is cached), plus the whole output bound.
     pub fn worst_micro_usd(&self) -> u64 {
-        let tokens = self.sent_bytes().div_ceil(2) as f64 + 1_500.0;
-        let [input, write, _, output] = self.model.price;
-        (tokens * input.max(write) + MAX_TOKENS as f64 * output).ceil() as u64
+        let tokens = self.sent_bytes() as f64 + 1_500.0;
+        let [input, _, _, output] = self.model.price;
+        (tokens * input + MAX_TOKENS as f64 * output).ceil() as u64
+    }
+
+    /// A digest of the request body: the model, prompt, schema and input.
+    pub fn fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(self.body().to_string().as_bytes());
+        digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    /// This request's own Stop waiting flag.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
     }
 
     /// A likelier figure: about four bytes per token and a few thousand
@@ -430,6 +461,7 @@ impl Prepared {
             worst_micro_usd: self.worst_micro_usd(),
             spend_cap_micro_usd: SPEND_CAP_MICRO_USD,
             destination: DESTINATION,
+            fingerprint: self.fingerprint(),
         }
     }
 
@@ -462,8 +494,10 @@ pub struct CheckItem {
 pub struct Draft {
     pub markdown: String,
     pub items: Vec<CheckItem>,
-    /// This request's estimated cost, in micro-dollars.
-    pub spent_micro_usd: u64,
+    /// This request's cost as the API reported it, in micro-dollars; absent
+    /// when it is not known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent_micro_usd: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -491,8 +525,140 @@ struct ActionShape {
     lines: Vec<String>,
 }
 
-fn normalized(text: &str) -> String {
-    flat(&text.to_lowercase())
+/// Words for matching: NFC, lower case, apostrophes of every kind dropped
+/// inside words, and every other non-alphanumeric character a separator.
+fn words(text: &str) -> Vec<String> {
+    let text = icu_normalizer::ComposingNormalizerBorrowed::new_nfc().normalize(text);
+    let mut out = Vec::new();
+    let mut word = String::new();
+    for c in text.chars().flat_map(char::to_lowercase) {
+        if c.is_alphanumeric() {
+            word.push(c);
+        } else if !matches!(
+            c,
+            '\'' | '\u{2018}' | '\u{2019}' | '\u{02BC}' | '`' | '\u{00B4}'
+        ) && !word.is_empty()
+        {
+            out.push(std::mem::take(&mut word));
+        }
+    }
+    if !word.is_empty() {
+        out.push(word);
+    }
+    out
+}
+
+/// Words that never identify an owner on their own: pronouns and stand-ins
+/// in the languages the fixture covers.
+const NOT_A_NAME: &[&str] = &[
+    "i",
+    "me",
+    "my",
+    "we",
+    "us",
+    "our",
+    "you",
+    "your",
+    "he",
+    "him",
+    "she",
+    "her",
+    "they",
+    "them",
+    "it",
+    "someone",
+    "somebody",
+    "anyone",
+    "anybody",
+    "everyone",
+    "everybody",
+    "nobody",
+    "all",
+    "both",
+    "team",
+    "the",
+    "a",
+    "an",
+    "one",
+    "yo",
+    "tú",
+    "tu",
+    "él",
+    "el",
+    "ella",
+    "nosotros",
+    "nosotras",
+    "ellos",
+    "ellas",
+    "usted",
+    "ustedes",
+    "alguien",
+    "todos",
+    "todas",
+    "equipo",
+];
+
+/// The value's words as a run of whole words in one of the cited lines.
+fn stated_in(value: &[String], lines: &[Line]) -> bool {
+    lines.iter().any(|line| {
+        let line = words(&line.text);
+        line.windows(value.len()).any(|window| window == value)
+    })
+}
+
+/// Accepts an owner only when it is a name-like run of whole words that one
+/// of the cited lines contains: at least two letters, not only pronouns or
+/// stand-ins, not a bare number.
+fn owner_stated(owner: &str, lines: &[Line]) -> bool {
+    let value = words(owner);
+    let letters = value
+        .iter()
+        .flat_map(|word| word.chars())
+        .filter(|c| c.is_alphabetic())
+        .count();
+    letters >= 2
+        && value.iter().any(|word| {
+            word.chars().any(char::is_alphabetic) && !NOT_A_NAME.contains(&word.as_str())
+        })
+        && stated_in(&value, lines)
+}
+
+/// Accepts a due date only when it is at least two characters of whole
+/// words that one of the cited lines contains.
+fn due_stated(due: &str, lines: &[Line]) -> bool {
+    let value = words(due);
+    value.iter().map(|word| word.chars().count()).sum::<usize>() >= 2 && stated_in(&value, lines)
+}
+
+/// Model text as inert Markdown: links of any kind removed, and the
+/// characters that open HTML, autolinks, links, images or code escaped. Only model
+/// output passes through this; the person's own edits are theirs.
+pub fn neutral(text: &str) -> String {
+    let text = flat(text)
+        .split(' ')
+        .map(|token| {
+            let lower = token.to_lowercase();
+            if lower.contains("://")
+                || lower.contains("www.")
+                || lower.contains("data:")
+                || lower.contains("mailto:")
+                || lower.contains("javascript:")
+            {
+                "(link removed)"
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '\\' | '<' | '>' | '[' | ']' | '`') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Checks a reply against the schema and the lines that were sent, and
@@ -545,22 +711,17 @@ pub fn validate(text: &str, prepared: &Prepared) -> Result<(String, Vec<CheckIte
         let text = text.trim();
         !text.is_empty() && text.chars().count() <= MAX_ITEM_CHARS
     };
-    // A name or date must appear, as written, in a line the item cites.
-    let stated = |value: &Option<String>, lines: &[Line], invalid: Invalid| match value {
+    // An owner or date is accepted only when its words are in a line the
+    // item cites. That shows the words were said, not that they are right.
+    let stated = |value: &Option<String>,
+                  lines: &[Line],
+                  check: fn(&str, &[Line]) -> bool,
+                  invalid: Invalid| match value {
         None => Ok(None),
-        Some(value) => {
-            let wanted = normalized(value);
-            if wanted.is_empty()
-                || value.chars().count() > MAX_NAME_CHARS
-                || !lines
-                    .iter()
-                    .any(|line| normalized(&line.text).contains(&wanted))
-            {
-                Err(invalid)
-            } else {
-                Ok(Some(flat(value)))
-            }
+        Some(value) if value.chars().count() <= MAX_NAME_CHARS && check(value, lines) => {
+            Ok(Some(flat(value)))
         }
+        Some(_) => Err(invalid),
     };
     let plain = |section: &'static str, list: Vec<ItemShape>| -> Result<Vec<CheckItem>, Invalid> {
         list.into_iter()
@@ -585,8 +746,13 @@ pub fn validate(text: &str, prepared: &Prepared) -> Result<(String, Vec<CheckIte
             return Err(Invalid::ItemText);
         }
         let sources = cited(&action.lines)?;
-        let owner = stated(&action.owner, &sources, Invalid::OwnerNotInLines)?;
-        let due = stated(&action.due, &sources, Invalid::DueNotInLines)?;
+        let owner = stated(
+            &action.owner,
+            &sources,
+            owner_stated,
+            Invalid::OwnerNotInLines,
+        )?;
+        let due = stated(&action.due, &sources, due_stated, Invalid::DueNotInLines)?;
         items.push(CheckItem {
             section: "actions",
             text: flat(&action.text),
@@ -636,12 +802,20 @@ pub fn render(items: &[CheckItem]) -> String {
         let mut any = false;
         for item in items.iter().filter(|item| item.section == section) {
             any = true;
-            out.push_str(&format!("- {}", item.text));
+            out.push_str(&format!("- {}", neutral(&item.text)));
             if section == "actions" {
                 out.push_str(&format!(
                     " Owner: {}. Due: {}.",
-                    item.owner.as_deref().unwrap_or("not stated"),
-                    item.due.as_deref().unwrap_or("not stated")
+                    item.owner
+                        .as_deref()
+                        .map(neutral)
+                        .as_deref()
+                        .unwrap_or("not stated"),
+                    item.due
+                        .as_deref()
+                        .map(neutral)
+                        .as_deref()
+                        .unwrap_or("not stated")
                 ));
             }
             out.push_str(&format!(" {}\n", citation(&item.sources)));
@@ -653,24 +827,26 @@ pub fn render(items: &[CheckItem]) -> String {
     out
 }
 
-/// Set by Cancel; read by the one request in flight.
-static CANCELLED: AtomicBool = AtomicBool::new(false);
-
-pub fn cancel() {
-    CANCELLED.store(true, Ordering::Release);
+/// What one write came to: the notes or why there are none, the cost when
+/// known, and whether anything was sent at all.
+#[derive(Debug)]
+pub struct Written {
+    pub result: Result<Draft, Failure>,
+    pub spent_micro_usd: Option<u64>,
+    pub sent: bool,
 }
 
-/// Sends the one request and checks the reply. Returns the notes or why
-/// there are none, and the estimated cost to count against this meeting.
+/// Sends the one request and checks the reply, unless Stop waiting was
+/// chosen first, in which case nothing is sent.
 pub fn write<T: Transport>(
     transport: &mut T,
     key: Secret,
     prepared: &Prepared,
     on_rejected: impl FnOnce(),
-) -> (Result<Draft, Failure>, u64) {
-    CANCELLED.store(false, Ordering::Release);
+) -> Written {
+    let cancel = prepared.cancel_flag();
     write_with(transport, key, prepared, on_rejected, &|| {
-        CANCELLED.load(Ordering::Acquire)
+        cancel.load(Ordering::Acquire)
     })
 }
 
@@ -680,43 +856,54 @@ fn write_with<T: Transport>(
     prepared: &Prepared,
     on_rejected: impl FnOnce(),
     cancelled: &dyn Fn() -> bool,
-) -> (Result<Draft, Failure>, u64) {
-    let worst = prepared.worst_micro_usd();
+) -> Written {
+    let unsent = |failure| Written {
+        result: Err(failure),
+        spent_micro_usd: Some(0),
+        sent: false,
+    };
     let body = prepared.body().to_string();
     if body.len() > MAX_REQUEST_BYTES {
-        // Unreachable within the transcript and notes bounds; nothing sent.
-        return (Err(Failure::Unavailable), 0);
+        // Unreachable within the transcript and notes bounds.
+        return unsent(Failure::Unavailable);
+    }
+    // Stop waiting may have been chosen while the key was being read.
+    if cancelled() {
+        return unsent(Failure::Cancelled);
     }
     let reply = transport.post(&key, body.as_bytes(), DEADLINE);
     drop(key);
+    // From here something reached, or may have reached, the provider.
+    let failed = |failure, spent| Written {
+        result: Err(failure),
+        spent_micro_usd: spent,
+        sent: true,
+    };
     let reply = match reply {
         Ok(reply) => reply,
-        // Whatever reached the provider may still be billed.
         Err(NoReply) => {
             let failure = if cancelled() {
                 Failure::Cancelled
             } else {
                 Failure::Unreachable
             };
-            return (Err(failure), worst);
+            return failed(failure, None);
         }
     };
     match reply.status {
         200 => {}
         401 | 403 => {
             on_rejected();
-            return (Err(Failure::SignIn), 0);
+            return failed(Failure::SignIn, Some(0));
         }
-        429 => return (Err(Failure::UsageLimit), worst),
-        _ => return (Err(Failure::Unreachable), worst),
+        // Whether a refused or failed request is billed is not reported.
+        429 => return failed(Failure::UsageLimit, None),
+        _ => return failed(Failure::Unreachable, None),
     }
     let (outcome, usage, complete) =
         anthropic_api::read_bounded_stream(reply.body, prepared.model, MAX_TEXT_BYTES, cancelled);
-    let spent = if complete {
-        usage.cost_micro_usd(prepared.model)
-    } else {
-        worst
-    };
+    // Only a complete reply reports its usage; otherwise the cost is unknown.
+    let spent = complete.then(|| usage.cost_micro_usd(prepared.model));
     let result = match outcome {
         Outcome::Decision(text) => match validate(&text, prepared) {
             Ok((markdown, items)) => Ok(Draft {
@@ -732,7 +919,11 @@ fn write_with<T: Transport>(
         Outcome::ConfigurationMismatch | Outcome::Protocol => Err(Failure::Unavailable),
         Outcome::Provider => Err(Failure::Unreachable),
     };
-    (result, spent)
+    Written {
+        result,
+        spent_micro_usd: spent,
+        sent: true,
+    }
 }
 
 /// Reads the key for the request, or says why nothing can be sent.
@@ -769,8 +960,11 @@ pub struct Record {
     draft: Option<Draft>,
     failure: Option<String>,
     kept: Option<String>,
-    /// Estimated cost of this session's notes request, once sent.
-    spent_micro_usd: u64,
+    /// Reported cost of this session's notes request, once sent; `None`
+    /// when it is not known.
+    spent_micro_usd: Option<u64>,
+    /// Stop waiting for the request in flight, if one is.
+    in_flight: Option<Arc<AtomicBool>>,
 }
 
 /// The most text a kept set of notes may hold after editing.
@@ -789,11 +983,24 @@ impl Record {
         self.kept.as_deref()
     }
 
-    pub fn spent_micro_usd(&self) -> u64 {
+    pub fn spent_micro_usd(&self) -> Option<u64> {
         self.spent_micro_usd
     }
 
-    pub fn finish(&mut self, result: Result<Draft, Failure>, spent: u64) -> Phase {
+    /// Records the request now in flight, so Stop waiting reaches it.
+    pub fn begin(&mut self, prepared: &Prepared) {
+        self.in_flight = Some(prepared.cancel_flag());
+    }
+
+    /// Stop waiting: the request in flight stops, or is never sent.
+    pub fn cancel(&mut self) {
+        if let Some(flag) = self.in_flight.take() {
+            flag.store(true, Ordering::Release);
+        }
+    }
+
+    pub fn finish(&mut self, result: Result<Draft, Failure>, spent: Option<u64>) -> Phase {
+        self.in_flight = None;
         self.spent_micro_usd = spent;
         match result {
             Ok(draft) => {

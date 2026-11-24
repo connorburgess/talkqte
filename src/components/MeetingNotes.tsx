@@ -6,6 +6,8 @@ import {
   keepMeetingNotes,
   meetingNotesPlan,
   meetingNotesResult,
+  notesModels,
+  planChanged,
   writeMeetingNotes,
   type CheckItem,
   type MeetingNotesDraft,
@@ -83,9 +85,18 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
     };
   }, [phase]);
 
+  // Focus the confirmation when it opens, not when it is re-planned.
+  const planOpen = plan !== null;
   useEffect(() => {
-    if (plan) confirmHeading.current?.focus();
-  }, [plan]);
+    if (planOpen) confirmHeading.current?.focus();
+  }, [planOpen]);
+
+  // The person's notes changed while they are set to be sent: show the
+  // plan for what would now be sent.
+  const notesText = snapshot.notes;
+  useEffect(() => {
+    if (planOpen && includeNotes) void openPlan(true);
+  }, [notesText]);
 
   useEffect(() => {
     if (focusResult.current && resultHeading.current) {
@@ -93,8 +104,6 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
       resultHeading.current.focus();
     }
   });
-
-  if (!ended && phase === 'none') return null;
 
   const openPlan = async (notes: boolean) => {
     setBusy(true);
@@ -115,18 +124,26 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
   };
 
   const send = async () => {
+    if (!plan) return;
     setBusy(true);
     setError('');
     const notes = includeNotes;
+    const confirmed = plan.fingerprint;
     setPlan(null);
     try {
-      const draft: MeetingNotesDraft = await writeMeetingNotes(notes);
+      const draft: MeetingNotesDraft = await writeMeetingNotes(
+        notes,
+        confirmed,
+      );
       setResult({ draft, spentMicroUsd: draft.spentMicroUsd });
       setText(draft.markdown);
       focusResult.current = true;
     } catch (failure) {
-      setError(message(failure, 'No notes were written.'));
-      requestAnimationFrame(() => writeButton.current?.focus());
+      const text = message(failure, 'No notes were written.');
+      setError(text);
+      // What would be sent changed: show the new plan to confirm again.
+      if (text.startsWith(planChanged)) await openPlan(notes);
+      else requestAnimationFrame(() => writeButton.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -144,9 +161,13 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
     }
   };
 
-  const cost = result?.spentMicroUsd
-    ? ` Estimated cost of this request: about ${dollars(result.spentMicroUsd)} (an estimate, not your bill).`
-    : '';
+  const care = (id: string) =>
+    notesModels.find((model) => model.id === id)?.label ?? 'Custom';
+  if (!ended && phase === 'none') return null;
+  const cost =
+    result?.spentMicroUsd !== undefined
+      ? ` Estimated cost of this request: about ${dollars(result.spentMicroUsd)} (an estimate, not your bill).`
+      : ' The API did not report what this request cost; your Anthropic Console shows it.';
 
   return (
     <section className="meeting-notes" aria-labelledby={`${id}-title`}>
@@ -206,6 +227,10 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
           </div>
           <p>To: {plan.destination}.</p>
           <p>
+            Notes setting: {care(plan.model)}, model {plan.model}. Change it in
+            Settings before sending.
+          </p>
+          <p>
             Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
             {dollars(plan.worstMicroUsd)}
             {plan.cueSpentMicroUsd
@@ -262,8 +287,10 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
             Check, edit, then keep or discard
           </h3>
           <p role="status">
-            Each item ends with the transcript times or note lines it came from.
-            An owner or date appears only where those lines state one.
+            Written by a model, which can still be wrong. Each item ends with
+            the transcript times or note lines it came from. An owner or date is
+            shown only when those words appear in the lines the item cites; that
+            does not show the person agreed to it.
             {cost}
           </p>
           <label htmlFor={`${id}-text`}>Notes to keep, editable</label>

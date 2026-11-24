@@ -29,7 +29,9 @@ pub struct NotesResult {
     failure: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kept: Option<String>,
-    spent_micro_usd: u64,
+    /// Absent when nothing was sent or the cost is not known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    spent_micro_usd: Option<u64>,
 }
 
 /// What a notes request would send and cost. Sends nothing.
@@ -52,18 +54,20 @@ pub fn meeting_notes_plan(
 }
 
 /// Sends this session's one notes request, after the person confirmed the
-/// plan, and returns the checked notes.
+/// plan named by `fingerprint`, and returns the checked notes. Input that
+/// differs from that plan is refused and nothing is sent.
 #[tauri::command]
 pub async fn write_meeting_notes(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     include_notes: bool,
+    fingerprint: String,
 ) -> Result<Draft, String> {
     let (prepared, session) = {
         let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
         let prepared = runtime
             .engine
-            .begin_meeting_notes(include_notes)
+            .begin_meeting_notes(include_notes, &fingerprint)
             .map_err(|refusal| refusal.message().to_string())?;
         let session = runtime.engine.session();
         crate::publish(&app, &mut runtime);
@@ -90,21 +94,35 @@ pub async fn write_meeting_notes(
             crate::publish(&app, &mut runtime);
             return Err(refusal.message().to_string());
         }
-        Ok(Ok((result, spent))) => {
-            let current = runtime
-                .engine
-                .finish_meeting_notes(session, result.clone(), spent);
+        // Stop waiting came before anything was sent.
+        Ok(Ok(written)) if !written.sent => {
+            runtime.engine.abandon_meeting_notes(session);
+            crate::publish(&app, &mut runtime);
+            return Err(match written.result {
+                Err(Failure::Cancelled) => meeting_notes::Refusal::Cancelled.message().into(),
+                _ => "The request could not be prepared. Nothing was sent.".into(),
+            });
+        }
+        Ok(Ok(written)) => {
+            let result = written.result;
+            let current = runtime.engine.finish_meeting_notes(
+                session,
+                result.clone(),
+                written.spent_micro_usd,
+            );
             crate::publish(&app, &mut runtime);
             if !current {
                 return Err("A new session has started, so these notes were not kept.".into());
             }
             result
         }
+        // The worker failed; the request may have been sent, so its cost is
+        // not known.
         Err(_) => {
             let failure = Failure::Unavailable;
             runtime
                 .engine
-                .finish_meeting_notes(session, Err(failure), 0);
+                .finish_meeting_notes(session, Err(failure), None);
             crate::publish(&app, &mut runtime);
             Err(failure)
         }
@@ -112,10 +130,13 @@ pub async fn write_meeting_notes(
     result.map_err(|failure| failure.message())
 }
 
-/// Stops waiting for the request in flight. What was sent may be billed.
+/// Stops waiting for this session's request in flight; if it has not been
+/// sent yet, it never is. What was sent may be billed.
 #[tauri::command]
-pub fn cancel_meeting_notes() {
-    meeting_notes::cancel();
+pub fn cancel_meeting_notes(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.engine.cancel_meeting_notes();
+    Ok(())
 }
 
 #[tauri::command]

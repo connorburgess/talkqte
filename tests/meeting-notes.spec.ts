@@ -67,6 +67,9 @@ test('offered only after a session ends, and nothing is sent without confirming'
   await expect(confirm).toContainText(
     "Estimated cost: about $0.07, at most $0.34, on top of about $0.01 for this meeting's cues.",
   );
+  await expect(confirm).toContainText(
+    'Notes setting: Most careful (default), model claude-opus-5-5.',
+  );
   await expect(confirm).toContainText('One request, no retry');
   const include = confirm.getByRole('checkbox', { name: 'Also send my notes' });
   await expect(include).not.toBeChecked();
@@ -222,4 +225,47 @@ test('fits a narrow window', async ({ page }) => {
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('Stop waiting before anything is sent leaves the request available', async ({
+  page,
+}) => {
+  await openNative(page);
+  await session(page, 'ended');
+  // The request is held as if the Keychain were still being read.
+  await page.evaluate(() => window.meetingNotesTest.hold());
+  await writeButton(page).click();
+  await page.getByRole('button', { name: 'Send and write notes' }).click();
+  await page.getByRole('button', { name: 'Stop waiting' }).click();
+  await expect(notesSection(page).getByRole('alert')).toContainText(
+    'Stopped before anything was sent. Nothing was sent.',
+  );
+  await expect(writeButton(page)).toBeVisible();
+});
+
+test('the confirmation follows notes edited while it is open', async ({
+  page,
+}) => {
+  await openNative(page);
+  await session(page, 'ended');
+  await page.evaluate(() =>
+    window.liveTest.publish({ notes: 'Fictional first line' }),
+  );
+  await writeButton(page).click();
+  const confirm = page.getByRole('group', {
+    name: 'Send this meeting to Anthropic?',
+  });
+  await confirm.getByRole('checkbox', { name: 'Also send my notes' }).check();
+  await expect(confirm).toContainText('Your notes are sent too: 1 line.');
+  await page.evaluate(() =>
+    window.liveTest.publish({
+      notes: 'Fictional first line\nFictional second line',
+    }),
+  );
+  await expect(confirm).toContainText('Your notes are sent too: 2 lines.');
+  await confirm.getByRole('button', { name: 'Send and write notes' }).click();
+  // The request named the plan for the edited notes, so it was accepted.
+  await expect(
+    page.getByRole('textbox', { name: 'Notes to keep, editable' }),
+  ).toBeVisible();
 });

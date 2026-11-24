@@ -815,7 +815,10 @@ impl Engine {
         // Keeping the meeting is chosen per session, never carried over.
         self.state.keep_meeting = false;
         self.shown_cues.clear();
-        // Meeting notes belong to the session they were written for.
+        // Meeting notes belong to the session they were written for; a
+        // request still in flight for the last one stops, and its result
+        // is dropped.
+        self.meeting_notes.cancel();
         self.meeting_notes = Default::default();
         self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
@@ -1966,23 +1969,36 @@ impl Engine {
     }
 
     /// Marks this session's one notes request as being written and returns
-    /// what to send. Call [`Self::abandon_meeting_notes`] if nothing is sent.
+    /// what to send, only if it is exactly what the confirmed plan
+    /// (`fingerprint`) described. Call [`Self::abandon_meeting_notes`] if
+    /// nothing is sent.
     pub fn begin_meeting_notes(
         &mut self,
         include_notes: bool,
+        fingerprint: &str,
     ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
         let prepared = self.meeting_notes_input(include_notes)?;
+        if prepared.fingerprint() != fingerprint {
+            return Err(crate::meeting_notes::Refusal::Changed);
+        }
+        self.meeting_notes.begin(&prepared);
         self.state.meeting_notes = crate::meeting_notes::Phase::Writing;
         self.changed();
         Ok(prepared)
     }
 
-    /// Nothing was sent (the key could not be used), so the request is
-    /// still available.
+    /// Stop waiting for this session's request in flight.
+    pub fn cancel_meeting_notes(&mut self) {
+        self.meeting_notes.cancel();
+    }
+
+    /// Nothing was sent (the key could not be used, or Stop waiting came
+    /// first), so the request is still available.
     pub fn abandon_meeting_notes(&mut self, session: u64) {
         if self.session() == session
             && self.state.meeting_notes == crate::meeting_notes::Phase::Writing
         {
+            self.meeting_notes.cancel();
             self.state.meeting_notes = crate::meeting_notes::Phase::None;
             self.changed();
         }
@@ -1993,7 +2009,7 @@ impl Engine {
         &mut self,
         session: u64,
         result: Result<crate::meeting_notes::Draft, crate::meeting_notes::Failure>,
-        spent_micro_usd: u64,
+        spent_micro_usd: Option<u64>,
     ) -> bool {
         if self.session() != session
             || self.state.meeting_notes != crate::meeting_notes::Phase::Writing

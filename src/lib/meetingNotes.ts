@@ -19,6 +19,8 @@ export interface MeetingNotesPlan {
   destination: string;
   /** This session's cue spend with the same key, when there was any. */
   cueSpentMicroUsd?: number;
+  /** Names exactly what would be sent; the request must match it. */
+  fingerprint: string;
 }
 
 export interface CitedLine {
@@ -38,14 +40,15 @@ export interface CheckItem {
 export interface MeetingNotesDraft {
   markdown: string;
   items: CheckItem[];
-  spentMicroUsd: number;
+  /** Absent when the API did not report the cost. */
+  spentMicroUsd?: number;
 }
 
 export interface MeetingNotesResult {
   draft?: MeetingNotesDraft;
   failure?: string;
   kept?: string;
-  spentMicroUsd: number;
+  spentMicroUsd?: number;
 }
 
 /** The models the app lists for notes, most careful first. */
@@ -76,11 +79,18 @@ export function meetingNotesPlan(includeNotes: boolean) {
   return invoke<MeetingNotesPlan>('meeting_notes_plan', { includeNotes });
 }
 
-/** Sends this meeting's one request; resolves when the notes are checked. */
-export function writeMeetingNotes(includeNotes: boolean) {
+/** Sends this meeting's one request, only if what would be sent still
+ * matches the confirmed plan; resolves when the notes are checked. */
+export function writeMeetingNotes(includeNotes: boolean, fingerprint: string) {
   if (!desktop) return unavailable();
-  return invoke<MeetingNotesDraft>('write_meeting_notes', { includeNotes });
+  return invoke<MeetingNotesDraft>('write_meeting_notes', {
+    includeNotes,
+    fingerprint,
+  });
 }
+
+/** The refusal Rust sends when the input changed after the plan. */
+export const planChanged = 'What would be sent has changed since you looked';
 
 export function cancelMeetingNotes() {
   if (!desktop) return Promise.resolve();
