@@ -39,6 +39,7 @@ import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
+import { MeetingNotes } from './components/MeetingNotes';
 import {
   PanelDivider,
   boundWidth,
@@ -1541,6 +1542,8 @@ function Notebook() {
                   disabled={busy || startPending}
                 />
               )}
+
+            <MeetingNotes snapshot={state} />
 
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}

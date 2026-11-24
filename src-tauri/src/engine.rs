@@ -498,6 +498,9 @@ pub struct Snapshot {
     /// shown in the Markdown export. Off for every new session; nothing is
     /// written unless the person reviews the export and saves it.
     pub keep_meeting: bool,
+    /// Where this session's model-written meeting notes stand. Nothing is
+    /// sent for them unless the person confirms, once, after the session.
+    pub meeting_notes: crate::meeting_notes::Phase,
 }
 
 /// A cue that appeared in this session, for the export when the person
@@ -602,6 +605,8 @@ pub struct Engine {
     /// meeting. Never sent anywhere.
     shown_cues: Vec<ShownCue>,
     last_recorded_cue: Option<String>,
+    /// This session's model-written meeting notes, if the person asked.
+    meeting_notes: crate::meeting_notes::Record,
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
@@ -707,6 +712,7 @@ impl Engine {
                 transcription: None,
                 sources: None,
                 keep_meeting: false,
+                meeting_notes: crate::meeting_notes::Phase::None,
             },
             script,
             generation: 0,
@@ -716,6 +722,7 @@ impl Engine {
             evaluated_cue: None,
             shown_cues: vec![],
             last_recorded_cue: None,
+            meeting_notes: Default::default(),
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
@@ -828,6 +835,12 @@ impl Engine {
         // Keeping the meeting is chosen per session, never carried over.
         self.state.keep_meeting = false;
         self.shown_cues.clear();
+        // Meeting notes belong to the session they were written for; a
+        // request still in flight for the last one stops, and its result
+        // is dropped.
+        self.meeting_notes.cancel();
+        self.meeting_notes = Default::default();
+        self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
         self.generation += 1;
         self.state.cues_paused = false;
@@ -2051,6 +2064,117 @@ impl Engine {
         }
     }
 
+    /// Why no meeting notes request can be sent for this session now, if
+    /// one cannot: only after a live session has ended, once per session.
+    fn meeting_notes_open(&self) -> Result<(), crate::meeting_notes::Refusal> {
+        use crate::meeting_notes::{Phase, Refusal};
+        if !self.state.live || self.state.status != Status::Ended {
+            return Err(Refusal::NotEnded);
+        }
+        match self.state.meeting_notes {
+            Phase::None => Ok(()),
+            Phase::Writing => Err(Refusal::Writing),
+            _ => Err(Refusal::AlreadySent),
+        }
+    }
+
+    fn meeting_notes_input(
+        &self,
+        include_notes: bool,
+    ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
+        self.meeting_notes_open()?;
+        let prepared = crate::meeting_notes::prepare(
+            crate::meeting_notes::notes_model(),
+            &self.state.transcript,
+            include_notes.then_some(self.state.notes.as_str()),
+        )?;
+        prepared.check_cap()?;
+        Ok(prepared)
+    }
+
+    /// What a notes request would send, for the confirmation. Sends nothing.
+    pub fn meeting_notes_plan(
+        &self,
+        include_notes: bool,
+    ) -> Result<crate::meeting_notes::Plan, crate::meeting_notes::Refusal> {
+        Ok(self.meeting_notes_input(include_notes)?.plan())
+    }
+
+    /// Marks this session's one notes request as being written and returns
+    /// what to send, only if it is exactly what the confirmed plan
+    /// (`fingerprint`) described. Call [`Self::abandon_meeting_notes`] if
+    /// nothing is sent.
+    pub fn begin_meeting_notes(
+        &mut self,
+        include_notes: bool,
+        fingerprint: &str,
+    ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
+        let prepared = self.meeting_notes_input(include_notes)?;
+        if prepared.fingerprint() != fingerprint {
+            return Err(crate::meeting_notes::Refusal::Changed);
+        }
+        self.meeting_notes.begin(&prepared);
+        self.state.meeting_notes = crate::meeting_notes::Phase::Writing;
+        self.changed();
+        Ok(prepared)
+    }
+
+    /// Stop waiting for this session's request in flight.
+    pub fn cancel_meeting_notes(&mut self) {
+        self.meeting_notes.cancel();
+    }
+
+    /// Nothing was sent (the key could not be used, or Stop waiting came
+    /// first), so the request is still available.
+    pub fn abandon_meeting_notes(&mut self, session: u64) {
+        if self.session() == session
+            && self.state.meeting_notes == crate::meeting_notes::Phase::Writing
+        {
+            self.meeting_notes.cancel();
+            self.state.meeting_notes = crate::meeting_notes::Phase::None;
+            self.changed();
+        }
+    }
+
+    /// Records the sent request's outcome, unless a new session has begun.
+    pub fn finish_meeting_notes(
+        &mut self,
+        session: u64,
+        result: Result<crate::meeting_notes::Draft, crate::meeting_notes::Failure>,
+        spent_micro_usd: Option<u64>,
+    ) -> bool {
+        if self.session() != session
+            || self.state.meeting_notes != crate::meeting_notes::Phase::Writing
+        {
+            return false;
+        }
+        self.state.meeting_notes = self.meeting_notes.finish(result, spent_micro_usd);
+        self.changed();
+        true
+    }
+
+    pub fn meeting_notes(&self) -> &crate::meeting_notes::Record {
+        &self.meeting_notes
+    }
+
+    /// Keeps the person's edited notes for the export.
+    pub fn keep_meeting_notes(&mut self, markdown: &str) -> Result<(), String> {
+        self.meeting_notes.keep(markdown)?;
+        self.state.meeting_notes = crate::meeting_notes::Phase::Kept;
+        self.changed();
+        Ok(())
+    }
+
+    /// Drops the draft or the kept notes; the request is not offered again.
+    pub fn discard_meeting_notes(&mut self) {
+        use crate::meeting_notes::Phase;
+        if matches!(self.state.meeting_notes, Phase::Draft | Phase::Kept) {
+            self.meeting_notes.discard();
+            self.state.meeting_notes = Phase::Discarded;
+            self.changed();
+        }
+    }
+
     /// The export. By default it holds the person's notes and nothing else:
     /// no transcript, cue, name, focus line or imported note. When the person
     /// chose to keep the meeting, it also holds the cues this session showed
@@ -2061,17 +2185,14 @@ impl Engine {
     /// audio; words people said aloud, names included, are in the transcript.
     pub fn markdown(&self) -> String {
         let mut out = format!("# TalkQTE notes\n\n{}\n", self.state.notes);
+        // Model-written notes only when the person kept them, as edited.
+        if let Some(kept) = self.meeting_notes.kept() {
+            out.push_str(&format!("\n{kept}\n"));
+        }
         if !self.state.keep_meeting {
             return out;
         }
-        let clock = |ms: u64| {
-            let s = ms / 1_000;
-            if s >= 3_600 {
-                format!("{}:{:02}:{:02}", s / 3_600, s / 60 % 60, s % 60)
-            } else {
-                format!("{:02}:{:02}", s / 60, s % 60)
-            }
-        };
+        let clock = crate::meeting_notes::clock;
         // One line per entry: line breaks inside a line become spaces.
         let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         out.push_str("\n## Cues shown\n\n");

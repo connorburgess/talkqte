@@ -77,6 +77,8 @@ mod lab_evaluator;
 pub mod live;
 mod live_control;
 mod live_source;
+pub mod meeting_notes;
+mod meeting_notes_commands;
 mod microphone;
 #[cfg(target_os = "macos")]
 mod native_session_clock;
@@ -1730,6 +1732,14 @@ pub fn run() {
             export_markdown,
             set_keep_meeting,
             resolve_echo_line,
+            meeting_notes_commands::meeting_notes_plan,
+            meeting_notes_commands::write_meeting_notes,
+            meeting_notes_commands::cancel_meeting_notes,
+            meeting_notes_commands::meeting_notes_result,
+            meeting_notes_commands::keep_meeting_notes,
+            meeting_notes_commands::discard_meeting_notes,
+            meeting_notes_commands::meeting_notes_model,
+            meeting_notes_commands::set_meeting_notes_model,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,
