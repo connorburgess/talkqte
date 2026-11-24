@@ -85,6 +85,14 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
   },
   {
     file: 'src/components/processing.css',
+    selector: '.processing-dev-details',
+    property: 'border-top',
+    kind: 'hairline',
+    reason:
+      'Full-width 1px neutral divider above Lab run details in the development group.',
+  },
+  {
+    file: 'src/components/processing.css',
     selector: '.notebook-processing .processing-panel',
     property: 'border-bottom',
     kind: 'hairline',

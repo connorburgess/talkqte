@@ -72,6 +72,8 @@ const ALLOWLIST = {
     '1px neutral hairline separating Keep this meeting from Not built summary.',
   '.tw-points li':
     '1px neutral hairline separating Two ways comparison bullet items.',
+  '.up-notes-section':
+    '1px neutral hairline separating structured meeting notes sections.',
   '.panel-note-row': '1px neutral hairline separating Prior context note rows.',
   '.panel-footer-line': '1px neutral hairline above notebook footer note.',
   '.dock-matrix-head':

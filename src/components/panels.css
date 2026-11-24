@@ -69,7 +69,8 @@
   padding: 12px 4px;
   min-height: 44px;
 }
-.layout-controls summary:hover {
+.layout-controls summary:hover,
+.layout-controls[open] > summary {
   color: var(--ink);
 }
 .layout-controls summary:focus-visible {
