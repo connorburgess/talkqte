@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { desktop } from '../lib/bridge';
 import { platformName, usePlatform } from '../lib/platform';
 
@@ -9,7 +10,7 @@ interface Settings {
 }
 
 /** Settings: offer to start a session when a call seems to be starting.
- * Off until the person turns it on; for this launch only. */
+ * Off until the person turns it on; saved in the settings file. */
 export function CallPromptSetting() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
@@ -20,8 +21,20 @@ export function CallPromptSetting() {
     invoke<Settings>('call_prompt_settings')
       .then((next) => alive && setSettings(next))
       .catch(() => alive && setError('This setting is unavailable.'));
+    // The menu bar has the same switch.
+    let stop: (() => void) | undefined;
+    if (desktop)
+      void listen<Settings>('call-prompt:settings', ({ payload }) => {
+        if (alive) setSettings(payload);
+      })
+        .then((unlisten) => {
+          if (alive) stop = unlisten;
+          else unlisten();
+        })
+        .catch(() => {});
     return () => {
       alive = false;
+      stop?.();
     };
   }, []);
 
@@ -61,8 +74,9 @@ export function CallPromptSetting() {
           that stays on this Mac. It never starts a session by itself: Start
           opens the notebook, where you choose and approve as usual. A browser
           call (Google Meet, for example) looks like any other use of the
-          microphone in a browser. TalkQTE has to be running to notice. This
-          setting lasts until you quit.
+          microphone in a browser. TalkQTE has to be running to notice. It
+          remembers this setting, and the apps you said not to ask about, by
+          their identifiers only.
         </p>
         {settings && (
           <label className="processing-option call-prompt-setting-option">

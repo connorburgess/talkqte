@@ -13,7 +13,8 @@
 //! Nothing is read while the prompt is off. What is read is whether the
 //! microphone is in use and the frontmost application's name and bundle
 //! identifier, never audio or window content, and it stays on this Mac.
-//! The settings last for this launch only, as every TalkQTE setting does.
+//! The on/off setting and the applications not to ask about are kept in the
+//! settings file (`settings.rs`), the latter as bundle identifiers only.
 
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -76,6 +77,25 @@ const BROWSERS: &[&str] = &[
     "com.brave.Browser",
 ];
 
+/// How Settings names a known application after a restart, when only its
+/// bundle identifier was kept.
+pub fn known_name(bundle_id: &str) -> Option<&'static str> {
+    Some(match bundle_id {
+        "us.zoom.xos" => "Zoom",
+        "com.microsoft.teams2" | "com.microsoft.teams" => "Microsoft Teams",
+        "com.apple.FaceTime" => "FaceTime",
+        "com.cisco.webexmeetingsapp" | "Cisco-Systems.Spark" => "Webex",
+        "com.tinyspeck.slackmacgap" => "Slack",
+        "com.google.Chrome" => "Google Chrome",
+        "com.apple.Safari" => "Safari",
+        "company.thebrowser.Browser" => "Arc",
+        "org.mozilla.firefox" => "Firefox",
+        "com.microsoft.edgemac" => "Microsoft Edge",
+        "com.brave.Browser" => "Brave",
+        _ => return None,
+    })
+}
+
 pub fn kind(bundle_id: &str) -> Option<Kind> {
     if MEETING.contains(&bundle_id) {
         Some(Kind::Meeting)
@@ -108,7 +128,7 @@ pub struct Preselect {
     pub bundle_id: String,
 }
 
-/// The person's choices. For this launch only.
+/// The person's choices, as Settings shows them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -168,6 +188,26 @@ impl Watcher {
             return self.clear() || changed;
         }
         changed
+    }
+
+    /// Bundle identifiers of the applications not to ask about, as saved.
+    pub fn not_for_ids(&self) -> &[String] {
+        &self.not_for_ids
+    }
+
+    /// Restores saved choices at launch, or the defaults on a reset. Only
+    /// known applications are kept, named as Settings names them.
+    pub fn restore(&mut self, enabled: bool, not_for_ids: &[String]) {
+        self.set_enabled(enabled);
+        self.clear_not_for();
+        for bundle in not_for_ids {
+            if let Some(name) = known_name(bundle) {
+                if !self.not_for_ids.contains(bundle) {
+                    self.not_for_ids.push(bundle.clone());
+                    self.settings.not_for.push(name.to_string());
+                }
+            }
+        }
     }
 
     /// Forget the applications the person said not to ask about.
@@ -525,6 +565,32 @@ mod tests {
             offered(&mut watcher, at + Duration::from_secs(60), zoom()),
             None
         );
+    }
+
+    #[test]
+    fn saved_choices_come_back_named_and_still_skip_their_application() {
+        let mut watcher = Watcher::default();
+        watcher.restore(
+            true,
+            &[
+                "us.zoom.xos".into(),
+                "com.example.unknown".into(),
+                "us.zoom.xos".into(),
+            ],
+        );
+        assert!(watcher.enabled());
+        assert_eq!(watcher.settings().not_for, ["Zoom"]);
+        assert_eq!(watcher.not_for_ids(), ["us.zoom.xos"]);
+        let start = Instant::now();
+        watcher.observe(&IN_USE(zoom()), false, start);
+        watcher.observe(&IN_USE(zoom()), false, start + SETTLE);
+        assert_eq!(watcher.prompt(), None);
+        // Every application an offer can be skipped for has a name.
+        for bundle in MEETING.iter().chain(BROWSERS) {
+            assert!(known_name(bundle).is_some(), "{bundle}");
+        }
+        watcher.restore(false, &[]);
+        assert_eq!(watcher.settings(), &Settings::default());
     }
 
     #[test]

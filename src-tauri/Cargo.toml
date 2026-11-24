@@ -104,6 +104,11 @@ security-framework = { version = "3", default-features = false }
 objc2-screen-capture-kit = { version = "=0.3.2", default-features = false, features = ["std", "SCStream", "SCError", "SCShareableContent", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics"] }
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSObject", "NSArray", "NSDictionary", "NSError", "NSString"] }
 dispatch2 = { version = "=0.3.1" }
+# The menu bar item (Tauri's status item, on the tray-icon crate already in
+# the lock file) and "Open at login" through SMAppService (macOS 13+; the
+# app's minimum is 14).
+tauri = { version = "2", features = ["tray-icon"] }
+objc2-service-management = { version = "=0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 objc2-core-media = { version = "=0.3.2", default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime", "objc2-core-audio-types"] }
 objc2-core-audio-types = { version = "=0.3.2", default-features = false, features = ["std", "CoreAudioBaseTypes"] }

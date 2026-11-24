@@ -9168,6 +9168,48 @@ Date: 2026-11-23 · Length: 06:42
                 Future unbuilt screens will be specified here before
                 implementation.
               </p>
+              <div class="sheet-kicker" style="margin-top: 18px">
+                <span class="mono-label badge badge-muted"
+                  >Built, awaiting styling</span
+                >
+              </div>
+              <p class="up-boundary" id="awaiting-saved-settings">
+                <strong>Settings → Saved settings</strong>
+                (<code>SavedSettings.tsx</code>): what TalkQTE remembers between
+                launches; <strong>Reset settings…</strong> with an inline
+                confirmation (<em>Reset settings</em> / <em>Keep them</em>);
+                status lines for a lab run (reset disabled), a settings file
+                from a newer version, saving unavailable, and a failed save.
+                Built from the shared <code>setting</code>,
+                <code>secondary-button</code> and
+                <code>setting-error</code> styles; not drawn here yet. For the
+                design lane.
+              </p>
+              <p class="up-boundary" id="awaiting-menu-bar">
+                <strong>Menu bar item</strong> (<code>menu_bar.rs</code>): a
+                native macOS menu with a template image of the mark (corners and
+                cue bar; the bar is solid with a dot while a session runs, faint
+                otherwise). Lines: <em>No session running</em> /
+                <em>Session running</em>, <em>Open notebook</em>,
+                <em>Start session…</em> (disabled while a session is open),
+                <em>Stop session</em> (only while one runs), the
+                <em>Offer to start when a call starts</em> check, and
+                <em>Quit TalkQTE</em>. Native menu styling is the system's; the
+                icon's drawing is for the design lane to confirm.
+              </p>
+              <p class="up-boundary" id="awaiting-menu-bar-settings">
+                <strong>Settings → Menu bar and login</strong>
+                (<code>MenuBarSettings.tsx</code>):
+                <em
+                  >Keep running in the menu bar when the notebook is closed</em
+                >
+                and <em>Open at login</em>, both off by default, with what off
+                means; Open at login states On, Off, Needs approval (with an
+                <em>Open Login Items</em> button) and Unavailable. Built from
+                the shared <code>setting</code>,
+                <code>processing-option</code> and
+                <code>secondary-button</code> styles; not drawn here yet.
+              </p>
             </div>
           </div>
         </div>
