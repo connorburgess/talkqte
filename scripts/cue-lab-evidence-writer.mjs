@@ -539,15 +539,19 @@ export function createLabEvidenceWriter({
                 typeof c.sourceIdentity[k] === 'string' &&
                 /^(0|[1-9]\d*)$/.test(c.sourceIdentity[k]),
             ) &&
-            // Released by the lab's Stop, or ended by native itself with a
-            // fixed problem label; never both, never unstated.
+            // Released by the lab's Stop, ended by native itself with a
+            // fixed problem label, or explicitly unconfirmed (a failed
+            // take); never more than one, never unstated.
             (c.sourceEnd === 'native-ended'
               ? c.sourceReleaseObserved === false &&
                 /^[a-z_]{1,40}$/.test(c.nativeEndProblem ?? '')
-              : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
-                c.sourceReleaseObserved === true &&
-                c.nativeEndProblem === undefined) &&
-            c.recorderFinalizationObserved === true &&
+              : c.sourceEnd === 'unconfirmed'
+                ? c.sourceReleaseObserved === false &&
+                  c.nativeEndProblem === undefined
+                : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
+                  c.sourceReleaseObserved === true &&
+                  c.nativeEndProblem === undefined) &&
+            typeof c.recorderFinalizationObserved === 'boolean' &&
             c.nativeWriterMayRemainOpen === true &&
             c.completeRunCoverage === false &&
             c.unknownLateRecords === true &&

@@ -163,10 +163,12 @@ function snapshotCoverage(artifact, manifest) {
     !(c.sourceEnd === 'native-ended'
       ? c.sourceReleaseObserved === false &&
         /^[a-z_]{1,40}$/.test(c.nativeEndProblem ?? '')
-      : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
-        c.sourceReleaseObserved === true &&
-        c.nativeEndProblem === undefined) ||
-    c.recorderFinalizationObserved !== true ||
+      : c.sourceEnd === 'unconfirmed'
+        ? c.sourceReleaseObserved === false && c.nativeEndProblem === undefined
+        : (c.sourceEnd === undefined || c.sourceEnd === 'released') &&
+          c.sourceReleaseObserved === true &&
+          c.nativeEndProblem === undefined) ||
+    typeof c.recorderFinalizationObserved !== 'boolean' ||
     c.nativeWriterMayRemainOpen !== true ||
     c.completeRunCoverage !== false ||
     c.unknownLateRecords !== true ||
@@ -201,7 +203,7 @@ function snapshotCoverage(artifact, manifest) {
     sourceReleaseObserved: c.sourceReleaseObserved,
     sourceEnd: c.sourceEnd ?? 'released',
     ...(c.nativeEndProblem ? { nativeEndProblem: c.nativeEndProblem } : {}),
-    recorderFinalizationObserved: true,
+    recorderFinalizationObserved: c.recorderFinalizationObserved,
     nativeWriterMayRemainOpen: true,
     completeRunCoverage: false,
     unknownLateRecords: true,
@@ -1638,7 +1640,16 @@ export function renderEvidenceMarkdown(r, { recordingHref } = {}) {
       .filter((a) => a.snapshotCoverage)
       .map((a) => {
         const c = a.snapshotCoverage;
-        return `| ${escape(a.id)} | ${c.sourceEnd === 'native-ended' ? `ended by native (${escape(c.nativeEndProblem)}), not released by Stop` : 'released by Stop'} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
+        const end =
+          c.sourceEnd === 'native-ended'
+            ? `ended by native (${escape(c.nativeEndProblem)}), not released by Stop`
+            : c.sourceEnd === 'unconfirmed'
+              ? 'release not confirmed: the app may still have been writing, so rows after the cutoff are unknown'
+              : 'released by Stop';
+        const recorder = c.recorderFinalizationObserved
+          ? ''
+          : '; recorder finalization not observed';
+        return `| ${escape(a.id)} | ${end}${recorder} | ${c.copiedBytes} / ${c.cutoffBytes} / ${c.observedBytesAtOpen} | ${c.omittedBytesAtCutoff} / ${c.unobservedBytesAtOpen} | ${c.rows} / ${c.trailingPartialBytes ?? 'unknown'} | ${c.rowLimitReached} / ${c.grewDuringCopy} |`;
       }),
     '',
     '## Per-take timeline',

@@ -930,6 +930,13 @@ test('a full fixture take reaches its terminal state, writes the evidence report
   assert.equal(outcome.native.transcription.tokenRemoved, true);
   assert.equal(outcome.recorder.finalized, true);
   assert.equal(outcome.evidence.timing, 'attached');
+  assert.equal(outcome.evidence.timingDetail.sourceEnd, 'released');
+  assert.equal(outcome.evidence.timingDetail.completeRunCoverage, false);
+  assert.ok(
+    lines.some((l) =>
+      /^Native timing attached: \d+ rows, .*source released by Stop\./.test(l),
+    ),
+  );
   assert.equal(outcome.evidence.recording, 'attached');
   assert.equal(outcome.evidence.recordingDurationMs, 4321.5);
   assert.equal(outcome.player.retired, true);
@@ -1014,6 +1021,14 @@ test('a recorder whose stream macOS stopped leaves its reason, code and start ti
   assert.equal(detail.timings.frameAcceptedMs, null);
   assert.doesNotMatch(JSON.stringify(outcome), /fictional interruption/);
   assert.ok(lines.some((l) => /recorder stream-stopped/.test(l)));
+  // Released but with no finalized recorder: the timing log is still
+  // attached and says the recorder was not finalized; the recording is not.
+  assert.equal(outcome.recorder.finalized, false);
+  assert.equal(outcome.evidence.timing, 'attached');
+  assert.equal(outcome.evidence.timingDetail.sourceEnd, 'released');
+  assert.equal(outcome.evidence.timingDetail.recorderFinalized, false);
+  assert.equal(outcome.evidence.recording, null);
+  assert.ok(lines.some((l) => /; recorder not finalized\./.test(l)));
 });
 
 test('a turn-off fixture take ends stopped with failure turned-off', async () => {
@@ -1139,10 +1154,35 @@ test('a failed build check is refused before the marker; a take that cannot conf
   // take ends in failed cleanup and keeps the player; the runner retires
   // it once the take has settled, so nothing it owns keeps running.
   const f = fixtureModules({ fixtureCase: 'lost-released' });
-  const result = await execute(planFile, planSha, f);
+  const lines = [];
+  const result = await execute(planFile, planSha, f, { io: quietIo(lines) });
   assert.equal(result.state, 'failed-cleanup');
   assert.equal(result.outcome.native.released, false);
-  assert.equal(result.outcome.evidence.timing, 'not-released');
+  // The timing log is still attached, through the bounded snapshot, and
+  // says that release was never confirmed rather than claiming coverage.
+  assert.equal(result.outcome.evidence.timing, 'attached');
+  const detail = result.outcome.evidence.timingDetail;
+  assert.equal(detail.sourceEnd, 'unconfirmed');
+  assert.equal(detail.recorderFinalized, true);
+  assert.equal(detail.completeRunCoverage, false);
+  assert.equal(detail.unknownLateRecords, true);
+  assert.ok(detail.rows > 0);
+  assert.equal(typeof detail.appEndedBeforeSnapshot, 'boolean');
+  assert.ok(
+    lines.some((l) =>
+      /^Native timing attached: \d+ rows, .*source release not confirmed, so the app may have kept writing\. Rows written after the cutoff are unknown; this is not complete run coverage\.$/.test(
+        l,
+      ),
+    ),
+  );
+  const manifest = JSON.parse(readFileSync(result.outcome.evidence.manifest));
+  const native = manifest.artifacts.find((a) => a.kind === 'native-timing');
+  assert.equal(native.snapshotCoverage.sourceEnd, 'unconfirmed');
+  assert.equal(native.snapshotCoverage.sourceReleaseObserved, false);
+  assert.match(
+    readFileSync(join(result.reportDirectory, 'report.md'), 'utf8'),
+    /release not confirmed: the app may still have been writing/,
+  );
   assert.equal(result.outcome.player.retired, true);
   assert.notEqual(result.outcome.player.diagnostics.process, null);
   assert.ok(existsSync(join(result.reportDirectory, 'report.md')));

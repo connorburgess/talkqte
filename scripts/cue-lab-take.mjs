@@ -972,6 +972,57 @@ async function runAttempt({
   }
 }
 
+// What the attached native timing covers, for the take outcome: counts and
+// the snapshot's own limits, never completeness. Rows the app wrote after
+// the cutoff, or after an unconfirmed release, stay unknown.
+function timingDetail(c, { appEndedBeforeSnapshot }) {
+  return {
+    sourceEnd: c.sourceEnd,
+    ...(c.nativeEndProblem ? { nativeEndProblem: c.nativeEndProblem } : {}),
+    recorderFinalized: c.recorderFinalizationObserved,
+    // An ended process can no longer append; a running one may have.
+    appEndedBeforeSnapshot,
+    rows: c.rows,
+    copiedBytes: c.copiedBytes,
+    observedBytesAtOpen: c.observedBytesAtOpen,
+    omittedBytesAtCutoff: c.omittedBytesAtCutoff,
+    unobservedBytesAtOpen: c.unobservedBytesAtOpen,
+    trailingPartialBytes: c.trailingPartialBytes,
+    rowLimitReached: c.rowLimitReached,
+    grewDuringCopy: c.grewDuringCopy,
+    completeRunCoverage: false,
+    unknownLateRecords: true,
+  };
+}
+
+// The one line the runner prints about the native timing it attached.
+function timingLine(evidence) {
+  const d = evidence.timingDetail;
+  if (evidence.timing === 'attached') {
+    const end =
+      d.sourceEnd === 'released'
+        ? 'released by Stop'
+        : d.sourceEnd === 'native-ended'
+          ? `ended by native (${d.nativeEndProblem})`
+          : 'release not confirmed, so the app may have kept writing';
+    const left = d.omittedBytesAtCutoff + d.unobservedBytesAtOpen;
+    return (
+      `Native timing attached: ${d.rows} rows, ${d.copiedBytes} of ${d.observedBytesAtOpen} bytes seen at open` +
+      `${left ? ` (${left} bytes not copied)` : ''}; source ${end}` +
+      `${d.recorderFinalized ? '' : '; recorder not finalized'}` +
+      `${d.grewDuringCopy ? '; the file grew during the copy' : ''}` +
+      '. Rows written after the cutoff are unknown; this is not complete run coverage.'
+    );
+  }
+  if (evidence.timing === 'failed')
+    return 'Native timing not attached: the bounded snapshot or its attachment was refused; the original timing file is kept where the app wrote it.';
+  if (evidence.timing === 'not-attached')
+    return d?.reason === 'app-not-launched'
+      ? 'Native timing not attached: the app was not launched.'
+      : 'Native timing not attached: the timing file has no frozen identity (the run never started), so it cannot be copied safely.';
+  return null;
+}
+
 // After the take settled (native released, recorder finalized, player
 // retired) or never started: timing snapshot, recording, manifest, report
 // and the take's own result, in that order. Nothing is deleted.
@@ -1006,23 +1057,36 @@ async function finishAttempt({
         () => false,
       )
     : true;
-  const evidence = { timing: null, recording: null };
-  if (writer && launcher?.processStarted && recorderFinalized) {
-    const ended = launcher.sourceReleased
+  const evidence = { timing: null, timingDetail: null, recording: null };
+  // The native timing log is attached whenever the app was launched and its
+  // file can be identified, released or not: a failed take still has every
+  // row the app wrote before the cutoff. The snapshot's own bounded cutoff
+  // is what makes that safe while the app may still be writing; its coverage
+  // says how the source ended and whether the recorder was finalized.
+  if (writer && launcher?.processStarted) {
+    const sourceEnd = launcher.sourceReleased
       ? { sourceReleased: true }
       : launcher.nativeEnded
         ? { nativeEnded: launcher.nativeEnded }
-        : null;
-    if (!ended) evidence.timing = 'not-released';
-    else
+        : { sourceUnconfirmed: true };
+    let identity = null;
+    try {
+      identity = launcher.timingFileIdentity;
+    } catch {
+      identity = null;
+    }
+    if (!identity) {
+      evidence.timing = 'not-attached';
+      evidence.timingDetail = { reason: 'no-timing-file-identity' };
+    } else
       try {
         const s = modules.snapshotTiming({
           path: launcher.timingPath,
           parentDirectory: writer.directory,
           runId: p.runId,
-          expectedIdentity: launcher.timingFileIdentity,
-          ...ended,
-          recorderFinalized: true,
+          expectedIdentity: identity,
+          ...sourceEnd,
+          recorderFinalized,
         });
         writer.attach({
           id: 'native-timing',
@@ -1033,9 +1097,16 @@ async function finishAttempt({
           snapshotCoverage: s.coverage,
         });
         evidence.timing = 'attached';
+        evidence.timingDetail = timingDetail(s.coverage, {
+          appEndedBeforeSnapshot: launcher.processEnded === true,
+        });
       } catch {
         evidence.timing = 'failed';
+        evidence.timingDetail = { reason: 'snapshot-or-attach-refused' };
       }
+  } else if (writer) {
+    evidence.timing = 'not-attached';
+    evidence.timingDetail = { reason: 'app-not-launched' };
   }
   let durationMs = null;
   if (writer && recorder?.report && recorderFinalized)
@@ -1139,6 +1210,8 @@ async function finishAttempt({
   io.log(
     `Take ended: ${state}${detail.length ? ` (${detail.join('; ')})` : ''}.`,
   );
+  const timing = timingLine(evidence);
+  if (timing) io.log(timing);
   if (reportDirectory)
     io.log(`Evidence report: ${join(reportDirectory, 'report.md')}`);
   else

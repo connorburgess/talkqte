@@ -46,20 +46,33 @@ export function snapshotLabTiming({
   expectedIdentity,
   sourceReleased,
   // Native ended the session itself (its source failed): { problem } with a
-  // fixed label. Either this or an observed release permits the snapshot.
+  // fixed label.
   nativeEnded,
+  // Neither a release nor a native end was observed (a failed take, or
+  // cleanup that never confirmed release): the app may still be writing.
+  // The snapshot is still bounded by its own cutoff, and says so.
+  sourceUnconfirmed,
+  // Whether the recorder's finalization was observed; stated either way.
   recorderFinalized,
   maxBytes = 8 * 1024 * 1024,
   maxRows = 10000,
   maxFrameBytes = 65536,
 } = {}) {
+  const ends = [
+    sourceReleased === true,
+    nativeEnded !== undefined,
+    sourceUnconfirmed === true,
+  ].filter(Boolean).length;
   required(
-    // Exactly one: released by the lab's Stop, or ended by native itself.
-    (sourceReleased === true
-      ? nativeEnded === undefined
-      : sourceReleased === undefined &&
+    // Exactly one: released by the lab's Stop, ended by native itself, or
+    // explicitly unconfirmed.
+    ends === 1 &&
+      [sourceReleased, sourceUnconfirmed].every(
+        (v) => v === undefined || v === true,
+      ) &&
+      (nativeEnded === undefined ||
         /^[a-z_]{1,40}$/.test(nativeEnded?.problem ?? '')) &&
-      recorderFinalized === true &&
+      typeof recorderFinalized === 'boolean' &&
       /^[A-Za-z0-9_-]{1,64}$/.test(runId ?? '') &&
       expectedIdentity?.runId === runId &&
       ['dev', 'ino'].every(
@@ -182,11 +195,14 @@ export function snapshotLabTiming({
         ino: expectedIdentity.ino,
       }),
       sourceReleaseObserved: sourceReleased === true,
-      sourceEnd: sourceReleased === true ? 'released' : 'native-ended',
-      ...(sourceReleased === true
-        ? {}
-        : { nativeEndProblem: nativeEnded.problem }),
-      recorderFinalizationObserved: true,
+      sourceEnd:
+        sourceReleased === true
+          ? 'released'
+          : nativeEnded
+            ? 'native-ended'
+            : 'unconfirmed',
+      ...(nativeEnded ? { nativeEndProblem: nativeEnded.problem } : {}),
+      recorderFinalizationObserved: recorderFinalized,
       nativeWriterMayRemainOpen: true,
       cutoffReceipt: Object.freeze({
         clockId: 'node',
