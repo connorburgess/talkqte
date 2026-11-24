@@ -109,6 +109,11 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-panel-sizes",
         "allow-set-panel-sizes",
         "allow-reset-settings",
+        // Keeping running in the menu bar and Open at login.
+        "allow-presence-settings",
+        "allow-set-keep-running-in-menu-bar",
+        "allow-set-open-at-login",
+        "allow-open-login-items",
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",

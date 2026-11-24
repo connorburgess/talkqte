@@ -94,7 +94,7 @@ CI runs the script's tests in the frontend job and the default (`--expect bundle
 | 7   | Upgrade with data migration    | Owner                      | The settings file (version 1) is the only stored format; there is no earlier format to convert. Needs two signed candidates. Procedure below; the [data snapshot](#data-snapshot) script gives the before-and-after comparison.      |
 | 8   | Update deferral during a call  | Not implemented            | No updater exists, so nothing can interrupt a call automatically. Deferral must be designed with the updater; see [update deferral](#update-deferral-during-a-call).                                             |
 | 9   | Rollback                       | Owner                      | Reinstalling the previous candidate is the only route. A build that finds a newer settings file uses its defaults and leaves the file unchanged; this has not been tried between two candidates.                                                             |
-| 10  | Uninstall                      | Owner                      | Moving the app to the Trash is expected to leave the folders listed above, including a speech model left by an earlier development build; this has not been tried. No in-app removal exists.               |
+| 10  | Uninstall                      | Owner                      | Moving the app to the Trash is expected to leave the folders listed above, including the settings file and a speech model left by an earlier development build; this has not been tried. If Open at login was on, turn it off first (Settings or System Settings → Login Items); what macOS does with the login item of a deleted app has not been observed. No in-app removal exists.               |
 
 ### 1. Build
 

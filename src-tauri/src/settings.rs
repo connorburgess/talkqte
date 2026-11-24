@@ -62,6 +62,9 @@ pub struct Settings {
     /// Bundle identifiers the call-starting prompt skips; each one is a
     /// known meeting application or browser.
     pub call_prompt_not_for: Vec<String>,
+    /// Closing the notebook leaves TalkQTE in the menu bar instead of
+    /// quitting. Off until the person turns it on.
+    pub keep_running_in_menu_bar: bool,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -85,6 +88,7 @@ impl Default for Settings {
             user_name: None,
             call_prompt_enabled: false,
             call_prompt_not_for: Vec::new(),
+            keep_running_in_menu_bar: false,
         }
     }
 }
@@ -184,6 +188,11 @@ pub fn parse(bytes: &[u8]) -> Settings {
         user_name,
         call_prompt_enabled,
         call_prompt_not_for,
+        keep_running_in_menu_bar: field(
+            &object,
+            "keepRunningInMenuBar",
+            defaults.keep_running_in_menu_bar,
+        ),
     }
 }
 
@@ -203,6 +212,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
             "enabled": settings.call_prompt_enabled,
             "notFor": settings.call_prompt_not_for,
         },
+        "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -286,7 +296,7 @@ pub fn write(path: &Path, settings: &Settings) -> std::io::Result<()> {
 /// Whether this launch is a lab run: the lab launcher always gives these,
 /// and nothing else does. Development launches only; a release build has no
 /// lab runs and always uses the file.
-fn lab_run() -> bool {
+pub(crate) fn lab_run() -> bool {
     #[cfg(debug_assertions)]
     {
         lab_run_in(|name| std::env::var_os(name).is_some())
@@ -492,6 +502,7 @@ mod tests {
             user_name: Some("Zoë O’Neil-Ray".into()),
             call_prompt_enabled: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
+            keep_running_in_menu_bar: true,
         }
     }
 
@@ -537,6 +548,7 @@ mod tests {
                 "callPrompt",
                 "companionPosition",
                 "floatingWindow",
+                "keepRunningInMenuBar",
                 "notesModel",
                 "panels",
                 "questionSize",

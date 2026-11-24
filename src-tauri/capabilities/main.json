@@ -77,6 +77,10 @@
     "allow-settings-status",
     "allow-panel-sizes",
     "allow-set-panel-sizes",
-    "allow-reset-settings"
+    "allow-reset-settings",
+    "allow-presence-settings",
+    "allow-set-keep-running-in-menu-bar",
+    "allow-set-open-at-login",
+    "allow-open-login-items"
   ]
 }
