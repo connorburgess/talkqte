@@ -35,6 +35,7 @@ jobs:
           - arch: x64
             runner: windows-2025
             rustup: x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
             # WiX 3, which Tauri uses for MSI, cannot target Arm64, so the
             # MSI is made for x64 only.
             bundles: nsis,msi
@@ -43,6 +44,7 @@ jobs:
           - arch: arm64
             runner: windows-11-arm
             rustup: aarch64-pc-windows-msvc
+            target: aarch64-pc-windows-msvc
             bundles: nsis
             tests: false
     steps:
@@ -98,9 +100,14 @@ jobs:
           $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/talkqte-windows"
           Get-ChildItem src-tauri/target/release/bundle -Recurse -Include *-setup.exe, *.msi |
             Copy-Item -Destination $out
-          Get-ChildItem $out -File | ForEach-Object {
+          # The licences of what this build links, beside the installer.
+          node scripts/third-party-notices.mjs --target ${{ matrix.target }} --out "$out/THIRD-PARTY-NOTICES.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not write the third-party notices.' }
+          # Listed before the sums file exists, so it is not hashed while written.
+          $sums = @(Get-ChildItem $out -File | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Out-File -Encoding ascii "$out/SHA256SUMS.txt"
+          })
+          $sums | Out-File -Encoding ascii "$out/SHA256SUMS.txt"
           @"
           TalkQTE for Windows ${{ matrix.arch }}: UNSIGNED development build
           Commit: ${{ github.sha }}
@@ -109,6 +116,8 @@ jobs:
           These installers are not signed. Windows SmartScreen will warn before
           running them. They are for testing on a machine you control, not a
           release. What this build can and cannot do is in docs/platforms.md.
+          THIRD-PARTY-NOTICES.txt lists the licences of what this build links;
+          the installed app does not carry its own copy yet.
           CI checked: it installs per user, opens its window, and uninstalls on
           a GitHub-hosted runner. Nothing else was checked on Windows here.
           "@ | Out-File -Encoding utf8 "$out/README-UNSIGNED.txt"
@@ -133,8 +142,10 @@ jobs:
           # the installed package is then checked.
           - arch: x64
             runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
           - arch: arm64
             runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,6 +194,8 @@ jobs:
           out="$RUNNER_TEMP/talkqte-ubuntu"
           mkdir -p "$out"
           cp src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage "$out/"
+          # The licences of what this build links, beside the packages.
+          node scripts/third-party-notices.mjs --target ${{ matrix.target }} --out "$out/THIRD-PARTY-NOTICES.txt"
           (cd "$out" && sha256sum -- * > SHA256SUMS.txt)
           cat > "$out/README-UNSIGNED.txt" <<EOF
           TalkQTE for Ubuntu ${{ matrix.arch }}: UNSIGNED development build
@@ -192,6 +205,8 @@ jobs:
           These packages are not signed and come from no apt repository. They are
           for testing on a machine you control, not a release. What this build
           can and cannot do is in docs/platforms.md.
+          THIRD-PARTY-NOTICES.txt lists the licences of what this build links;
+          the installed app does not carry its own copy yet.
           CI checked: built on Ubuntu 24.04; the deb installs on Ubuntu 26.04 LTS
           and both open their window under a virtual display (Xvfb). The
           AppImage was built but not launched. Nothing else was checked here.
