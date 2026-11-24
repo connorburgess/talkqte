@@ -49,6 +49,7 @@ import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
+import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
@@ -68,6 +69,7 @@ import {
   sourcesHeading,
   transcribedWhere,
   transcriptionDropText,
+  transcriptionLowText,
   transcriptionReconnectText,
   transcriptionStopText,
 } from './lib/transcription';
@@ -789,6 +791,18 @@ function Notebook() {
       state.live && state.status === 'ended' ? state.focus.join('\n') : null,
     );
   }, [state?.live, state?.status]);
+  // The cap's countdown is said when it first appears, not every minute.
+  const lowSaid = useRef(false);
+  const lowText = transcriptionLowText(state?.transcription);
+  useEffect(() => {
+    if (!lowText) {
+      lowSaid.current = false;
+      return;
+    }
+    if (lowSaid.current) return;
+    lowSaid.current = true;
+    setNotice(lowText);
+  }, [lowText]);
   // Said once each to assistive technology, through regions that stay
   // mounted: a live region added together with its words is often not read.
   // A new cue is read; its countdown, a hold or an answer are not.
@@ -1566,6 +1580,11 @@ function Notebook() {
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
                     </p>
+                  )}
+                  {/* Changes each minute: said once, through the notice
+                      region, when it first appears. */}
+                  {transcriptionLowText(state.transcription) && (
+                    <p>{transcriptionLowText(state.transcription)}</p>
                   )}
                   {transcriptionReconnectText(state.transcription) && (
                     <p role="status">
@@ -2389,14 +2408,24 @@ function Notebook() {
                   transcribe. With cloud transcription or cue processing on,
                   audio goes to the named transcription service and recent lines
                   to the cue provider, for that session only. A live session’s
-                  transcript is kept in memory only and cannot be exported.
-                  Notes exist in memory until you close the app. Exports contain
+                  transcript is kept in memory only; it is in an export only if
+                  you choose to keep the meeting, after the session ends. Notes
+                  exist in memory until you close the app. Exports contain
                   exactly the text you review and are saved to the location you
                   choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
             </section>
+            <Diagnostics
+              current={() => ({
+                desktop: bridge.desktop,
+                session: state,
+                processing: capture.state ?? null,
+                microphone: microphone.state,
+                liveAvailable: liveStatus?.available ?? null,
+              })}
+            />
             <section className="coming-next">
               <h2>What comes next</h2>
               <p>
