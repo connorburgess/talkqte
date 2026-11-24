@@ -99,6 +99,8 @@ pub mod provider_keys;
     )
 ))]
 mod selected_attestation;
+pub mod settings;
+mod settings_commands;
 pub mod timing_log;
 pub mod transcription;
 mod updates;
@@ -417,6 +419,23 @@ fn change(
     result
 }
 
+/// A change to a saved display choice or the name: applied as any change,
+/// then that one setting, as the engine now holds it, is written to the
+/// settings file. Only the field the person changed is saved, so a
+/// development launch setting applied over the file is never written.
+fn change_setting(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    action: impl FnOnce(&mut Engine) -> Result<(), String>,
+    save: impl FnOnce(&engine::Snapshot, &mut settings::Settings),
+) -> Result<(), String> {
+    change(app, state, action)?;
+    if let Ok(runtime) = state.0.lock() {
+        settings_commands::record(app, |settings| save(&runtime.engine.state, settings));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn snapshot(
     window: tauri::WebviewWindow,
@@ -515,10 +534,15 @@ fn set_companion_position(
 ) -> Result<(), String> {
     // A preset replaces wherever the person dragged the window to.
     companion::reset_drag(&app);
-    change(&app, &state, |e| {
-        e.set_companion_position(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_companion_position(value);
+            Ok(())
+        },
+        |s, saved| saved.companion_position = s.companion_position,
+    )
 }
 #[tauri::command]
 fn set_question_size(
@@ -526,10 +550,15 @@ fn set_question_size(
     state: tauri::State<AppState>,
     value: QuestionSize,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_question_size(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_question_size(value);
+            Ok(())
+        },
+        |s, saved| saved.question_size = s.question_size,
+    )
 }
 #[tauri::command]
 fn update_notes(
@@ -545,7 +574,12 @@ fn set_user_name(
     state: tauri::State<AppState>,
     name: Option<String>,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.set_user_name(name))
+    change_setting(
+        &app,
+        &state,
+        |e| e.set_user_name(name),
+        |s, saved| saved.user_name = s.user_name.clone(),
+    )
 }
 #[tauri::command]
 fn set_focus(
@@ -561,10 +595,15 @@ fn set_sensitivity(
     state: tauri::State<AppState>,
     value: Sensitivity,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_sensitivity(value);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_sensitivity(value);
+            Ok(())
+        },
+        |s, saved| saved.sensitivity = s.sensitivity,
+    )
 }
 #[tauri::command]
 fn set_overlay(
@@ -572,10 +611,15 @@ fn set_overlay(
     state: tauri::State<AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
-        e.set_overlay(enabled);
-        Ok(())
-    })
+    change_setting(
+        &app,
+        &state,
+        |e| {
+            e.set_overlay(enabled);
+            Ok(())
+        },
+        |s, saved| saved.overlay_enabled = s.overlay_enabled,
+    )
 }
 
 #[tauri::command]
@@ -1769,11 +1813,19 @@ pub fn run() {
             stop_live_session,
             microphone::microphone_snapshot,
             microphone::start_microphone,
-            stop_microphone
+            stop_microphone,
+            settings_commands::settings_status,
+            settings_commands::panel_sizes,
+            settings_commands::set_panel_sizes,
+            settings_commands::reset_settings
         ])
         .setup(|app| {
+            // The person's saved settings, before anything is published. A
+            // lab run reads none (settings.rs).
+            settings_commands::load(app.handle());
             // A lab launch may give the user's name; it is set before the
-            // first session, as if typed in Settings.
+            // first session, as if typed in Settings, over any saved name,
+            // and is never written to the settings file.
             #[cfg(debug_assertions)]
             {
                 dev_user_name::initialize();

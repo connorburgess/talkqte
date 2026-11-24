@@ -73,6 +73,10 @@
     "allow-call-prompt-settings",
     "allow-set-call-prompt",
     "allow-clear-call-prompt-apps",
-    "allow-respond-to-call-prompt"
+    "allow-respond-to-call-prompt",
+    "allow-settings-status",
+    "allow-panel-sizes",
+    "allow-set-panel-sizes",
+    "allow-reset-settings"
   ]
 }

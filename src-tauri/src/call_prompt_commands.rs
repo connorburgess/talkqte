@@ -27,7 +27,7 @@ pub(crate) fn call_prompt_settings(
     Ok(runtime.call_prompt.settings().clone())
 }
 
-/// Turn the prompt on or off for this launch. Off stops every read of the
+/// Turn the prompt on or off; the choice is saved. Off stops every read of the
 /// microphone's in-use state and the frontmost application.
 #[tauri::command]
 pub(crate) fn set_call_prompt(
@@ -42,6 +42,7 @@ pub(crate) fn set_call_prompt(
         if runtime.call_prompt.set_enabled(enabled) {
             changed(&app, &mut runtime);
         }
+        crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
         runtime.call_prompt.settings().clone()
     };
     crate::companion::refresh(&app);
@@ -51,11 +52,13 @@ pub(crate) fn set_call_prompt(
 #[tauri::command]
 pub(crate) fn clear_call_prompt_apps(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<Settings, String> {
     main_only(&window)?;
     let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
     runtime.call_prompt.clear_not_for();
+    crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
     Ok(runtime.call_prompt.settings().clone())
 }
 
@@ -73,6 +76,8 @@ pub(crate) fn respond_to_call_prompt(
         let start = runtime
             .call_prompt
             .answer(id, answer, std::time::Instant::now());
+        // Not for this app and Don't ask again are saved choices.
+        crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
         changed(&app, &mut runtime);
         start
     };

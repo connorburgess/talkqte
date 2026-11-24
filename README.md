@@ -118,7 +118,9 @@ A default-off [bounded transcript-history option](docs/cue-evaluator.md#opt-in-b
 
 **Focus** is optional. Leaving the field applies its lines, including edits made while an earlier save is pending. Clear and accepted suggestions use the same ordered saves. Rejected lines stay editable with an inline retry message; delayed replies preserve newer drafts and keyboard focus. See the [Focus recovery checks](docs/focus-save-recovery.md).
 
-**Your name** in Settings is optional and kept only until quit. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
+**Saved settings:** the choices in Settings (your name, transcription language, notes model, question size and timing, companion position preset and whether it shows, panel sizes, and the call-starting offer) are kept between launches in one small settings file on this Mac, readable by your account only. It never holds keys, which stay in the Keychain, or anything from a meeting. **Settings → Saved settings → Reset settings** deletes it ([what it holds and where](PRIVACY.md)).
+
+**Your name** in Settings is optional and remembered between launches. Enter or leaving the field applies it to phrase-based **Asked you** cues. Later edits survive a slow save; rejected names show an inline error and keep the last applied name unless you have already typed a newer draft. See the [name recovery checks](docs/name-save-recovery.md).
 
 ## Fictional cue lab
 
