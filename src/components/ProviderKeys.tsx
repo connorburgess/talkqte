@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import {
   cueUsage,
+  keyStoreName,
   keysStatus,
   removeKey,
   setKey,
@@ -12,6 +13,7 @@ import {
   type CueUsage,
   type KeyProvider,
   type KeyStatus,
+  type KeyStore,
   type KeysStatus,
 } from '../lib/providerKeys';
 import { MeetingNotesModel } from './MeetingNotesModel';
@@ -53,11 +55,26 @@ export function isKeysStatus(value: unknown): value is KeysStatus {
   );
 }
 
-function stateText(name: string, status: KeyStatus | undefined) {
+function unreadableText(store: KeyStore | undefined) {
+  if (store && !store.available) return 'Cannot be saved on this system yet';
+  switch (store?.kind) {
+    case 'credentialManager':
+      return 'Could not be read from Windows Credential Manager. Save the key again.';
+    case 'secretService':
+      return 'Could not be read from the keyring. Unlock it or allow access, or save the key again.';
+    default:
+      return 'Could not be read from the Keychain. Unlock it or allow access, or save the key again.';
+  }
+}
+
+function stateText(
+  name: string,
+  status: KeyStatus | undefined,
+  store: KeyStore | undefined,
+) {
   if (!status) return 'Checking…';
   if (status.state === 'notSet') return 'Not set';
-  if (status.state === 'unreadable')
-    return 'Could not be read from the Keychain. Unlock it or allow access, or save the key again.';
+  if (status.state === 'unreadable') return unreadableText(store);
   if (status.state === 'rejected')
     return `Rejected by ${name}. Replace it with a new key.`;
   return status.verified ? 'Set and checked' : 'Set, not checked yet';
@@ -75,6 +92,26 @@ function message(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
   return fallback;
+}
+
+function removedFrom(kind: KeyStore['kind'] | undefined) {
+  if (kind === 'credentialManager') return 'Windows Credential Manager';
+  if (kind === 'secretService') return 'the keyring';
+  return 'the Keychain';
+}
+
+/** Shown instead of a per-key error when this system has no store to keep
+ * keys in (Linux without a keyring service). Nothing is kept elsewhere. */
+function NoKeyStore({ store }: { store: KeyStore | undefined }) {
+  if (!store || store.available) return null;
+  return (
+    <p className="provider-keys-error" role="status">
+      Keys cannot be saved on this system yet. TalkQTE keeps them only in{' '}
+      {keyStoreName(store.kind)}, and none answered for this login. On Ubuntu,
+      sign in to a desktop session with GNOME Keyring (Passwords and Keys)
+      unlocked, then reopen Settings. Live sessions need both keys.
+    </p>
+  );
 }
 
 const dollars = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
@@ -127,10 +164,11 @@ export function ProviderKeys() {
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
           TalkQTE runs on your own accounts. Live sessions need both keys. Each
-          is kept in your Mac's Keychain and is never shown again. Nothing is
-          sent to either provider until you approve a session's processing
-          review.
+          is kept in {keyStoreName(status?.store?.kind)} and is never shown
+          again. Nothing is sent to either provider until you approve a
+          session's processing review.
         </p>
+        <NoKeyStore store={status?.store} />
         {unavailable && (
           <p className="provider-keys-error" role="alert">
             Your keys could not be read. Try again later.
@@ -143,6 +181,7 @@ export function ProviderKeys() {
             key={provider.id}
             provider={provider}
             status={status?.[provider.id]}
+            store={status?.store}
             onStatus={(next) => {
               setStatus(next);
               setUnavailable(false);
@@ -178,11 +217,13 @@ export function ProviderKeysRows({
           Your keys could not be read. Try again later.
         </p>
       )}
+      <NoKeyStore store={status?.store} />
       {providers.map((provider) => (
         <KeyRow
           key={provider.id}
           provider={provider}
           status={status?.[provider.id]}
+          store={status?.store}
           showWhereToGet={showWhereToGet}
           onStatus={(next) => {
             setStatus(next);
@@ -197,11 +238,13 @@ export function ProviderKeysRows({
 function KeyRow({
   provider,
   status,
+  store,
   showWhereToGet = false,
   onStatus,
 }: {
   provider: (typeof providers)[number];
   status: KeyStatus | undefined;
+  store: KeyStore | undefined;
   showWhereToGet?: boolean;
   onStatus: (status: KeysStatus) => void;
 }) {
@@ -210,7 +253,8 @@ function KeyRow({
   const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const stored = !!status && status.state !== 'notSet';
+  const noStore = !!store && !store.available;
+  const stored = !!status && status.state !== 'notSet' && !noStore;
 
   const run = async (
     action: 'save' | 'test' | 'remove',
@@ -260,7 +304,9 @@ function KeyRow({
             busy === 'test' ? 'is-checking' : stateClass(status)
           }`}
         >
-          {busy === 'test' ? 'Checking…' : stateText(provider.name, status)}
+          {busy === 'test'
+            ? 'Checking…'
+            : stateText(provider.name, status, store)}
         </p>
       </div>
       <p id={`${id}-role`} className="provider-key-role">
@@ -282,6 +328,7 @@ function KeyRow({
         autoCapitalize="off"
         spellCheck={false}
         maxLength={512}
+        disabled={noStore}
         aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
         onChange={(event) => setDraft(event.target.value)}
       />
@@ -289,7 +336,7 @@ function KeyRow({
         <button
           type="submit"
           className="primary-button provider-key-btn"
-          disabled={!draft.trim() || busy !== null}
+          disabled={noStore || !draft.trim() || busy !== null}
         >
           {busy === 'save' ? 'Saving…' : 'Save key'}
         </button>
@@ -318,7 +365,8 @@ function KeyRow({
             void run(
               'remove',
               () => removeKey(provider.id),
-              () => `${provider.name} key removed from the Keychain.`,
+              () =>
+                `${provider.name} key removed from ${removedFrom(store?.kind)}.`,
             )
           }
         >

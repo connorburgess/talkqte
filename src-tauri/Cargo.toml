@@ -69,6 +69,19 @@ icu_normalizer = { version = "2", default-features = false, features = ["compile
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The person's own provider keys in Windows Credential Manager (CredReadW,
+# CredWriteW, CredDeleteW). The same windows-sys release Tauri, tokio and
+# others already link on Windows; only these two API families are added.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+
+# The person's own provider keys in the desktop keyring through the
+# freedesktop Secret Service. Built on the `dbus` crate (libdbus) that the
+# Tauri window layer already links on Linux; no cryptography features, so it
+# adds no other crate. Pinned.
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus-secret-service = { version = "=4.2.0", default-features = false }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 cpal = { version = "0.18.2", default-features = false }
 block2 = "0.6"
