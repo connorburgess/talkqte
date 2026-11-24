@@ -561,6 +561,8 @@ function launcher({
         const baseKeys = [
           'TALKQTE_DEV_STOP_SIGNAL',
           'TALKQTE_DEV_STOP_AFTER_S',
+          // Also how the app knows this is a lab run, which neither reads
+          // nor writes the person's settings file (src-tauri/src/settings.rs).
           'TALKQTE_DEV_LAB_RUN_ID',
           // Forwarded only when this launch was prepared for a turn-off.
           ...(turnOff ? ['TALKQTE_DEV_OFF_SIGNAL'] : []),

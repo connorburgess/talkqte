@@ -33,8 +33,11 @@ presses Start live session and approves cue processing, as always. TalkQTE
 never starts a session by itself.
 
 Not for *App* skips that application; Don't ask again turns the prompt off.
-Both, and the setting itself, last until the app quits, as every TalkQTE
-setting does today. The setting is **off by default**.
+Both, and the setting itself, are kept in the [settings file](../PRIVACY.md)
+and apply at the next launch. Not for *App* is kept as the application's
+bundle identifier only, and only for the known meeting applications and
+browsers below, which Settings names from a fixed list after a restart. The
+setting is **off by default**.
 
 ## Signals assessed
 
@@ -65,11 +68,10 @@ watcher thread checks the setting and returns before any read.
 
 ## The app has to be running
 
-TalkQTE notices a call only while it is open. Making that dependable needs a
+TalkQTE notices a call only while it is open. The setting is saved, so once
+turned on it stays on at the next launch. Making that dependable also needs a
 menu bar presence (so the notebook window can be closed) and an "Open at
 login" option; neither is in this slice, and neither should be on by default.
-Until settings persist across launches, the person has to turn the prompt on
-each time TalkQTE starts.
 
 ## Code and tests
 

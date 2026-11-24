@@ -8,7 +8,7 @@ interface Settings {
 }
 
 /** Settings: offer to start a session when a call seems to be starting.
- * Off until the person turns it on; for this launch only. */
+ * Off until the person turns it on; saved in the settings file. */
 export function CallPromptSetting() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
@@ -46,8 +46,9 @@ export function CallPromptSetting() {
           that stays on this Mac. It never starts a session by itself: Start
           opens the notebook, where you choose and approve as usual. A browser
           call (Google Meet, for example) looks like any other use of the
-          microphone in a browser. TalkQTE has to be running to notice. This
-          setting lasts until you quit.
+          microphone in a browser. TalkQTE has to be running to notice. It
+          remembers this setting, and the apps you said not to ask about, by
+          their identifiers only.
         </p>
         {settings && (
           <label className="processing-option call-prompt-setting-option">

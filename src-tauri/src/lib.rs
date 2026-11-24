@@ -99,6 +99,8 @@ pub mod provider_keys;
     )
 ))]
 mod selected_attestation;
+pub mod settings;
+mod settings_commands;
 pub mod timing_log;
 pub mod transcription;
 
@@ -416,6 +418,20 @@ fn change(
     result
 }
 
+/// A change to a saved display choice or the name: applied as any change,
+/// then written to the settings file once it took effect.
+fn change_setting(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    action: impl FnOnce(&mut Engine) -> Result<(), String>,
+) -> Result<(), String> {
+    change(app, state, action)?;
+    if let Ok(runtime) = state.0.lock() {
+        settings_commands::record_engine(app, &runtime.engine);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn snapshot(
     window: tauri::WebviewWindow,
@@ -514,7 +530,7 @@ fn set_companion_position(
 ) -> Result<(), String> {
     // A preset replaces wherever the person dragged the window to.
     companion::reset_drag(&app);
-    change(&app, &state, |e| {
+    change_setting(&app, &state, |e| {
         e.set_companion_position(value);
         Ok(())
     })
@@ -525,7 +541,7 @@ fn set_question_size(
     state: tauri::State<AppState>,
     value: QuestionSize,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
+    change_setting(&app, &state, |e| {
         e.set_question_size(value);
         Ok(())
     })
@@ -544,7 +560,7 @@ fn set_user_name(
     state: tauri::State<AppState>,
     name: Option<String>,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.set_user_name(name))
+    change_setting(&app, &state, |e| e.set_user_name(name))
 }
 #[tauri::command]
 fn set_focus(
@@ -560,7 +576,7 @@ fn set_sensitivity(
     state: tauri::State<AppState>,
     value: Sensitivity,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
+    change_setting(&app, &state, |e| {
         e.set_sensitivity(value);
         Ok(())
     })
@@ -571,7 +587,7 @@ fn set_overlay(
     state: tauri::State<AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    change(&app, &state, |e| {
+    change_setting(&app, &state, |e| {
         e.set_overlay(enabled);
         Ok(())
     })
@@ -1768,11 +1784,19 @@ pub fn run() {
             stop_live_session,
             microphone::microphone_snapshot,
             microphone::start_microphone,
-            stop_microphone
+            stop_microphone,
+            settings_commands::settings_status,
+            settings_commands::panel_sizes,
+            settings_commands::set_panel_sizes,
+            settings_commands::reset_settings
         ])
         .setup(|app| {
+            // The person's saved settings, before anything is published. A
+            // lab run reads none (settings.rs).
+            settings_commands::load(app.handle());
             // A lab launch may give the user's name; it is set before the
-            // first session, as if typed in Settings.
+            // first session, as if typed in Settings, over any saved name,
+            // and is never written to the settings file.
             #[cfg(debug_assertions)]
             {
                 dev_user_name::initialize();

@@ -70,6 +70,26 @@ const applicationAudio: unknown[] = [];
 const liveStarts: unknown[] = [];
 // The call-starting prompt's settings and the companion's answers.
 let callPrompt = { enabled: false, notFor: [] as string[] };
+/** The settings file, as the stand-in keeps it: set
+ * `window.standInSavedSettings` before loading to start from saved values. */
+const savedSettings = {
+  status: { saving: 'on' } as { saving: string; error?: string },
+  panels: { sidebarWidth: null, notesRatio: null } as {
+    sidebarWidth: number | null;
+    notesRatio: number | null;
+  },
+  panelWrites: 0,
+  resets: 0,
+  ...(
+    window as typeof window & {
+      standInSavedSettings?: Partial<{
+        status: { saving: string; error?: string };
+        panels: { sidebarWidth: number | null; notesRatio: number | null };
+      }>;
+    }
+  ).standInSavedSettings,
+};
+
 const callPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
 let host: ApplicationAudioStatus | null = null;
@@ -489,6 +509,21 @@ mockIPC(
             };
         return value;
       }
+      case 'settings_status':
+        return structuredClone(savedSettings.status);
+      case 'panel_sizes':
+        return structuredClone(savedSettings.panels);
+      case 'set_panel_sizes':
+        savedSettings.panels = structuredClone(
+          (args as { panels: typeof savedSettings.panels }).panels,
+        );
+        savedSettings.panelWrites++;
+        return structuredClone(savedSettings.panels);
+      case 'reset_settings':
+        savedSettings.resets++;
+        savedSettings.panels = { sidebarWidth: null, notesRatio: null };
+        callPrompt = { enabled: false, notFor: [] };
+        return;
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
       case 'set_call_prompt':
@@ -617,6 +652,7 @@ declare global {
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
       callPrompt: () => { enabled: boolean; notFor: string[] };
+      savedSettings: () => typeof savedSettings;
       /** The companion's Start on an offer, as the native side relays it. */
       callPromptStart: (
         application: { name: string; bundleId: string } | null,
@@ -681,6 +717,7 @@ declare global {
 window.permissionTest = permissionFixture;
 window.providerKeysTest = providerKeysFixture.providerKeysTest;
 window.captureTest = {
+  savedSettings: () => structuredClone(savedSettings),
   send: sendProcessing,
   state: () => structuredClone(processing),
   targets: stopTargets,

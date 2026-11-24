@@ -104,6 +104,11 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-call-prompt-settings",
         "allow-set-call-prompt",
         "allow-clear-call-prompt-apps",
+        // The settings file: whether it is saved, panel sizes, and Reset.
+        "allow-settings-status",
+        "allow-panel-sizes",
+        "allow-set-panel-sizes",
+        "allow-reset-settings",
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",
