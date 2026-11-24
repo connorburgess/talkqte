@@ -118,7 +118,11 @@ These defaults are an owner decision that is still open:
 - **Per session only**: there is no per-launch or per-day cap; each new
   session starts again from zero.
 - **Requests**: at most 400 per session, at least two seconds apart, one at a
-  time.
+  time. In a scripted hour with both sources and a line about every three
+  seconds (`anthropic_api::sustained_tests`), requests went out about every
+  three seconds and the cap ended cues after about 22 minutes, at an estimated
+  $0.07 with that test's token counts; the spend estimate was nowhere near its
+  cap. A real meeting's rate and request size have not been measured.
 - **Spend**: at most an estimated $0.50 per session. Before each request, the
   lab's worst case for it is computed (prompt, input and schema at about two
   bytes per token, plus 1,500 tokens, plus the full output bound). If what the

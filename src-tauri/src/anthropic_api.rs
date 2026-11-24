@@ -762,3 +762,7 @@ fn registered<T: Transport>(
 #[cfg(test)]
 #[path = "anthropic_api_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sustained_tests.rs"]
+mod sustained_tests;

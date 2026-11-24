@@ -34,6 +34,14 @@ If a problem is not listed, the [feedback route](#reporting-a-problem) at the en
 | Lines are wrong or missing                                            | Recognition with this code has not been checked against the real service or in real rooms.                   | Record what was said and what appeared, with the setup, when reporting it.                                                                      |
 | "Transcription by Deepgram stopped: …"                                | Cloud transcription ended for the reason given, and the live session ended with it. Nothing fell back to another transcription service. | See [what stops it](cloud-transcription.md#what-stops-it), deal with the cause, then start a new session.                                       |
 
+## Long sessions
+
+| You see | What it means | What to do |
+| --- | --- | --- |
+| "About 10 minutes of transcription are left before this session's 120-minute cap; then the session ends." | A session may send 120 minutes of audio to Deepgram. With your microphone and an application, both streams count, so a two-source meeting reaches the cap after about an hour. The notice counts down from ten minutes of meeting left and is read out once. | Stop and start a new session to continue after the cap. |
+| Cues stop partway through a busy meeting with "this session's request limit was reached" | A session sends at most 400 cue requests, at least two seconds apart. In a scripted two-source hour with a line about every three seconds, the limit was reached after about 22 minutes; quieter meetings last longer. The transcript continues. | Start a new session for more cues. The limit is an open owner decision ([own-key cues](own-key-cues.md#caps-and-the-spend-estimate)). |
+| The transcript shows only the most recent lines | The notebook shows the last 400 lines. A kept meeting's export and meeting notes still use the whole meeting, up to 4,000 lines (about two hours of talk). | Nothing. Past 4,000 lines the export says its start is not included, and meeting notes are refused rather than written from part of the meeting. |
+
 ## Speech model left from an earlier version
 
 Earlier development builds could download a speech model for on-device transcription. That was removed on 16 November 2026. A model downloaded before then stays at `<app data folder>/models/ggml-tiny.en.bin` (on macOS, `~/Library/Application Support/com.talkqte.desktop/models/`). TalkQTE no longer reads or deletes it; delete that `models` folder yourself if you want the space back.

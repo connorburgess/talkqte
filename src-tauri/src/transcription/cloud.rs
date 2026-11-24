@@ -785,6 +785,12 @@ impl Budget {
         )))
     }
 
+    /// How much audio is still allowed.
+    pub fn left(&self) -> Duration {
+        let samples = self.0.load(std::sync::atomic::Ordering::Acquire);
+        Duration::from_millis(samples * 1000 / SAMPLE_RATE as u64)
+    }
+
     /// Takes up to `want` samples from what is left; returns how many.
     pub fn reserve(&self, want: u64) -> u64 {
         use std::sync::atomic::Ordering;
