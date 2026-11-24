@@ -328,6 +328,9 @@ svg {
   align-items: center;
   gap: var(--space-8);
 }
+.microphone-activity.is-active {
+  color: var(--accent-ink);
+}
 .microphone-panel p {
   margin: var(--space-8) 0 0;
   font-size: 14px;
@@ -384,11 +387,12 @@ svg {
   background: var(--border);
   border-radius: 1px;
 }
-.status-dot.running {
+.status-dot.running,
+.status-dot.preparing {
   background: var(--accent-ink);
 }
 .status-dot.paused {
-  background: var(--muted);
+  background: var(--border);
 }
 .session-state .status-dot {
   margin-top: 10px;
@@ -515,15 +519,18 @@ svg {
 .tabs button[aria-selected='true'] {
   color: var(--ink);
   font-weight: 600;
+}
+.tabs button[aria-selected='true'] .tab-label {
   text-decoration: underline;
   text-decoration-thickness: 2px;
-  text-underline-offset: 8px;
+  text-underline-offset: 10px;
 }
-.tabs button > span {
+.tabs .tab-count {
+  padding-left: 6px;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
-  text-decoration: none;
+  font-weight: 400;
 }
 .note-editor {
   width: 100%;
@@ -622,7 +629,7 @@ svg {
   padding-top: var(--space-8);
 }
 .transcript-segment {
-  padding: var(--space-16) 0;
+  padding: var(--space-12) 0;
 }
 .transcript-segment + .transcript-segment {
   border-top: 1px solid var(--line);
@@ -642,9 +649,9 @@ svg {
   font-variant-numeric: tabular-nums;
 }
 .transcript-segment p {
-  font-size: 16px;
-  line-height: 1.75;
-  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-top: var(--space-4);
 }
 .context-panel {
   margin-top: var(--space-8);
@@ -755,6 +762,8 @@ svg {
 .context-freshness {
   font-family: var(--font-mono);
   font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .context-list li p {
   margin: 6px 0 0;
@@ -926,9 +935,10 @@ svg {
 }
 .setting p {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 1.55;
   max-width: 60ch;
-  margin-top: var(--space-8);
+  margin-top: 6px;
 }
 .setting select {
   max-width: 100%;
@@ -954,9 +964,10 @@ svg {
 }
 .setting .appearance-example {
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--ink);
-  margin-top: 20px;
+  margin-top: var(--space-12);
 }
 .setting input:not([type='text']) {
   accent-color: var(--ink);
@@ -1045,8 +1056,9 @@ svg {
 }
 .export-dialog > p {
   color: var(--muted);
-  font-size: 15px;
-  margin: 10px 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  margin: var(--space-8) 0 14px;
 }
 .export-dialog pre {
   white-space: pre-wrap;
@@ -1055,7 +1067,7 @@ svg {
   background: var(--band);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  padding: 16px;
+  padding: 14px;
   max-height: 45vh;
   overflow: auto;
 }
@@ -1086,13 +1098,14 @@ svg {
   flex-direction: column;
   height: 100vh;
   overflow-y: auto;
-  padding: 6px;
+  padding: 0;
 }
 .companion-shell {
   background: var(--companion-bg);
   border: 1px solid var(--companion-border);
   border-radius: var(--radius-dock);
   box-shadow: var(--shadow-dock);
+  padding: 6px;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -1107,7 +1120,7 @@ svg {
   align-items: center;
   gap: 2px;
   min-height: 44px;
-  padding: 0 6px 0 14px;
+  padding: 0 2px 0 8px;
   color: var(--companion-muted);
 }
 /* Kept by its bottom edge, the window has its bar at the bottom. The bar
@@ -1153,9 +1166,9 @@ svg {
 /* A state the glyph cannot say on its own is spelled out, on one line. */
 .companion-status [role='status']:not(.visually-hidden) {
   color: var(--companion-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 400;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;

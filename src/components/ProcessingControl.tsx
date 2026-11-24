@@ -439,7 +439,9 @@ export function ProcessingControl({
         <h2 id="processing-title" ref={statusHeading} tabIndex={-1}>
           Cue processing
         </h2>
-        <span role="status">{phase}</span>
+        <span role="status" className={active ? 'is-active' : undefined}>
+          {phase}
+        </span>
       </div>
       {!status && (
         <p className="processing-capture">
