@@ -100,6 +100,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-review-processing-scope",
         "allow-approve-processing-scope",
         "allow-processing-snapshot",
+        // The call-starting prompt's settings are the notebook's alone.
+        "allow-call-prompt-settings",
+        "allow-set-call-prompt",
+        "allow-clear-call-prompt-apps",
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",
@@ -120,7 +124,9 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     // entry is a privacy decision to make here and in PRIVACY.md, not a
     // default. `companion_anchor` returns only "top" or "bottom", from the
     // window's placement preset and whether it was dragged: no
-    // conversation, note or position.
+    // conversation, note or position. `respond_to_call_prompt` answers a
+    // call-starting offer: Start only brings the notebook forward with the
+    // offer's sources chosen; nothing is started, listed or captured.
     let companion = set(&[
         "core:event:allow-listen",
         "core:event:allow-unlisten",
@@ -134,6 +140,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-microphone-snapshot",
         "allow-stop-microphone",
         "allow-stop-live-session",
+        "allow-respond-to-call-prompt",
     ]);
     assert!(
         cue.is_subset(&companion),

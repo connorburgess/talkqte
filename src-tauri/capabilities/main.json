@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -67,6 +69,10 @@
     "allow-cancel-model-download",
     "allow-remove-model",
     "allow-start-live-session",
-    "allow-stop-live-session"
+    "allow-stop-live-session",
+    "allow-call-prompt-settings",
+    "allow-set-call-prompt",
+    "allow-clear-call-prompt-apps",
+    "allow-respond-to-call-prompt"
   ]
 }

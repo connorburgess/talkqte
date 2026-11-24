@@ -13,6 +13,10 @@ fn main() {
         tauri_build::AppManifest::new().commands(with_development_commands(&[
             "snapshot",
             "processing_snapshot",
+            "call_prompt_settings",
+            "set_call_prompt",
+            "clear_call_prompt_apps",
+            "respond_to_call_prompt",
             "stop_capture",
             "review_processing_scope",
             "approve_processing_scope",

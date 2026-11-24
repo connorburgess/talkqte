@@ -295,6 +295,7 @@ impl Runtime {
     pub(crate) fn cue_snapshot(&self) -> crate::engine::CueSnapshot {
         let mut snapshot = self.engine.cue_snapshot();
         snapshot.source_session = self.source_session_running();
+        snapshot.call_prompt = self.call_prompt.prompt().cloned();
         snapshot
     }
 

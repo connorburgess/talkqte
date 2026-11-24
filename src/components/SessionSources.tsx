@@ -13,6 +13,9 @@ export interface SourceChoice {
   mode: SourceMode;
   /** The listed application chosen, for `both` and `application`. */
   application: { id: string; name: string } | null;
+  /** An application to choose once listed, matched by bundle identifier:
+   * the one a call-starting offer named. Nothing is listed for it. */
+  wanted?: { name: string; bundleId: string };
 }
 export const microphoneOnly: SourceChoice = {
   mode: 'microphone',
@@ -97,6 +100,17 @@ export function SessionSources({
     };
   }, []);
 
+  // The application a call-starting offer named is chosen once the person
+  // has listed applications and it is there.
+  useEffect(() => {
+    if (!value.wanted || value.application || !status) return;
+    const wanted = value.wanted;
+    const match = status.choices.find(
+      (item) => item.bundleId === wanted.bundleId,
+    );
+    if (match) onChange({ ...value, application: match, wanted: undefined });
+  }, [status, value, onChange]);
+
   // A chosen application that is no longer listed is no longer chosen.
   useEffect(() => {
     if (
@@ -152,6 +166,12 @@ export function SessionSources({
       </fieldset>
       {needsApplication && (
         <div className="session-sources-application">
+          {value.wanted && !value.application && (
+            <p className="processing-muted" role="status">
+              For the call in {value.wanted.name}: list applications, check it
+              is chosen, then start.
+            </p>
+          )}
           <p className="processing-muted">
             {status?.scopeNotice ??
               'Audio from all windows of this application may be included.'}{' '}

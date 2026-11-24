@@ -69,6 +69,10 @@ pub(crate) use crate::engine::{SourcePhase as Phase, SourceProblem as Problem};
 pub(crate) struct Choice {
     pub id: String,
     pub name: String,
+    /// So the notebook can match an application a call-starting offer named
+    /// by its identity, not its display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -823,6 +827,7 @@ impl Host {
                 .map(|application| Choice {
                     id: application.selection_id().to_owned(),
                     name: application.name().to_owned(),
+                    bundle_id: application.traits().map(|traits| traits.bundle_id.clone()),
                 })
                 .collect(),
             problem,

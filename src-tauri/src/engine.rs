@@ -558,6 +558,10 @@ pub struct CueSnapshot {
     /// no microphone. Development builds only; absent otherwise.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub source_session: bool,
+    /// A call seems to be starting: the offer to start a session, when the
+    /// person has turned that prompt on. Metadata only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_prompt: Option<crate::call_prompt::Prompt>,
     /// Whether conversation lines may leave the device for a model, and
     /// whether a request is being sent. Absent without a model connection.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -756,6 +760,7 @@ impl Engine {
             question_size: self.state.question_size,
             sensitivity: self.state.sensitivity,
             source_session: false,
+            call_prompt: None,
             model: match self.evaluation_status() {
                 Some(EvaluationStatus::Unavailable(_)) if self.state.live => {
                     Some(ModelLink::Stopped)

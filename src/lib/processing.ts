@@ -171,7 +171,7 @@ export interface ApplicationAudioStatus {
   application: string | null;
   /** The review or operation, for Start and Stop. */
   operation: string | null;
-  choices: { id: string; name: string }[];
+  choices: { id: string; name: string; bundleId?: string }[];
   problem: string | null;
   /** The last attempt came from the development launch setting. */
   bySetting?: boolean;
