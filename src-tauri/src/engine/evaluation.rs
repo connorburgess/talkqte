@@ -80,6 +80,10 @@ pub enum EvaluationIssue {
     KeyRejected,
     /// The person's own key was removed or the Keychain could not be read.
     KeyUnavailable,
+    /// Anthropic is limiting requests for the person's own key (429).
+    KeyRateLimited,
+    /// The person's Anthropic account has no credit for more requests.
+    Billing,
     /// The session's estimated spend cap was reached.
     SpendLimit,
     /// The session's request cap was reached, with the person's own key.
@@ -371,7 +375,9 @@ impl Engine {
             Failure::Credentials if self.is_own_key() => EvaluationIssue::KeyUnavailable,
             Failure::SpendLimit => EvaluationIssue::SpendLimit,
             Failure::Credentials => EvaluationIssue::Credentials,
-            Failure::UsageLimit => EvaluationIssue::UsageLimit,
+            Failure::UsageLimit if self.is_own_key() => EvaluationIssue::KeyRateLimited,
+            Failure::Billing if self.is_own_key() => EvaluationIssue::Billing,
+            Failure::UsageLimit | Failure::Billing => EvaluationIssue::UsageLimit,
             Failure::Unreachable => EvaluationIssue::Unreachable,
             // Only the lab can refuse, and there the request is skipped
             // before this point; anywhere else it is an invalid reply.
@@ -908,6 +914,7 @@ impl Engine {
                     Failure::Expired => "timeout",
                     Failure::InvalidDecision => "invalid_reply",
                     Failure::UsageLimit => "rate_limited",
+                    Failure::Billing => "billing",
                     Failure::InvalidInput => "input_limit",
                     Failure::SignIn => "sign_in",
                     Failure::Credentials => "credentials",

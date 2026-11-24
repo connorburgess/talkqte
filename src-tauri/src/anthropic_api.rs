@@ -230,9 +230,42 @@ impl TokenUsage {
 
 /// One HTTP exchange. The network transport posts to the Messages API;
 /// tests script the reply.
-/// No reply was received: the connection failed or timed out. No detail.
+/// No reply was received. No detail beyond whether the request could have
+/// left the Mac.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NoReply;
+pub enum NoReply {
+    /// Nothing was sent: the host name did not resolve, no connection or
+    /// secure channel was made. Nothing reached Anthropic.
+    Unsent,
+    /// A connection was made, or may have been, and no reply came back.
+    Lost,
+}
+
+impl NoReply {
+    fn from_ureq(error: &ureq::Error) -> Self {
+        use std::io::ErrorKind;
+        match error {
+            ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Tls(_)
+            | ureq::Error::Rustls(_)
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => Self::Unsent,
+            ureq::Error::Io(io)
+                if matches!(
+                    io.kind(),
+                    ErrorKind::ConnectionRefused
+                        | ErrorKind::NotConnected
+                        | ErrorKind::AddrNotAvailable
+                        | ErrorKind::NetworkUnreachable
+                        | ErrorKind::HostUnreachable
+                ) =>
+            {
+                Self::Unsent
+            }
+            _ => Self::Lost,
+        }
+    }
+}
 
 pub trait Transport: Send + 'static {
     /// Posts `body` with the key, within `timeout`. Ok carries the status and
@@ -243,6 +276,20 @@ pub trait Transport: Send + 'static {
 pub struct Reply {
     pub status: u16,
     pub body: Box<dyn Read + Send>,
+}
+
+/// How much of a refusal is read to tell a billing refusal from another.
+const REFUSAL_BYTES: u64 = 4 * 1024;
+
+/// Whether a 400 is Anthropic refusing the request for the account's credit
+/// balance ("Your credit balance is too low…"). Only the start of the body
+/// is read and nothing of it is kept or shown.
+fn refused_for_credit(body: Box<dyn Read + Send>) -> bool {
+    let mut text = String::new();
+    if body.take(REFUSAL_BYTES).read_to_string(&mut text).is_err() {
+        return false;
+    }
+    text.to_ascii_lowercase().contains("credit balance")
 }
 
 /// The Messages API over HTTPS: ureq with rustls and the bundled web roots,
@@ -267,7 +314,7 @@ impl Transport for Network {
             .header("content-type", "application/json")
             .header("accept", "text/event-stream")
             .send(body)
-            .map_err(|_| NoReply)?;
+            .map_err(|error| NoReply::from_ureq(&error))?;
         let status = response.status().as_u16();
         let body = response
             .into_body()
@@ -417,9 +464,12 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         drop(key);
         let reply = match reply {
             Ok(reply) => reply,
-            Err(NoReply) => {
-                // Whatever reached the provider may still be billed.
-                self.usage.charge(worst);
+            Err(no_reply) => {
+                // Whatever reached the provider may still be billed; nothing
+                // that never left is.
+                if no_reply == NoReply::Lost {
+                    self.usage.charge(worst);
+                }
                 return Err(if cancel.is_cancelled() {
                     Failure::Cancelled
                 } else {
@@ -437,6 +487,9 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
                 self.usage.charge(worst);
                 return Err(Failure::UsageLimit);
             }
+            // Nothing was generated, so nothing is charged.
+            402 => return Err(Failure::Billing),
+            400 if refused_for_credit(reply.body) => return Err(Failure::Billing),
             _ => {
                 self.usage.charge(worst);
                 return Err(Failure::Unreachable);

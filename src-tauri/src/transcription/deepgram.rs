@@ -114,6 +114,7 @@ pub fn handshake_failure(status: u16) -> SttFailure {
         401 | 403 => SttFailure::Auth,
         402 => SttFailure::Quota,
         429 => SttFailure::RateLimited,
+        500..=599 => SttFailure::Unavailable,
         _ => SttFailure::Network,
     }
 }
@@ -269,6 +270,9 @@ const STALL_AFTER: Duration = Duration::from_secs(10);
 const SLOW_WRITE: Duration = Duration::from_secs(3);
 /// One second of 100 ms frames.
 const FRAMES_PER_READ: usize = 10;
+/// At most this much audio (two seconds) waits on the socket thread beyond
+/// the bounded queue.
+const MAX_PENDING_SAMPLES: usize = FRAME * 20;
 
 #[allow(clippy::too_many_arguments)]
 fn run(
@@ -288,8 +292,13 @@ fn run(
         if stop.load(Ordering::Acquire) {
             return;
         }
-        if let Some(token) = token.take() {
-            break token;
+        match token.take() {
+            Ok(Some(token)) => break token,
+            Ok(None) => {}
+            Err(failure) => {
+                let _ = events.send(SttEvent::Failed(failure));
+                return;
+            }
         }
         if timing.now() >= until {
             let _ = events.send(SttEvent::Failed(SttFailure::Settings));
@@ -328,7 +337,10 @@ fn run(
             return;
         }
         if closing.is_none() {
-            loop {
+            // Take from the bounded queue only while little is waiting here:
+            // if the socket falls behind, audio backs up in the queue, where
+            // it is dropped and counted, instead of piling up unbounded.
+            while pending.len() < MAX_PENDING_SAMPLES {
                 match queue.try_recv() {
                     Ok(block) => pending.extend(
                         block
@@ -597,12 +609,12 @@ const TOKEN_POLL: Duration = Duration::from_millis(50);
 /// Where the socket thread gets its credential: a fixed one, the owner-only
 /// file read when a valid token is there, or the stored key. The text is
 /// wiped once the handshake is sent.
-pub struct Token(Box<dyn FnMut() -> Option<Zeroizing<String>> + Send>);
+pub struct Token(Box<dyn FnMut() -> Result<Option<Zeroizing<String>>, SttFailure> + Send>);
 
 impl Token {
     pub fn from_file(path: std::path::PathBuf) -> Self {
         Self(Box::new(move || {
-            super::cloud::read_token(&path).ok().map(Zeroizing::new)
+            Ok(super::cloud::read_token(&path).ok().map(Zeroizing::new))
         }))
     }
 
@@ -612,21 +624,18 @@ impl Token {
     }
 
     /// Read once per stream attempt: a missing key, or a Keychain that
-    /// refuses or asks, is not asked again every poll. The stream then waits
-    /// out its token wait and stops with `settings`.
+    /// refuses or asks, is not asked again. The stream stops at once with
+    /// `key_unavailable`, so the person is told to check the key rather than
+    /// waiting out the token wait for a settings problem.
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
-        let mut asked = false;
         Self(Box::new(move || {
-            if std::mem::replace(&mut asked, true) {
-                return None;
-            }
             keys.get(crate::provider_keys::Provider::Deepgram)
-                .ok()
-                .map(|key| Zeroizing::new(key.expose().to_string()))
+                .map(|key| Some(Zeroizing::new(key.expose().to_string())))
+                .map_err(|_| SttFailure::KeyUnavailable)
         }))
     }
 
-    fn take(&mut self) -> Option<Zeroizing<String>> {
+    fn take(&mut self) -> Result<Option<Zeroizing<String>>, SttFailure> {
         (self.0)()
     }
 }
@@ -634,7 +643,7 @@ impl Token {
 impl From<String> for Token {
     fn from(token: String) -> Self {
         let mut token = Some(Zeroizing::new(token));
-        Self(Box::new(move || token.take()))
+        Self(Box::new(move || Ok(token.take())))
     }
 }
 
@@ -1100,13 +1109,15 @@ mod tests {
             Token::from_keys(keys),
             Duration::from_secs(60),
             Timing {
-                token_wait: Duration::from_millis(60),
+                // Long enough that only an immediate stop passes.
+                token_wait: Duration::from_secs(30),
                 ..Timing::default()
             },
         );
         stream.push(&[0.25; FRAME]).unwrap();
         let events = stream.finish(Duration::from_secs(2));
-        assert!(events.contains(&SttEvent::Failed(SttFailure::Settings)));
+        // Said as the key, not as development settings, and at once.
+        assert!(events.contains(&SttEvent::Failed(SttFailure::KeyUnavailable)));
         assert!(fake.0.lock().unwrap().url.is_none());
         assert_eq!(counting.1.load(Ordering::SeqCst), 1);
     }
@@ -1199,7 +1210,10 @@ mod tests {
         assert_eq!(handshake_failure(403), SttFailure::Auth);
         assert_eq!(handshake_failure(402), SttFailure::Quota);
         assert_eq!(handshake_failure(429), SttFailure::RateLimited);
-        assert_eq!(handshake_failure(500), SttFailure::Network);
+        // A server error is the provider's outage, not the person's network.
+        assert_eq!(handshake_failure(500), SttFailure::Unavailable);
+        assert_eq!(handshake_failure(503), SttFailure::Unavailable);
+        assert_eq!(handshake_failure(418), SttFailure::Network);
         let mut stream = DeepgramStream::start(
             Fake(Default::default(), Some(SttFailure::Auth)),
             ListenRequest::lab(),
@@ -1492,6 +1506,36 @@ mod tests {
         assert!(fake.0.lock().unwrap().closed);
     }
 
+    #[test]
+    fn a_socket_that_falls_behind_backs_audio_up_in_the_bounded_queue_not_without_limit() {
+        // Audio arrives every 5 ms and each frame takes 20 ms to send: the
+        // socket thread holds at most two seconds, the queue fills, and
+        // later audio is refused (the feed counts and discloses it) instead
+        // of collecting without limit on the socket thread.
+        let fake = Fake::default();
+        fake.0.lock().unwrap().send_delay = Duration::from_millis(20);
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(600),
+            Timing::default(),
+        );
+        let mut refused = 0;
+        for _ in 0..400 {
+            if stream.push(&[0.1; FRAME]).is_err() {
+                refused += 1;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let sent = fake.0.lock().unwrap().binary.len();
+        assert!(refused > 0, "nothing was refused; {sent} frames sent");
+        // Everything accepted is either sent, queued, or among the two
+        // seconds held on the socket thread.
+        assert!(400 - refused <= sent + QUEUE + MAX_PENDING_SAMPLES / FRAME + 1);
+        stream.abort();
+    }
+
     /// How many frames had gone out when a reply, arriving while 3 s of
     /// audio was backed up, was read.
     fn frames_before_reply(frames_per_read: usize) -> usize {
@@ -1526,9 +1570,10 @@ mod tests {
     #[test]
     fn replies_are_read_between_seconds_of_backed_up_audio() {
         // With a second of frames between reads, the reply is read long
-        // before the backlog is gone; without a limit, only after all of it.
-        assert!(frames_before_reply(FRAMES_PER_READ) < 25);
-        assert_eq!(frames_before_reply(usize::MAX), 30);
+        // before the backlog is gone; without a limit, only after all the
+        // socket thread holds (two seconds; the rest waits in the queue).
+        assert!(frames_before_reply(FRAMES_PER_READ) < 20);
+        assert_eq!(frames_before_reply(usize::MAX), MAX_PENDING_SAMPLES / FRAME);
     }
 
     #[test]

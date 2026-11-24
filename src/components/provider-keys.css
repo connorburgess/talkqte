@@ -47,7 +47,7 @@
   gap: var(--space-12);
   flex-wrap: wrap;
 }
-.provider-key h3 {
+.provider-key :is(h2, h3) {
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
