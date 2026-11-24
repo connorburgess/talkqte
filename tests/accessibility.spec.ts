@@ -280,11 +280,9 @@ test('the end of a session and the first marked echo are each said once, politel
   page,
 }) => {
   await liveSession(page);
-  const notice = page
-    .getByRole('status')
-    .filter({
-      hasText: /Live session ended\.|look like a repeat|looks like a/,
-    });
+  const notice = page.getByRole('status').filter({
+    hasText: /Live session ended\.|look like a repeat|looks like a/,
+  });
   await page.evaluate(
     (sources) =>
       window.liveTest.publish({
