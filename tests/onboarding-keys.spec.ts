@@ -88,7 +88,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   // Step 1: focus lands on step heading; Two ways shows Free active and Pro planned and disabled.
   const step1 = page.getByRole('heading', {
     name: 'One quiet cue beside your live call',
-    level: 2,
+    level: 1,
   });
   await expect(step1).toBeVisible();
   await expect(step1).toBeFocused();
@@ -118,7 +118,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
   const step2 = page.getByRole('heading', {
     name: 'Connect your service keys',
-    level: 2,
+    level: 1,
   });
   await expect(step2).toBeFocused();
   await expect(page.getByText('Step 2 of 4')).toBeVisible();
@@ -136,7 +136,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   await page.getByRole('button', { name: 'Next: Permissions' }).click();
   const step3 = page.getByRole('heading', {
     name: 'What macOS will ask later',
-    level: 2,
+    level: 1,
   });
   await expect(step3).toBeFocused();
   await expect(page.getByText('Step 3 of 4')).toBeVisible();
@@ -146,7 +146,7 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   await page.getByRole('button', { name: 'Next: First session' }).click();
   const step4 = page.getByRole('heading', {
     name: 'How a live session starts and stops',
-    level: 2,
+    level: 1,
   });
   await expect(step4).toBeFocused();
   await expect(page.getByText('Step 4 of 4')).toBeVisible();
@@ -307,7 +307,7 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(
     page.getByRole('heading', {
       name: 'One quiet cue beside your live call',
-      level: 2,
+      level: 1,
     }),
   ).toBeFocused();
 
@@ -329,7 +329,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await expect(
     page.getByRole('heading', {
       name: 'One quiet cue beside your live call',
-      level: 2,
+      level: 1,
     }),
   ).toBeFocused();
   await page.getByRole('button', { name: 'Next: Your keys' }).focus();
@@ -338,7 +338,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await expect(
     page.getByRole('heading', {
       name: 'Connect your service keys',
-      level: 2,
+      level: 1,
     }),
   ).toBeFocused();
   const anthropic = providerRow(page, 'Anthropic');
@@ -353,7 +353,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await expect(
     page.getByRole('heading', {
       name: 'What macOS will ask later',
-      level: 2,
+      level: 1,
     }),
   ).toBeFocused();
 
@@ -362,7 +362,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await expect(
     page.getByRole('heading', {
       name: 'How a live session starts and stops',
-      level: 2,
+      level: 1,
     }),
   ).toBeFocused();
 

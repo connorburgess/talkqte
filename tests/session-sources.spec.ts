@@ -77,9 +77,11 @@ test('dropped echoes are counted and a stopped application is said plainly', asy
     both,
   );
   await expect(
-    page.getByText(
-      "2 microphone lines look like a repeat of Fictional Call's sound through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.",
-    ),
+    page
+      .getByRole('region', { name: 'Session' })
+      .getByText(
+        "2 microphone lines look like a repeat of Fictional Call's sound through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.",
+      ),
   ).toBeVisible();
   await page.evaluate(
     (sources) =>
