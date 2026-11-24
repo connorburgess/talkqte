@@ -60,7 +60,7 @@ The direction is to grow from a proof of concept into a dependable AI companion 
 
 These are development milestones, not announced release dates or current capabilities. Integrations, reliability, and platform feasibility are planned alongside the core experience; each supported release must work end to end. See the [development milestones](docs/initial-rollout.md) and [detailed roadmap](ROADMAP.md).
 
-**Platform direction:** macOS first, Windows next. Ubuntu/Linux is an exploratory track. iPhone and Android are future companion goals, including receiving cues while using Google Meet on a phone; same-phone call access still needs to be proven. See the [platform plan](docs/platforms.md) and [mobile feasibility plan](docs/mobile.md).
+**Platform direction:** macOS first, Windows next. Ubuntu/Linux is an exploratory track. Unsigned Windows and Ubuntu test builds come from CI on each pull request: they keep keys in Credential Manager or the desktop keyring and offer microphone-only live sessions, but have not been run on a real Windows PC or Ubuntu desktop, and hearing another application, the call-starting offer and the companion over full-screen apps are macOS-only ([what each build does](docs/platforms.md#what-each-build-does-by-capability)). iPhone and Android are future companion goals, including receiving cues while using Google Meet on a phone; same-phone call access still needs to be proven. See the [platform plan](docs/platforms.md) and [mobile feasibility plan](docs/mobile.md).
 
 [Follow development on GitHub](https://github.com/connorburgess/talkqte).
 
