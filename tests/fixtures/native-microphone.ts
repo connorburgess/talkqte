@@ -5,6 +5,7 @@ import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
 import * as providerKeysFixture from './native-provider-keys';
 import * as meetingNotesFixture from './native-meeting-notes';
+import * as historyFixture from './native-meeting-history';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -213,7 +214,11 @@ async function send(value: Partial<MicrophoneSnapshot>) {
 }
 
 // Stands in for the Rust live session: no device, stream, or transcription.
+/** Counts sessions, as Rust's session number does, for kept meetings. */
+let historySession = 0;
 async function publish(value: Partial<Snapshot>) {
+  if (value.status === 'running' && session?.status !== 'running')
+    historySession += 1;
   session = {
     ...session,
     ...value,
@@ -325,6 +330,13 @@ mockIPC(
       return providerKeysFixture.command(command, args);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
+    if (historyFixture.commands.includes(command))
+      return historyFixture.command(
+        command,
+        args,
+        () => session,
+        () => historySession,
+      );
     switch (command) {
       case 'application_audio':
         // Record what the notebook asked for; answer as the fictional host

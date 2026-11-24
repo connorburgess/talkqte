@@ -181,7 +181,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(review).not.toContainText('first draft');
   await page.keyboard.press('Escape');
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'The transcript is never saved or exported. Your notes stay in memory until you quit; export anything you want to keep before closing.',
+    'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.',
   );
   // A new session can be started.
   await expect(

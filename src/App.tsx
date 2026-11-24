@@ -39,6 +39,8 @@ import { ContextNotes } from './components/ContextNotes';
 import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
+import { KeepInHistory } from './components/KeepInHistory';
+import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
 import {
   PanelDivider,
@@ -1555,6 +1557,7 @@ function Notebook() {
               )}
 
             <MeetingNotes snapshot={state} />
+            <KeepInHistory snapshot={state} />
 
             <div
               className={`notebook-grid${splitContent ? ' is-split' : ''}`}
@@ -2008,9 +2011,9 @@ function Notebook() {
               <ShieldCheck size={15} />
               <p>
                 {live || preparing || finishing
-                  ? 'This live session stays in memory. Its transcript is never saved or exported.'
+                  ? 'This live session stays in memory while it runs. Nothing is kept unless you choose to keep it after it ends.'
                   : state.live
-                    ? 'The transcript is never saved or exported. Your notes stay in memory until you quit; export anything you want to keep before closing.'
+                    ? 'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.'
                     : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
               </p>
             </footer>
@@ -2263,6 +2266,7 @@ function Notebook() {
                 </p>
               </div>
             </section>
+            <MeetingHistorySettings />
             <section className="setting">
               <div>
                 <h2>Your data</h2>
@@ -2271,10 +2275,11 @@ function Notebook() {
                   transcribe. With cloud transcription or cue processing on,
                   audio goes to the named transcription service and recent lines
                   to the cue provider, for that session only. A live session’s
-                  transcript is kept in memory only and cannot be exported.
-                  Notes exist in memory until you close the app. Exports contain
-                  exactly the text you review and are saved to the location you
-                  choose.
+                  transcript is kept in memory until you quit or start another
+                  session, unless you keep that meeting after it ends or export
+                  it. Notes exist in memory until you close the app. Exports
+                  contain exactly the text you review and are saved to the
+                  location you choose.
                 </p>
               </div>
               <ShieldCheck size={24} />
