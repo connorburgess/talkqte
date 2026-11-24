@@ -14,6 +14,7 @@ import {
   type KeyStatus,
   type KeysStatus,
 } from '../lib/providerKeys';
+import { MeetingNotesModel } from './MeetingNotesModel';
 import './provider-keys.css';
 
 const providers: {
@@ -154,6 +155,7 @@ export function ProviderKeys() {
             : 'No session has used your Anthropic key yet.'}
         </p>
         <LanguageChoice />
+        <MeetingNotesModel />
       </div>
     </section>
   );
