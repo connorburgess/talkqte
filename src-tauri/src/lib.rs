@@ -103,6 +103,7 @@ pub mod settings;
 mod settings_commands;
 pub mod timing_log;
 pub mod transcription;
+mod updates;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
 use std::{

@@ -1,0 +1,126 @@
+name: Release build
+
+# Builds the macOS download with `npm run release` and uploads it as a
+# workflow artifact. It never creates a GitHub Release or a tag and publishes
+# nothing. Without signing secrets (and always on pull requests) it uploads an
+# unsigned build whose file names say it is not for release. With the
+# secrets below it signs with Developer ID; with the notary secrets too it
+# notarizes and staples. docs/release-path.md#ci names each secret.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release.mjs
+      - scripts/release-build.mjs
+      - scripts/release-preflight.mjs
+      - src-tauri/Entitlements.plist
+      - src-tauri/Info.plist
+      - src-tauri/tauri.conf.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('release-pr-{0}', github.event.pull_request.number) || format('release-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    name: macOS release artifact
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      # Secrets are never exposed to pull requests; each mode needs all of its
+      # secrets, so a partial set builds the weaker mode instead of failing late.
+      CAN_SIGN: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_TEAM_ID != '' }}
+      CAN_NOTARIZE: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY != '' && secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: A tag must match the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./src-tauri/tauri.conf.json').version")"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - run: npm run test:release
+      - run: npm run check:release
+
+      - name: Import the Developer ID certificate into a temporary keychain
+        if: env.CAN_SIGN == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password="$(openssl rand -hex 24)"
+          umask 077
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          echo "APPLE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Write the App Store Connect API key
+        if: env.CAN_SIGN == 'true' && env.CAN_NOTARIZE == 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize and package
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.CAN_SIGN == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_TEAM_ID: ${{ env.CAN_SIGN == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY: ${{ env.CAN_NOTARIZE == 'true' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ env.CAN_NOTARIZE == 'true' && secrets.APPLE_API_ISSUER || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$CAN_SIGN" = true ] && [ "$CAN_NOTARIZE" = true ]; then mode=
+          elif [ "$CAN_SIGN" = true ]; then mode=--no-notarize
+          else mode=--unsigned
+          fi
+          echo "Release mode: ${mode:-notarized}"
+          npm run release -- $mode --out "$RUNNER_TEMP/release-artifacts"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: talkqte-macos-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-artifacts/*.dmg
+            ${{ runner.temp }}/release-artifacts/*.zip
+            ${{ runner.temp }}/release-artifacts/*.manifest.json
+            ${{ runner.temp }}/release-artifacts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Keep Apple's notary log on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: notary-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-artifacts/notary-log-*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          if [ -n "${APPLE_KEYCHAIN:-}" ]; then security delete-keychain "$APPLE_KEYCHAIN" || true; fi
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
