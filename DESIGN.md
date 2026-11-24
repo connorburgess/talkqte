@@ -50,3 +50,7 @@ All normal text pairs meet at least 4.5:1 and all UI boundaries, glyphs, and foc
 | Waiting large cue (55% carbon) on cue | 55% `#11151b` on `#f8f7f4` | 3.97:1 | Large bold waiting words (>= 3:1) |
 | Waiting small cue (68% carbon) on cue | 68% `#11151b` on `#f8f7f4` | 6.17:1 | Smaller waiting words (>= 4.5:1) |
 | Waiting small cue (68% carbon) on Asked you | 68% `#11151b` on `#fdf6e9` | 6.13:1 | Smaller waiting words (>= 4.5:1) |
+
+## New and changed screens
+
+Every new or changed screen follows Direction C in [docs/brand](docs/brand/BRAND_GUIDE.md): it uses the shared tokens and components instead of new one-off styles, it is added to the specimen sheets in `docs/brand/index.html` with all of its states, and it passes the one-sided-border check (`npm run test:borders`). When the running app and a sheet disagree, either the app is changed to match the sheet or the sheet is changed with a recorded reason (a test, an accessibility rule, a size or timing above, a lab text contract or consent text).

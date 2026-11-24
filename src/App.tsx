@@ -244,7 +244,9 @@ function FloatingQuestion() {
                 {(listening || appAudio || live || microphoneControl) && (
                   <span
                     className={`companion-capture${
-                      listening || appAudio ? ' is-on' : ''
+                      (listening && mic?.activity === 'active') || appAudio
+                        ? ' is-on'
+                        : ''
                     }`}
                     title={statusText}
                     data-tauri-drag-region
@@ -362,7 +364,7 @@ function FloatingQuestion() {
                     }
                   >
                     {state.cuesPaused ? (
-                      <Play size={16} aria-hidden="true" />
+                      <Play size={14} fill="currentColor" aria-hidden="true" />
                     ) : (
                       <Pause size={16} aria-hidden="true" />
                     )}
@@ -376,7 +378,7 @@ function FloatingQuestion() {
                       void run(() => bridge.command('stop_live_session'))
                     }
                   >
-                    <Square size={14} fill="currentColor" aria-hidden="true" />
+                    <Square size={14} aria-hidden="true" />
                   </button>
                 </>
               ) : microphoneControl ? (
@@ -391,7 +393,7 @@ function FloatingQuestion() {
                   }
                   onClick={() => void microphone.stop()}
                 >
-                  <Square size={14} fill="currentColor" aria-hidden="true" />
+                  <Square size={14} aria-hidden="true" />
                 </button>
               ) : null}
               <button
@@ -1338,7 +1340,15 @@ function Notebook() {
               <div className="session-state">
                 {/* A dot only while something runs; idle and ended have none. */}
                 {(live || simulated || preparing || finishing) && (
-                  <span className={`status-dot ${state.status}`} />
+                  <span
+                    className={`status-dot ${
+                      preparing
+                        ? 'preparing'
+                        : state.cuesPaused
+                          ? 'paused'
+                          : state.status
+                    }`}
+                  />
                 )}
                 <div>
                   <h1 ref={sessionHeading} tabIndex={-1}>
@@ -1545,7 +1555,7 @@ function Notebook() {
                     onClick={() => setTab('notes')}
                   >
                     <FileText size={16} />
-                    Notes
+                    <span className="tab-label">Notes</span>
                   </button>
                   <button
                     ref={transcriptTab}
@@ -1557,7 +1567,12 @@ function Notebook() {
                     onClick={() => setTab('transcript')}
                   >
                     <MessageCircle size={16} />
-                    Transcript <span>{state.transcript.length}</span>
+                    <span className="tab-label">
+                      Transcript{' '}
+                      <span className="tab-count">
+                        {state.transcript.length}
+                      </span>
+                    </span>
                   </button>
                 </div>
                 {tab === 'notes' ? (

@@ -38,7 +38,6 @@
   gap: var(--space-8);
   padding: var(--space-16) 0;
   border-top: 1px solid var(--line);
-  max-width: 40rem;
   min-width: 0;
 }
 .provider-key-head {
@@ -140,6 +139,12 @@
   padding: 8px 14px;
   font-size: 13px;
 }
+.provider-key-btn:disabled {
+  opacity: 1;
+  background: var(--band);
+  border-color: var(--line);
+  color: var(--muted);
+}
 .provider-key-remove:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
@@ -175,7 +180,6 @@
   font-size: 13px;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
-  max-width: 40rem;
   overflow-wrap: anywhere;
 }
 @media (prefers-reduced-motion: reduce) {
