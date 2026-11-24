@@ -40,6 +40,8 @@ export type ProcessingIssue =
   | 'authentication'
   | 'credentials'
   | 'allowance'
+  | 'keyRateLimited'
+  | 'billing'
   | 'rateLimit'
   | 'unreachable'
   | 'timedOut'
