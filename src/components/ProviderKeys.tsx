@@ -225,6 +225,7 @@ export function ProviderKeysRows({
           status={status?.[provider.id]}
           store={status?.store}
           showWhereToGet={showWhereToGet}
+          embedded
           onStatus={(next) => {
             setStatus(next);
             setUnavailable(false);
@@ -240,15 +241,19 @@ function KeyRow({
   status,
   store,
   showWhereToGet = false,
+  embedded = false,
   onStatus,
 }: {
   provider: (typeof providers)[number];
   status: KeyStatus | undefined;
   store: KeyStore | undefined;
   showWhereToGet?: boolean;
+  /** In setup, directly under the step's level-one heading. */
+  embedded?: boolean;
   onStatus: (status: KeysStatus) => void;
 }) {
   const id = useId();
+  const Heading = embedded ? 'h2' : 'h3';
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
   const [error, setError] = useState('');
@@ -297,7 +302,7 @@ function KeyRow({
       onSubmit={save}
     >
       <div className="provider-key-head">
-        <h3 id={`${id}-name`}>{provider.name}</h3>
+        <Heading id={`${id}-name`}>{provider.name}</Heading>
         <p
           id={`${id}-state`}
           className={`provider-key-state ${

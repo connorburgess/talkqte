@@ -130,14 +130,15 @@ export function Onboarding({
         </header>
 
         <div className="ob-body">
-          <h2
+          {/* The page's one level-one heading while setup is shown. */}
+          <h1
             id="onboarding-step-heading"
             ref={headingRef}
             tabIndex={-1}
             className="ob-h2"
           >
             {meta.heading}
-          </h2>
+          </h1>
 
           {step === 1 && (
             <>
@@ -226,7 +227,7 @@ export function Onboarding({
 
               <div className="ob-perm-card">
                 <div className="ob-card-head">
-                  <h3>Microphone</h3>
+                  <h2>Microphone</h2>
                   <span className="ob-card-meta">
                     Asked on first session start
                   </span>
@@ -240,7 +241,7 @@ export function Onboarding({
 
               <div className="ob-perm-card">
                 <div className="ob-card-head">
-                  <h3>Screen &amp; System Audio Recording</h3>
+                  <h2>Screen &amp; System Audio Recording</h2>
                   <span className="ob-card-meta">
                     Only if choosing application audio
                   </span>
@@ -364,7 +365,7 @@ export function Onboarding({
           }
         }}
       >
-        <h3 id="ob-skip-title">Skip setup for now?</h3>
+        <h2 id="ob-skip-title">Skip setup for now?</h2>
         <p>
           You can add your keys or run through these four steps again any time
           from Settings → Set up TalkQTE again.

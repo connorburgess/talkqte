@@ -61,6 +61,8 @@ pub enum Issue {
     LabUnavailable,
     KeyRejected,
     KeyUnavailable,
+    KeyRateLimited,
+    Billing,
     SpendLimit,
     RequestLimit,
 }
@@ -443,6 +445,10 @@ impl Engine {
             Some(EvaluationStatus::Unavailable(EvaluationIssue::KeyUnavailable)) => {
                 Some(Issue::KeyUnavailable)
             }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::KeyRateLimited)) => {
+                Some(Issue::KeyRateLimited)
+            }
+            Some(EvaluationStatus::Unavailable(EvaluationIssue::Billing)) => Some(Issue::Billing),
             Some(EvaluationStatus::Unavailable(EvaluationIssue::SpendLimit)) => {
                 Some(Issue::SpendLimit)
             }
