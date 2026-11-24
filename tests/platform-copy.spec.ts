@@ -61,6 +61,16 @@ for (const [os, name] of [
     const setting = page.getByRole('region', { name: 'When a call starts' });
     await expect(setting).toContainText(`Not available on ${name} yet.`);
     await expect(setting.getByRole('checkbox')).toHaveCount(0);
+    const menuBar = page.getByRole('region', { name: 'Menu bar and login' });
+    await expect(menuBar).toContainText(`Not available on ${name} yet`);
+    await expect(menuBar.getByRole('checkbox')).toHaveCount(0);
+    const saved = page.getByRole('region', { name: 'Saved settings' });
+    await expect(saved).toContainText(
+      os === 'windows'
+        ? 'Keys stay in Windows Credential Manager'
+        : 'Keys stay in your desktop keyring',
+    );
+    await expect(saved).not.toContainText('Mac');
   });
 }
 
