@@ -70,7 +70,7 @@ libc = "0.2"
 cpal = { version = "0.18.2", default-features = false }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSView", "NSRunningApplication", "libc", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSView", "NSRunningApplication", "NSWorkspace", "libc", "objc2-core-foundation"] }
 # The CGRect the companion's single frame change passes to AppKit.
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }

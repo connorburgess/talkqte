@@ -3,6 +3,8 @@ pub mod application_audio;
 #[cfg(target_os = "macos")]
 mod application_audio_host;
 pub mod audio_tap;
+pub mod call_prompt;
+mod call_prompt_commands;
 mod capture_control;
 #[cfg(feature = "claude-cli")]
 pub mod claude_cli;
@@ -125,6 +127,8 @@ struct Runtime {
     /// The application the development join setting will attach to the
     /// next microphone session, which is then declared with it.
     dev_join_application: Option<String>,
+    /// The call-starting prompt: off unless the person turns it on.
+    call_prompt: call_prompt::Watcher,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -162,6 +166,7 @@ impl Default for Runtime {
             source_session: None,
             live_budget: None,
             dev_join_application: None,
+            call_prompt: call_prompt::Watcher::default(),
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -1665,6 +1670,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
+            call_prompt_commands::call_prompt_settings,
+            call_prompt_commands::set_call_prompt,
+            call_prompt_commands::clear_call_prompt_apps,
+            call_prompt_commands::respond_to_call_prompt,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
             processing_commands::cancel_processing_review,
@@ -1749,6 +1758,7 @@ pub fn run() {
             companion_macos::hide_controls(app)?;
             #[cfg(target_os = "macos")]
             application_audio_host::install(app.handle())?;
+            call_prompt_commands::install(app.handle());
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut last_placement = Instant::now();

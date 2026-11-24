@@ -47,6 +47,9 @@ import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
+import { listen } from '@tauri-apps/api/event';
+import { CallPrompt } from './components/CallPrompt';
+import { CallPromptSetting } from './components/CallPromptSetting';
 import {
   SessionSources,
   microphoneOnly,
@@ -429,6 +432,19 @@ function FloatingQuestion() {
               />
             )}
           </>
+        ) : state?.callPrompt && state.overlayEnabled ? (
+          <CallPrompt
+            offer={state.callPrompt}
+            busy={busy}
+            onAnswer={(answer) =>
+              void run(() =>
+                bridge.command('respond_to_call_prompt', {
+                  id: state.callPrompt!.id,
+                  answer,
+                }),
+              )
+            }
+          />
         ) : (
           <p className="floating-empty">
             {state?.overlayEnabled === false
@@ -491,6 +507,29 @@ function Notebook() {
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
   const [sources, setSources] = useState<SourceChoice>(microphoneOnly);
+  // Start in the companion's call-starting offer: show the notebook with
+  // the microphone and the offered application chosen. Nothing starts here.
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<string | null>('call-prompt:start', ({ payload }) => {
+      setView('notebook');
+      setSources({
+        mode: payload ? 'both' : 'microphone',
+        application: null,
+        wanted: payload ?? undefined,
+      });
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   // Only a build that can hear an application reports one beside the
   // microphone; any other build starts from the microphone as before.
   const canChooseSources = !!capture.state?.source;
@@ -2127,6 +2166,7 @@ function Notebook() {
                 }
               />
             </section>
+            <CallPromptSetting />
             <section className="setting">
               <div>
                 <h2 id="live-transcription" tabIndex={-1}>

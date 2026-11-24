@@ -67,6 +67,9 @@ const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
+// The call-starting prompt's settings and the companion's answers.
+let callPrompt = { enabled: false, notFor: [] as string[] };
+const callPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
 let host: ApplicationAudioStatus | null = null;
 let hostRefusal: string | null = null;
@@ -481,6 +484,20 @@ mockIPC(
             };
         return value;
       }
+      case 'call_prompt_settings':
+        return structuredClone(callPrompt);
+      case 'set_call_prompt':
+        callPrompt = {
+          ...callPrompt,
+          enabled: (args as { enabled: boolean }).enabled,
+        };
+        return structuredClone(callPrompt);
+      case 'clear_call_prompt_apps':
+        callPrompt = { ...callPrompt, notFor: [] };
+        return structuredClone(callPrompt);
+      case 'respond_to_call_prompt':
+        callPromptAnswers.push(structuredClone(args));
+        return;
       case 'start_live_session':
         liveStarts.push(structuredClone(args ?? null));
         await beginStart();
@@ -586,6 +603,10 @@ declare global {
       targets: StopTarget[];
       applicationAudio: unknown[];
       liveStarts: unknown[];
+      callPromptAnswers: unknown[];
+      callPrompt: () => { enabled: boolean; notFor: string[] };
+      /** The companion's Start on an offer, as the native side relays it. */
+      callPromptStart: (application: string | null) => Promise<void>;
       /** Answer application_audio as a fictional host with this status. */
       host: (value: Partial<ApplicationAudioStatus>) => void;
       /** The host publishes a change, as when listing finishes. */
@@ -650,6 +671,9 @@ window.captureTest = {
   targets: stopTargets,
   applicationAudio,
   liveStarts,
+  callPromptAnswers,
+  callPrompt: () => structuredClone(callPrompt),
+  callPromptStart: (application) => emit('call-prompt:start', application),
   host: (value) => {
     host = {
       revision: 1,

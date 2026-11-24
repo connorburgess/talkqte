@@ -1192,6 +1192,28 @@ svg {
   padding: 8px 20px;
   font-size: 14px;
 }
+.call-prompt {
+  color: var(--companion-fg);
+  padding: var(--space-12) var(--space-16);
+}
+.call-prompt-title {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.call-prompt-detail {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: var(--space-4);
+  opacity: 0.85;
+}
+.call-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
 .visually-hidden {
   position: absolute;
   width: 1px;

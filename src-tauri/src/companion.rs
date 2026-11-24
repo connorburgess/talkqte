@@ -23,7 +23,7 @@ impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.cue.is_some() {
+        } else if state.cue.is_some() || state.call_prompt.is_some() {
             Self::Question
         } else if microphone == MicrophoneStatus::Off
             && matches!(state.status, Status::Ready | Status::Ended)
@@ -451,6 +451,33 @@ mod tests {
         assert_eq!(
             placement.leave_wait(Mode::Compact, at(150), false),
             Some(Duration::from_millis(LEAVE_MS))
+        );
+    }
+
+    #[test]
+    fn a_call_starting_offer_shows_the_companion_with_no_session_unless_it_is_hidden() {
+        let mut engine = Engine::default();
+        let mut snapshot = engine.cue_snapshot();
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+        snapshot.call_prompt = Some(crate::call_prompt::Prompt {
+            application: Some("Fictional Call".into()),
+            kind: Some(crate::call_prompt::Kind::Meeting),
+            id: 1,
+        });
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
+            Mode::Question
+        );
+        // The person hid the companion: the offer does not bring it back.
+        engine.set_overlay(false);
+        let mut hidden = engine.cue_snapshot();
+        hidden.call_prompt = snapshot.call_prompt.clone();
+        assert_eq!(
+            Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
+            Mode::Hidden
         );
     }
 

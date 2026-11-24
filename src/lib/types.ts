@@ -55,6 +55,9 @@ export interface CueSnapshot {
    * conversation that captures nothing. The desktop app never sends it. */
   simulated?: boolean;
   /** Suppresses cues while the live microphone and transcript continue. */
+  /** A call seems to be starting: the offer, when the person turned the
+   * prompt on. */
+  callPrompt?: import('../components/CallPrompt').CallPromptOffer;
   cuesPaused: boolean;
   cue: Cue | null;
   overlayEnabled: boolean;
@@ -110,6 +113,10 @@ export type Commands = {
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string } | undefined;
   stop_live_session: undefined;
+  respond_to_call_prompt: {
+    id: number;
+    answer: import('../components/CallPrompt').CallPromptAnswer;
+  };
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };
   cancel_granola_sign_in: undefined;
