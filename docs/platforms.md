@@ -20,7 +20,7 @@ The [Windows and Ubuntu builds workflow](../.github/workflows/platform-builds.ym
 | `talkqte-ubuntu-x64-unsigned-<sha>` | `.deb` and `.AppImage` | `ubuntu-24.04` | Rust tests and Clippy; the built app opens its `TalkQTE` window under Xvfb; the `.deb` installs with its dependencies in an `ubuntu:26.04` container and the installed app opens its window there |
 | `talkqte-ubuntu-arm64-unsigned-<sha>` | `.deb` and `.AppImage` | `ubuntu-24.04-arm` | The same as x64 |
 
-The Ubuntu packages are built on 24.04 so their library requirements are met on 24.04 and on the current LTS, 26.04, where the installed package is launched. The AppImage is built but not launched in CI.
+The Ubuntu packages are built on 24.04 so their library requirements are met on 24.04 and on the current LTS, 26.04, where the installed package is launched. The AppImage is built but not launched in CI; it also carries Ubuntu 24.04 system libraries (WebKitGTK, GTK and others) under their own licences, which the artifact's notices do not list. The installed `.deb` is launched as an ordinary user.
 
 A launch check proves that the app starts and creates its window on that runner. It does not show that anything in the window works, and it involves no microphone, display a person sees, meeting app, keyring prompt or network provider. Windows SmartScreen and an unsigned-publisher warning will appear on a real machine; Ubuntu installs the `.deb` without any signature check. The installed apps do not yet carry their own copy of the third-party notices; it is beside the installer in the artifact.
 

@@ -51,6 +51,13 @@ const VENDORED_NOTICES = {
 const IGNORED_NOTICES = {
   // Linux desktop-portal backend; the macOS build uses the AppKit backend.
   rfd: ['src/backend/xdg_desktop_portal/window_identifier/LICENSE'],
+  // libdbus's own source, compiled only with the crate's `vendored` feature,
+  // which nothing enables (the lockfile gives libdbus-sys no C compiler):
+  // Linux builds link the system's libdbus instead.
+  'libdbus-sys': [
+    'vendor/dbus/COPYING',
+    'vendor/dbus/cmake/modules/COPYING-CMAKE-SCRIPTS',
+  ],
 };
 
 const NOTICE_FILE = /^(licen[sc]e|copying|notice|unlicense|copyright)/i;
