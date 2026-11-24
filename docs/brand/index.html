@@ -1883,6 +1883,163 @@
         color: var(--g-muted);
       }
 
+      /* Upcoming screens (Designed, not built) */
+      .up-boundary {
+        margin-top: 14px;
+        padding: 12px 14px;
+        background: var(--g-band);
+        border: 1px solid var(--g-line);
+        border-radius: 2px;
+        font-size: 12px;
+        line-height: 1.55;
+        color: var(--g-muted);
+      }
+
+      .up-boundary strong {
+        color: var(--g-ink);
+      }
+
+      .up-prompt-pair {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        align-items: flex-start;
+        margin-top: 14px;
+      }
+
+      .dock-prompt {
+        width: min(320px, 100%);
+        max-width: 100%;
+        padding: 14px 16px;
+        background: #0d1014;
+        color: #f5f7fa;
+        border: 1px solid #252c36;
+        border-radius: 18px;
+        box-shadow: 0 12px 28px rgba(13, 16, 20, 0.22);
+      }
+
+      .dock-prompt-kicker {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #ebb45b;
+      }
+
+      .dock-prompt-title {
+        margin-top: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.28;
+        color: #f5f7fa;
+      }
+
+      .dock-prompt.is-large .dock-prompt-title {
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .dock-prompt-copy {
+        margin-top: 6px;
+        font-size: 13px;
+        line-height: 1.45;
+        color: #9aa4b2;
+      }
+
+      .dock-prompt.is-large .dock-prompt-copy {
+        font-size: 15px;
+        line-height: 1.45;
+      }
+
+      .dock-prompt-bar {
+        height: 3px;
+        background: #252c36;
+        border-radius: 1px;
+        margin: 12px 0;
+        overflow: hidden;
+      }
+
+      .dock-prompt-bar span {
+        display: block;
+        width: 68%;
+        height: 100%;
+        background: #ebb45b;
+      }
+
+      .dock-prompt-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .dock-prompt-btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 8px 14px;
+        background: #ebb45b;
+        color: #0d1014;
+        border: 1px solid #ebb45b;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .dock-prompt-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 8px 11px;
+        background: #181f28;
+        color: #f5f7fa;
+        border: 1px solid #38414e;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .dock-prompt.is-large .dock-prompt-btn-primary,
+      .dock-prompt.is-large .dock-prompt-btn {
+        font-size: 14px;
+      }
+
+      .up-notes-editor {
+        margin-top: 12px;
+        padding: 14px 16px;
+        background: #ffffff;
+        border: 1px solid var(--g-border);
+        border-radius: 4px;
+      }
+
+      .up-notes-section {
+        padding: 10px 0;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .up-notes-section:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .up-citation {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--g-amber-ink);
+      }
+
+      .sk-chip.is-unreadable {
+        border-color: var(--g-error-ink);
+        background: var(--g-error-bg);
+        color: var(--g-error-ink);
+      }
+
       @media (max-width: 1120px) {
         .ob-step-wrap {
           grid-template-columns: 1fr;
@@ -2510,6 +2667,7 @@
           <a href="#onboarding-spec">Onboarding</a>
           <a href="#keeping-spec">Keeping a meeting</a>
           <a href="#two-ways-spec">Two ways</a>
+          <a href="#upcoming-spec">Designed, not built</a>
           <a href="#reference">Type</a>
           <a href="#history">History (Not Adopted)</a>
         </nav>
@@ -2628,7 +2786,7 @@
                 <div class="nb-nav-item active">Notebook</div>
                 <div class="nb-sidebar-bottom">
                   <div class="nb-nav-item">Settings</div>
-                  <div class="nb-version"><span>TalkQTE</span><span>0.1 · early development</span></div>
+                  <div class="nb-version"><span>TalkQTE</span><span>0.1 · alpha</span></div>
                 </div>
               </aside>
               <div class="nb-main">
@@ -3340,7 +3498,7 @@
                   <div class="nb-nav-item active" style="padding: 8px 10px">Notebook</div>
                   <div style="padding: 12px 4px 4px; font-size: 13px; font-weight: 600">▸ Set up a live session</div>
                   <div class="nb-nav-item" style="margin-top: 24px; padding: 8px 10px">Settings</div>
-                  <div class="nb-version" style="margin-top: 8px; padding: 10px 4px 0"><span>TalkQTE</span><span>0.1 · early dev</span></div>
+                  <div class="nb-version" style="margin-top: 8px; padding: 10px 4px 0"><span>TalkQTE</span><span>0.1 · alpha</span></div>
                 </div>
                 <div style="flex: 1; min-width: 220px">
                   <div class="nb-toolbar" style="padding: 0 0 10px; height: auto; margin-bottom: 12px">
@@ -3618,29 +3776,33 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
               </div>
             </article>
 
-            <!-- 11. Settings · Service keys (default & entry & active session) -->
+            <!-- 11. Settings · Your API keys (merged ProviderKeys.tsx + Transcription language) -->
             <article class="panel-card is-wide" id="service-keys-spec">
-              <div class="panel-card-tag mono-label"><span>11 · Settings · Service keys</span><span>Mounted in src/App.tsx directly after Live transcription</span></div>
-              <div class="panel-h2">Service keys</div>
+              <div class="panel-card-tag mono-label"><span>11 · Settings · Your API keys</span><span>src/components/ProviderKeys.tsx · mounted after Live transcription</span></div>
+              <div class="panel-h2">Your API keys</div>
               <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
-                Add your own keys for live transcription and cue decisions. Keys are stored in the macOS Keychain and never shown again after saving; TalkQTE only displays Not set, Set, Checking…, or Rejected.
+                TalkQTE runs on your own accounts. Live sessions need both keys. Each is kept in your Mac's Keychain and is never shown again. Nothing is sent to either provider until you approve a session's processing review.
               </p>
 
               <div class="sk-row" style="margin-top: 14px">
                 <div class="sk-row-head">
                   <div class="sk-provider">
                     <strong class="panel-h3">Deepgram</strong>
-                    <span class="mono-label" style="color: var(--g-muted)">Transcription</span>
                   </div>
-                  <span class="sk-chip is-set">Set</span>
+                  <span class="sk-chip is-set">Set and checked</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
-                  Receives the session's audio (microphone or the chosen application), only after you approve cue processing for that session, at most 120 minutes per session. Billed to your own Deepgram account.
+                  Transcribes a live session's audio. Billed by Deepgram per minute, at most 120 minutes per session.
                 </p>
-                <div class="sk-actions">
-                  <span class="sk-btn">Test</span>
-                  <span class="sk-btn">Replace</span>
-                  <span class="sk-btn is-danger">Remove</span>
+                <div class="sk-entry">
+                  <div class="mono-label" style="color: var(--g-ink)">Replace Deepgram key</div>
+                  <div class="sk-input-row">
+                    <span class="sk-password" style="color: var(--g-muted)">Paste replacement key…</span>
+                    <span class="sk-btn-primary is-disabled">Save key</span>
+                    <span class="sk-btn">Test key</span>
+                    <span class="sk-btn is-danger">Remove key</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Deepgram accepted the key.</p>
                 </div>
               </div>
 
@@ -3648,22 +3810,19 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                 <div class="sk-row-head">
                   <div class="sk-provider">
                     <strong class="panel-h3">Anthropic</strong>
-                    <span class="mono-label" style="color: var(--g-muted)">Cue decisions</span>
                   </div>
                   <span class="sk-chip">Not set</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
-                  Receives up to six recent transcript lines (labelled only "Speaker") and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines. Billed to your own Anthropic account.
+                  Decides when a cue would help, from recent lines. Billed by Anthropic per token.
                 </p>
-                <div class="sk-actions">
-                  <span class="sk-btn-primary">Add key</span>
-                </div>
                 <div class="sk-entry">
-                  <div class="mono-label" style="color: var(--g-ink)">Password entry (clears after saving; never shown again)</div>
+                  <div class="mono-label" style="color: var(--g-ink)">Anthropic API key (clears after saving; never shown again)</div>
                   <div class="sk-input-row">
                     <span class="sk-password sk-focused">••••••••••••••••••••••••••••</span>
                     <span class="sk-btn-primary">Save key</span>
-                    <span class="sk-btn">Cancel</span>
+                    <span class="sk-btn is-disabled">Test key</span>
+                    <span class="sk-btn is-disabled">Remove key</span>
                   </div>
                   <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Focus ring: 3px solid #875500, 3px offset. Save key stays disabled while empty.</p>
                 </div>
@@ -3672,148 +3831,122 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
               <div class="sk-session-box">
                 <div class="sk-row-head">
                   <strong class="panel-h3">This session</strong>
-                  <span class="mono-label" style="color: var(--g-muted)">Active session · local estimate only · model never shown</span>
+                  <span class="mono-label" style="color: var(--g-muted)">Active &amp; empty states · model name never shown</span>
                 </div>
-                <div class="sk-session-grid">
-                  <div class="sk-stat">
-                    <span class="mono-label" style="color: var(--g-muted)">Anthropic requests</span>
-                    <span class="sk-stat-value">12 of 400</span>
-                  </div>
-                  <div class="sk-stat">
-                    <span class="mono-label" style="color: var(--g-muted)">Per-session caps</span>
-                    <span class="sk-stat-value">400 req · $0.50</span>
-                  </div>
-                  <div class="sk-stat">
-                    <span class="mono-label" style="color: var(--g-muted)">Estimated spend</span>
-                    <span class="sk-stat-value">Est. $0.03 of $0.50</span>
-                  </div>
-                </div>
-                <p class="panel-muted" style="margin-top: 8px; font-size: 12px">
-                  Estimate calculated locally from token counts (via <code>cue_usage</code>); not a bill from Anthropic. The model name is never shown here.
+                <p class="panel-muted" style="margin-top: 8px; color: var(--g-ink); font-family: var(--font-mono); font-size: 13px">
+                  This session: 12 of 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill).
+                </p>
+                <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
+                  Empty state before any session: <strong>No session has used your Anthropic key yet.</strong>
                 </p>
               </div>
 
-              <div class="sk-session-box" style="margin-top: 10px">
+              <div class="sk-row" style="margin-top: 14px">
                 <div class="sk-row-head">
-                  <strong class="panel-h3">This session · empty state (before any session)</strong>
-                  <span class="mono-label" style="color: var(--g-muted)">No session yet</span>
+                  <strong class="panel-h3">Transcription language</strong>
+                  <div class="panel-input">English ▾</div>
                 </div>
-                <p class="panel-muted" style="margin-top: 6px">
-                  0 of 400 requests · est. $0.00 of $0.50 (estimate from token counts, not a bill). Counts reset when a new session starts.
+                <p class="panel-muted" style="margin-top: 6px; max-width: 72ch">
+                  Applies to the next live session, never one already running. Multilingual follows several languages and switches between them, and Deepgram bills it at a higher rate than English. Phrase-rule cues understand English only; a question that opens with your name and ends in a question mark is noticed in any language; model cues work on what the model understands.
                 </p>
+                <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Options: <code>English</code> (<code>en</code>) · <code>Multilingual</code> (<code>multi</code>). Error state: <em>The language was not changed.</em></p>
               </div>
             </article>
 
-            <!-- 12. Service keys · Checking, Rejected, Remove confirm, Disabled -->
+            <!-- 12. Your API keys · All states (including Set not checked, Checking, Rejected, Unreadable) -->
             <article class="panel-card">
-              <div class="panel-card-tag mono-label"><span>12 · Service keys · States</span><span>Checking, Rejected, Remove confirm, Disabled</span></div>
+              <div class="panel-card-tag mono-label"><span>12 · Your API keys · All states</span><span>ProviderKeys.tsx: notSet, set, checking, rejected, unreadable</span></div>
 
               <div class="sk-row">
                 <div class="sk-row-head">
-                  <div class="sk-provider">
-                    <strong class="panel-h3">Deepgram</strong>
-                    <span class="mono-label" style="color: var(--g-muted)">Transcription</span>
-                  </div>
+                  <strong class="panel-h3">Deepgram</strong>
+                  <span class="sk-chip is-set">Set, not checked yet</span>
+                </div>
+                <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Deepgram key saved. It was not checked.</p>
+                <div class="sk-actions">
+                  <span class="sk-btn-primary is-disabled">Save key</span>
+                  <span class="sk-btn">Test key</span>
+                  <span class="sk-btn is-danger">Remove key</span>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <strong class="panel-h3">Deepgram</strong>
                   <span class="sk-chip is-checking">Checking…</span>
                 </div>
-                <p class="panel-muted" style="margin-top: 6px">Sending one test request to Deepgram. Controls wait until it finishes.</p>
+                <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Controls wait while Saving…, Checking…, or Removing… completes.</p>
                 <div class="sk-actions">
-                  <span class="sk-btn is-disabled">Test</span>
-                  <span class="sk-btn is-disabled">Replace</span>
-                  <span class="sk-btn is-disabled">Remove</span>
-                </div>
-              </div>
-
-              <div class="sk-row">
-                <div class="sk-row-head">
-                  <div class="sk-provider">
-                    <strong class="panel-h3">Anthropic</strong>
-                    <span class="mono-label" style="color: var(--g-muted)">Cue decisions</span>
-                  </div>
-                  <span class="sk-chip is-rejected">Rejected</span>
-                </div>
-                <div class="panel-error-box">
-                  <strong>Refused by the service.</strong> Check the key in your Anthropic account and replace it here.
-                </div>
-                <div class="panel-error-box">
-                  <strong>Could not reach the service.</strong> Check your internet connection and try Test again.
-                </div>
-                <div class="sk-actions">
-                  <span class="sk-btn sk-focused">Test</span>
-                  <span class="sk-btn">Replace</span>
-                  <span class="sk-btn is-danger">Remove</span>
-                </div>
-              </div>
-
-              <div class="sk-row">
-                <div class="sk-row-head">
-                  <div class="sk-provider">
-                    <strong class="panel-h3">Deepgram</strong>
-                    <span class="mono-label" style="color: var(--g-muted)">Remove confirmation</span>
-                  </div>
-                  <span class="sk-chip is-set">Set</span>
-                </div>
-                <div class="sk-confirm">
-                  <span style="font-size: 13px; color: var(--g-error-ink)"><strong>Remove Deepgram key?</strong> Live transcription will stop until a key is added again.</span>
-                  <div style="display: flex; gap: 8px; flex-wrap: wrap">
-                    <span class="sk-btn">Cancel</span>
-                    <span class="sk-btn is-danger">Remove key</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="sk-row">
-                <div class="mono-label" style="color: var(--g-muted)">Empty password field · disabled Save key</div>
-                <div class="sk-input-row">
-                  <span class="sk-password" style="color: var(--g-muted)">Paste key…</span>
                   <span class="sk-btn-primary is-disabled">Save key</span>
-                  <span class="sk-btn">Cancel</span>
+                  <span class="sk-btn is-disabled">Checking…</span>
+                  <span class="sk-btn is-disabled">Remove key</span>
                 </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <strong class="panel-h3">Anthropic</strong>
+                  <span class="sk-chip is-rejected">Rejected by Anthropic. Replace it with a new key.</span>
+                </div>
+                <div class="panel-error-box" style="font-size: 12px">Anthropic rejected the key.</div>
+                <div class="sk-actions">
+                  <span class="sk-btn-primary is-disabled">Save key</span>
+                  <span class="sk-btn sk-focused">Test key</span>
+                  <span class="sk-btn is-danger">Remove key</span>
+                </div>
+              </div>
+
+              <div class="sk-row">
+                <div class="sk-row-head">
+                  <strong class="panel-h3">Deepgram</strong>
+                  <span class="sk-chip is-unreadable">Unreadable</span>
+                </div>
+                <div class="panel-error-box" style="font-size: 12px">
+                  Could not be read from the Keychain. Unlock it or allow access, or save the key again.
+                </div>
+                <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Section-level alert when status fails: <em>Your keys could not be read. Try again later.</em></p>
               </div>
             </article>
 
-            <!-- 13. Service keys · 390px narrow layout + implementer boundary -->
+            <!-- 13. Your API keys · 390px narrow layout + implementer boundary -->
             <article class="panel-card">
-              <div class="panel-card-tag mono-label"><span>13 · Service keys · 390px narrow</span><span>Stacked layout &amp; 44px targets</span></div>
+              <div class="panel-card-tag mono-label"><span>13 · Your API keys · 390px narrow</span><span>Stacked layout, language select &amp; 44px targets</span></div>
               <div class="sk-narrow-frame">
-                <strong class="panel-h3">Service keys</strong>
-                <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Stored in macOS Keychain. Never shown again after saving.</p>
+                <strong class="panel-h3">Your API keys</strong>
+                <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Kept in your Mac's Keychain and never shown again.</p>
 
                 <div class="sk-row" style="margin-top: 10px">
                   <div class="sk-row-head">
-                    <strong style="font-size: 14px">Deepgram · Transcription</strong>
-                    <span class="sk-chip is-set">Set</span>
+                    <strong style="font-size: 14px">Deepgram</strong>
+                    <span class="sk-chip is-set">Set and checked</span>
                   </div>
-                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives the session's audio (microphone or chosen application), only after you approve cue processing, at most 120 minutes per session. Billed to your own account.</p>
+                  <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Transcribes a live session's audio. Billed by Deepgram per minute, at most 120 minutes per session.</p>
                   <div class="sk-actions">
-                    <span class="sk-btn">Test</span>
-                    <span class="sk-btn">Replace</span>
-                    <span class="sk-btn is-danger">Remove</span>
+                    <span class="sk-btn-primary is-disabled">Save key</span>
+                    <span class="sk-btn">Test key</span>
+                    <span class="sk-btn is-danger">Remove key</span>
                   </div>
                 </div>
 
                 <div class="sk-row">
                   <div class="sk-row-head">
-                    <strong style="font-size: 14px">Anthropic · Cue decisions</strong>
-                    <span class="sk-chip is-rejected">Rejected</span>
+                    <strong style="font-size: 14px">Anthropic</strong>
+                    <span class="sk-chip is-unreadable">Unreadable</span>
                   </div>
-                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Receives up to six recent transcript lines (labelled "Speaker"), cited lines, the cue on screen, up to four earlier cues, and your session name if set; never audio, the full transcript, notes, or focus lines. Billed to your own account.</p>
-                  <div class="panel-error-box" style="font-size: 12px">Refused by the service.</div>
-                  <div class="sk-actions">
-                    <span class="sk-btn">Test</span>
-                    <span class="sk-btn">Replace</span>
-                    <span class="sk-btn is-danger">Remove</span>
-                  </div>
+                  <div class="panel-error-box" style="font-size: 12px">Could not be read from the Keychain. Unlock it or allow access, or save the key again.</div>
                 </div>
 
                 <div class="sk-session-box" style="margin-top: 10px; padding: 12px">
-                  <strong style="font-size: 13px">This session</strong>
-                  <p class="panel-muted" style="margin-top: 4px; font-size: 12px; font-family: var(--font-mono)">12 of 400 requests · est. $0.03 of $0.50</p>
-                  <p class="panel-muted" style="margin-top: 4px; font-size: 11px">Estimate from token counts; not a bill. Model never shown.</p>
+                  <p class="panel-muted" style="font-size: 12px; font-family: var(--font-mono); color: var(--g-ink)">This session: 12 of 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill).</p>
+                </div>
+
+                <div class="sk-row" style="margin-top: 10px">
+                  <strong style="font-size: 13px; display: block; margin-bottom: 6px">Transcription language</strong>
+                  <div class="panel-input" style="width: 100%">English ▾</div>
                 </div>
               </div>
               <p class="panel-footer-line">
-                Component boundary: one new component <code>src/components/ServiceKeys.tsx</code> + <code>src/components/service-keys.css</code>, mounted as one <code>&lt;section className="setting"&gt;</code> in <code>src/App.tsx</code> directly after Live transcription. Commands: <code>provider_keys_status</code>, <code>set_provider_key</code>, <code>test_provider_key</code>, <code>remove_provider_key</code>, event <code>provider-keys:changed</code>, and <code>cue_usage</code>.
+                Component boundary: <code>src/components/ProviderKeys.tsx</code> + <code>src/components/provider-keys.css</code> (exports <code>ProviderKeys</code> for Settings and <code>ProviderKeysRows</code> for Onboarding Step 2), mounted in <code>src/App.tsx</code> directly after Live transcription. Commands: <code>provider_keys_status</code>, <code>set_provider_key</code>, <code>test_provider_key</code>, <code>remove_provider_key</code>, <code>transcription_language</code>, <code>set_transcription_language</code>, event <code>provider-keys:changed</code>, and <code>cue_usage</code>.
               </p>
             </article>
           </div>
@@ -3887,17 +4020,17 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                       <div class="ob-ways-grid">
                         <div class="ob-way is-active">
                           <div class="sk-row-head">
-                            <strong style="font-size: 14px">Free · with your own keys</strong>
+                            <strong style="font-size: 14px">Free</strong>
                             <span class="sk-chip is-set">Alpha</span>
                           </div>
-                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">TalkQTE charges nothing; you pay Deepgram and Anthropic directly for what you use. Add your keys in the next step.</p>
+                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">With your own keys. Add your Deepgram and Anthropic keys in the next step; you pay them directly for what you use, and audio and text go from your Mac to those providers.</p>
                         </div>
                         <div class="ob-way" aria-disabled="true">
                           <div class="sk-row-head">
                             <strong style="font-size: 14px; color: var(--g-muted)">Pro</strong>
                             <span class="sk-chip">Planned</span>
                           </div>
-                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Pay as you go: top up credit and pay per meeting hour. No keys, no subscription. Audio and text would pass through TalkQTE's service as well as the providers. Pricing to be announced; not selectable.</p>
+                          <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Pay as you go: top up credit and pay per meeting hour. No keys, no subscription. Not available yet; pricing to be announced.</p>
                         </div>
                       </div>
                     </div>
@@ -3974,39 +4107,42 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
 
                     <div class="sk-row" style="margin-top: 12px">
                       <div class="sk-row-head">
-                        <div class="sk-provider"><strong class="panel-h3">Deepgram</strong><span class="mono-label" style="color: var(--g-muted)">Transcription</span></div>
-                        <span class="sk-chip is-set">Set</span>
+                        <div class="sk-provider"><strong class="panel-h3">Deepgram</strong></div>
+                        <span class="sk-chip is-set">Set and checked</span>
                       </div>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Deepgram Console (console.deepgram.com) → API Keys. No link is fetched by TalkQTE.</p>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives the session's audio (microphone or the chosen application), only after you approve cue processing for that session, at most 120 minutes per session. Billed to your own Deepgram account.</p>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Transcribes a live session's audio. Billed by Deepgram per minute, at most 120 minutes per session.</p>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Deepgram Console (console.deepgram.com) → API Keys</p>
                       <div class="sk-actions">
-                        <span class="sk-btn">Test</span>
-                        <span class="sk-btn">Replace</span>
-                        <span class="sk-btn is-danger">Remove</span>
+                        <span class="sk-btn-primary is-disabled">Save key</span>
+                        <span class="sk-btn">Test key</span>
+                        <span class="sk-btn is-danger">Remove key</span>
                       </div>
                     </div>
 
                     <div class="sk-row">
                       <div class="sk-row-head">
-                        <div class="sk-provider"><strong class="panel-h3">Anthropic</strong><span class="mono-label" style="color: var(--g-muted)">Cue decisions</span></div>
-                        <span class="sk-chip is-rejected">Rejected</span>
+                        <div class="sk-provider"><strong class="panel-h3">Anthropic</strong></div>
+                        <span class="sk-chip is-rejected">Rejected by Anthropic. Replace it with a new key.</span>
                       </div>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Anthropic Console (console.anthropic.com) → API Keys. No link is fetched by TalkQTE.</p>
-                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Receives up to six recent transcript lines (labelled only "Speaker") and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if set; never audio, the full transcript, your notes, imported notes, or focus lines. Billed to your own Anthropic account.</p>
-                      <div class="panel-error-box" style="font-size: 12px">Refused by the service. Check the key in your Anthropic account and replace it, or skip for now.</div>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Decides when a cue would help, from recent lines. Billed by Anthropic per token.</p>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px"><strong>Where to get one:</strong> Anthropic Console (console.anthropic.com) → API Keys</p>
+                      <div class="panel-error-box" style="font-size: 12px">Anthropic rejected the key.</div>
                       <div class="sk-actions">
-                        <span class="sk-btn">Test</span>
-                        <span class="sk-btn">Replace</span>
-                        <span class="sk-btn is-danger">Remove</span>
+                        <span class="sk-btn-primary is-disabled">Save key</span>
+                        <span class="sk-btn">Test key</span>
+                        <span class="sk-btn is-danger">Remove key</span>
                       </div>
                     </div>
 
                     <div class="sk-row">
                       <div class="sk-row-head">
-                        <div class="sk-provider"><strong class="panel-h3">Anthropic (alternate: Not set state)</strong></div>
-                        <span class="sk-chip">Not set</span>
+                        <div class="sk-provider"><strong class="panel-h3">Alternate states: Not set &amp; Unreadable</strong></div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                          <span class="sk-chip">Not set</span>
+                          <span class="sk-chip is-unreadable">Unreadable</span>
+                        </div>
                       </div>
-                      <div class="sk-actions"><span class="sk-btn-primary">Add key</span></div>
+                      <p class="panel-muted" style="margin-top: 4px; font-size: 12px">Unreadable state: <em>Could not be read from the Keychain. Unlock it or allow access, or save the key again.</em> Reuses <code>ProviderKeysRows</code> verbatim.</p>
                     </div>
                   </div>
                   <div class="ob-foot">
@@ -4496,6 +4632,271 @@ Date: 2026-11-23 · Length: 06:42
                 <li>Not available yet: pricing to be announced, no date, and no extra feature promise beyond pay-as-you-go top-up credit.</li>
               </ul>
               <span class="sm-text-link">Email to hear when it is ready (connor@seatbeltlabs.com · TalkQTE Pro)</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- DESIGNED, NOT BUILT: THREE UPCOMING SCREENS -->
+      <section id="upcoming-spec" class="sheet" data-dir="c">
+        <div class="wrap">
+          <div class="sheet-head">
+            <div>
+              <div class="sheet-kicker">
+                <span class="mono-label badge badge-muted">Surface 06 · Designed, not built</span>
+                <span class="mono-label" style="color: var(--g-amber-ink)">Three upcoming screens · one component &amp; one mount point each</span>
+              </div>
+              <h2>Three Upcoming Screens (Designed, not built)</h2>
+              <p class="studio-line">
+                Direction C specifications for three planned surfaces in active or upcoming lanes: dual-source session start, the quiet dock call-starting prompt, and post-session structured meeting notes. Every tile is visibly labelled <strong>Designed, not built</strong>, never names a model, and uses uniform all-round borders with zero one-sided accents.
+              </p>
+            </div>
+          </div>
+
+          <div class="panel-grid">
+            <!-- TILE 1: SESSION START WITH SOURCES -->
+            <article class="panel-card is-wide" id="session-sources-spec">
+              <div class="panel-card-tag mono-label">
+                <span>Tile 01 · Session start with sources</span>
+                <span class="sk-chip">Designed, not built</span>
+              </div>
+              <div class="panel-h2">Choose audio sources before starting</div>
+              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
+                Before pressing Start live session, choose your microphone, one application from the list, or both. One per-session approval names both sources when both are chosen, and Stop ends both.
+              </p>
+
+              <div class="km-split" style="margin-top: 14px">
+                <!-- Choosing + Both chosen -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3">1. Choosing &amp; both sources chosen</strong>
+                    <span class="mono-label" style="color: var(--g-amber-ink)">Mic + App</span>
+                  </div>
+                  <div class="panel-check" style="margin-top: 8px">
+                    <span class="panel-box is-checked">✓</span>
+                    <div><strong>Microphone</strong> <span class="panel-muted">· Fictional microphone</span></div>
+                  </div>
+                  <div class="panel-check">
+                    <span class="panel-box is-checked">✓</span>
+                    <div><strong>Application audio</strong> <span class="panel-muted">· choose one running app</span></div>
+                  </div>
+                  <div style="margin: 6px 0 10px 26px; padding: 10px 12px; background: var(--g-band); border: 1px solid var(--g-line); border-radius: 2px">
+                    <div class="panel-check" style="padding: 4px 0"><span class="panel-radio is-checked"></span><span><strong>Fictional player</strong></span></div>
+                    <div class="panel-check" style="padding: 4px 0"><span class="panel-radio"></span><span>Fictional call app</span></div>
+                    <div style="margin-top: 6px"><span class="nb-btn" style="padding: 4px 10px; font-size: 12px">List again</span></div>
+                  </div>
+                  <p class="panel-muted" style="font-size: 12px">
+                    All windows of the chosen application may be included. Listing applications or capturing application audio makes macOS ask for Screen &amp; System Audio Recording.
+                  </p>
+                  <div class="km-notice" style="margin-top: 10px; font-size: 12px">
+                    <strong>Headphones recommended when both sources are on</strong>, so the call audio does not bleed back into your microphone.
+                  </div>
+                  <div class="sk-actions">
+                    <span class="sk-btn-primary">▶ Start live session</span>
+                  </div>
+                </div>
+
+                <!-- Single per-session approval + One source failed -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3">2. Single per-session approval (both sources)</strong>
+                    <span class="mono-label" style="color: var(--g-muted)">Stop ends both</span>
+                  </div>
+                  <dl class="panel-dl" style="margin-top: 10px">
+                    <dt>Sources</dt><dd><strong>the microphone and Fictional player</strong></dd>
+                    <dt>Transcription</dt><dd>Deepgram (your key, up to 120 minutes per session)</dd>
+                    <dt>Cue decisions</dt><dd>Anthropic (your key, recent transcript lines only)</dd>
+                    <dt>Stopping</dt><dd>Stop live session ends both sources and stops sending.</dd>
+                  </dl>
+                  <div class="sk-actions">
+                    <span class="sk-btn-primary">Enable for this session</span>
+                    <span class="sk-btn">Cancel</span>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 16px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">3. One source failed (partial failure)</strong>
+                      <span class="sk-chip is-rejected">App audio failed</span>
+                    </div>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      <strong>Could not capture Fictional player.</strong> Check Screen &amp; System Audio Recording permission or pick another app. Your microphone is still ready.
+                    </div>
+                    <div class="sk-actions">
+                      <span class="sk-btn">Retry app audio</span>
+                      <span class="sk-btn">Continue with microphone only</span>
+                      <span class="sk-btn is-danger">Stop live session</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="up-boundary">
+                <strong>Component boundary (Designed, not built):</strong> One new component <code>src/components/SessionSources.tsx</code> + <code>src/components/session-sources.css</code>, mounted at one mount point in <code>src/App.tsx</code> directly above the notebook session strip's Start live session action (replaces the separate dev-only <code>ApplicationAudioStart</code> block once dual-source lands).
+              </div>
+            </article>
+
+            <!-- TILE 2: CALL STARTING PROMPT -->
+            <article class="panel-card is-wide" id="call-prompt-spec">
+              <div class="panel-card-tag mono-label">
+                <span>Tile 02 · Call starting prompt</span>
+                <span class="sk-chip">Designed, not built</span>
+              </div>
+              <div class="panel-h2">Quiet dock prompt when a call seems to be starting</div>
+              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
+                Shown only when no session is running. Styled in the floating dock's Void Carbon chrome (320px wide, uniform 1px border). Never takes keyboard focus, never auto-starts, captures nothing before Start and per-session approval, and clears by itself via a quiet time line with no countdown numbers.
+              </p>
+
+              <div class="up-prompt-pair">
+                <!-- Standard text -->
+                <div>
+                  <span class="mono-label" style="display: block; color: var(--g-muted); margin-bottom: 8px">Standard text · 320px dock shell</span>
+                  <div class="dock-prompt">
+                    <div class="dock-prompt-kicker">
+                      <span>■ Call detected · No capture yet</span>
+                      <span style="color: #9aa4b2">Fictional</span>
+                    </div>
+                    <div class="dock-prompt-title">Call starting in Fictional call app?</div>
+                    <p class="dock-prompt-copy">
+                      Start a session with your microphone and Fictional call app preselected. Nothing is captured until you start and approve.
+                    </p>
+                    <div class="dock-prompt-bar"><span></span></div>
+                    <div class="dock-prompt-actions">
+                      <span class="dock-prompt-btn-primary">Start</span>
+                      <span class="dock-prompt-btn">Not now</span>
+                      <span class="dock-prompt-btn">Not for this app</span>
+                      <span class="dock-prompt-btn">Don't ask again</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Larger text -->
+                <div>
+                  <span class="mono-label" style="display: block; color: var(--g-muted); margin-bottom: 8px">Larger text · 320px dock shell (wraps cleanly, 44px targets)</span>
+                  <div class="dock-prompt is-large">
+                    <div class="dock-prompt-kicker">
+                      <span>■ Call detected · No capture yet</span>
+                      <span style="color: #9aa4b2">Fictional</span>
+                    </div>
+                    <div class="dock-prompt-title">Call starting in Fictional call app?</div>
+                    <p class="dock-prompt-copy">
+                      Start a session with your microphone and Fictional call app preselected. Nothing is captured until you start and approve.
+                    </p>
+                    <div class="dock-prompt-bar"><span></span></div>
+                    <div class="dock-prompt-actions">
+                      <span class="dock-prompt-btn-primary">Start</span>
+                      <span class="dock-prompt-btn">Not now</span>
+                      <span class="dock-prompt-btn">Not for this app</span>
+                      <span class="dock-prompt-btn">Don't ask again</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="up-boundary">
+                <strong>Component boundary (Designed, not built):</strong> One new component <code>src/components/CallStartPrompt.tsx</code> + <code>src/components/call-start-prompt.css</code>, mounted at one mount point inside the floating companion window (<code>FloatingQuestion</code> in <code>src/App.tsx</code> / companion entry) when no session is active. Never steals window focus; pressing <code>Start</code> opens the notebook's normal start and per-session approval flow.
+              </div>
+            </article>
+
+            <!-- TILE 3: WRITE MEETING NOTES -->
+            <article class="panel-card is-wide" id="write-notes-spec">
+              <div class="panel-card-tag mono-label">
+                <span>Tile 03 · Write meeting notes</span>
+                <span class="sk-chip">Designed, not built</span>
+              </div>
+              <div class="panel-h2">Post-session structured meeting notes (explicit confirmation, never names model)</div>
+              <p class="panel-muted" style="margin-top: 4px; max-width: 72ch">
+                One explicit action after Stop. Confirms exact payload, optional inclusion of the person's own notes, estimated token size, and estimated Anthropic cost before sending anything. Editable structured output cites transcript lines and marks unstated owners as <code>not stated</code>.
+              </p>
+
+              <div class="km-split" style="margin-top: 14px">
+                <!-- 1. Confirmation before sending + 2. Progress + 4. Failed -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3">1. Confirmation before sending</strong>
+                    <span class="sk-chip">Nothing sent yet</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
+                    Sent to <strong>Anthropic</strong> using your own key. Model name is never shown.
+                  </p>
+                  <div class="panel-check" style="margin-top: 8px">
+                    <span class="panel-box is-checked">✓</span>
+                    <div><strong>This session's transcript</strong> <span class="panel-muted">(14 lines · ~320 words)</span></div>
+                  </div>
+                  <div class="panel-check">
+                    <span class="panel-box"></span>
+                    <div><strong>Include my own notes</strong> <span class="panel-muted">(optional · off by default · 2 lines · ~24 words)</span></div>
+                  </div>
+                  <div class="sk-session-box" style="margin-top: 8px; padding: 10px 12px">
+                    <span class="mono-label" style="color: var(--g-ink)">Estimated size &amp; cost: ~480 tokens · est. $0.01</span>
+                    <p class="panel-muted" style="margin-top: 4px; font-size: 11px">Local estimate from token counts; billed to your own Anthropic account.</p>
+                  </div>
+                  <div class="sk-actions">
+                    <span class="sk-btn-primary">Send to Anthropic &amp; write notes</span>
+                    <span class="sk-btn">Cancel</span>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 16px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">2. In progress</strong>
+                      <span class="sk-chip is-checking">Writing notes…</span>
+                    </div>
+                    <p class="panel-muted" style="margin-top: 6px; font-size: 12px">Sending approved session text to Anthropic and waiting for structured notes.</p>
+                    <div class="sk-actions"><span class="sk-btn">Cancel</span></div>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <div class="sk-row-head">
+                      <strong class="panel-h3">4. Failed state</strong>
+                      <span class="sk-chip is-rejected">Failed</span>
+                    </div>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      <strong>Could not write meeting notes.</strong> Anthropic did not return structured notes (request timed out). Your transcript and notes were not changed.
+                    </div>
+                    <div class="sk-actions">
+                      <span class="sk-btn">Try again</span>
+                      <span class="sk-btn">Dismiss</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3. Editable structured result + Keep / Discard -->
+                <div class="km-pane">
+                  <div class="sk-row-head">
+                    <strong class="panel-h3">3. Editable structured notes (Keep or Discard)</strong>
+                    <span class="sk-chip is-set">Editable draft</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
+                    Review and edit any line before keeping. Keeping adds these notes to your Keep this meeting Markdown export; Discard removes them from memory.
+                  </p>
+                  <div class="up-notes-editor">
+                    <div class="up-notes-section">
+                      <span class="mono-label" style="color: var(--g-muted)">Summary</span>
+                      <p style="font-size: 13px; margin-top: 4px">Release review for the Friday date; legal review needs two full working days once the draft lands <span class="up-citation">[02:11]</span>.</p>
+                    </div>
+                    <div class="up-notes-section">
+                      <span class="mono-label" style="color: var(--g-muted)">Decisions</span>
+                      <p style="font-size: 13px; margin-top: 4px">Hold off on confirming Friday until the draft reaches legal by Wednesday morning <span class="up-citation">[02:11] [06:40]</span>.</p>
+                    </div>
+                    <div class="up-notes-section">
+                      <span class="mono-label" style="color: var(--g-muted)">Action items (owners only where stated)</span>
+                      <p style="font-size: 13px; margin-top: 4px">Send draft contract text to legal by Wednesday morning · Owner: <strong>Sam</strong> <span class="up-citation">[06:40]</span></p>
+                      <p style="font-size: 13px; margin-top: 4px">Confirm final sign-off window · Owner: <strong>not stated</strong> <span class="up-citation">[04:08]</span></p>
+                    </div>
+                    <div class="up-notes-section">
+                      <span class="mono-label" style="color: var(--g-muted)">Open questions</span>
+                      <p style="font-size: 13px; margin-top: 4px">Can legal finish review in time for Friday if the draft arrives Wednesday morning? <span class="up-citation">[04:08] [06:40]</span></p>
+                    </div>
+                  </div>
+                  <div class="sk-actions" style="margin-top: 12px">
+                    <span class="sk-btn-primary">Keep (add to meeting export)</span>
+                    <span class="sk-btn is-danger">Discard</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="up-boundary">
+                <strong>Component boundary (Designed, not built):</strong> One new component <code>src/components/WriteMeetingNotes.tsx</code> + <code>src/components/write-meeting-notes.css</code>, mounted at one mount point in <code>src/App.tsx</code> inside the post-Stop ended-session panel directly below <code>KeepMeetingChoice</code>.
+              </div>
             </article>
           </div>
         </div>
