@@ -94,7 +94,7 @@ Passing notes are rendered by Rust. Each item ends with where it came from, `(tr
 
 ## Settings
 
-**Settings → Your API keys → Model for meeting notes** picks one of the three models the cue path already lists (`scripts/cue-lab-anthropic-core.mjs` and `src-tauri/src/anthropic_api.rs`): **Most careful (default)**, **Balanced** or **Quickest**, each with its relative cost, with the model's identifier in the help text. The default is the Opus-class model because this is one request per meeting and it is what people keep. The choice lasts until quit and applies to the next request.
+**Settings → Your API keys → Model for meeting notes** picks one of the three models the cue path already lists (`scripts/cue-lab-anthropic-core.mjs` and `src-tauri/src/anthropic_api.rs`): **Most careful (default)**, **Balanced** or **Quickest**, each with its relative cost, with the model's identifier in the help text. The default is the Opus-class model because this is one request per meeting and it is what people keep. The choice is kept in the settings file between launches and applies to the next request.
 
 ## Evidence
 

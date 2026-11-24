@@ -33,8 +33,11 @@ presses Start live session and approves cue processing, as always. TalkQTE
 never starts a session by itself.
 
 Not for *App* skips that application; Don't ask again turns the prompt off.
-Both, and the setting itself, last until the app quits, as every TalkQTE
-setting does today. The setting is **off by default**.
+Both, and the setting itself, are kept in the [settings file](../PRIVACY.md)
+and apply at the next launch. Not for *App* is kept as the application's
+bundle identifier only, and only for the known meeting applications and
+browsers below, which Settings names from a fixed list after a restart. The
+setting is **off by default**.
 
 ## Signals assessed
 
@@ -65,11 +68,25 @@ watcher thread checks the setting and returns before any read.
 
 ## The app has to be running
 
-TalkQTE notices a call only while it is open. Making that dependable needs a
-menu bar presence (so the notebook window can be closed) and an "Open at
-login" option; neither is in this slice, and neither should be on by default.
-Until settings persist across launches, the person has to turn the prompt on
-each time TalkQTE starts.
+TalkQTE notices a call only while it is running. Three things make that
+dependable, each the person's choice:
+
+- The setting is saved, so once turned on it stays on at the next launch.
+- **Settings → Menu bar and login → Keep running in the menu bar when the
+  notebook is closed** (off by default). With it on, closing the notebook
+  leaves TalkQTE in the menu bar and out of the Dock, still watching if the
+  prompt is on. With it off, closing the notebook quits, as before.
+- **Open at login** (off by default) registers TalkQTE with macOS
+  (`SMAppService`) so it opens when the person logs in. The state shown is
+  read back from macOS each time; macOS may ask for approval in System
+  Settings → General → Login Items.
+
+The menu bar item shows whether a session is running and has **Open
+notebook**, **Start session…**, **Stop session** (only while one runs), the
+prompt's on/off switch and **Quit TalkQTE**. Start session… opens the
+notebook's usual start, as the offer's Start does; nothing is chosen,
+approved or captured from the menu bar. An offer's Start brings the notebook
+back from the menu bar too.
 
 ## Code and tests
 
