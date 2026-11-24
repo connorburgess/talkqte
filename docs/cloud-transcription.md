@@ -31,9 +31,12 @@ stream waits, and the stream stops with `settings`. A session may send at
 most 120 minutes of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects;
 Deepgram bills the person's account for it. The budget is made once per live
 start, after the start gate is taken, and handed to that session's stream and
-its replacements only, so another start cannot replace or reuse it. A
-development application source started into a session opens its own streams
-under a separate 120-minute budget. The caps are per session only: there is
+its replacements only, so another start cannot replace or reuse it. An
+application started into a microphone session (both sides of a call) opens its
+own stream, but spends that session's budget: the 120 minutes are counted
+across both streams, so two streams at once use them twice as fast, as
+Deepgram bills each stream. A session for an application alone has a budget
+of its own, being a session of its own. The caps are per session only: there is
 no per-launch or per-day cap with the person's key. A 401 or 403 marks the key rejected, so Settings
 says so and the next start is refused with "Deepgram rejected your API key.
 Replace it in Settings to start a live session." Without a key, a start is
@@ -161,12 +164,51 @@ Only final results become transcript lines. Interim results are dropped.
 Deepgram's speaker label is untrusted: it is never shown or sent to a cue
 model, and only the timing log records it.
 
+**What the review says.** The review's Deepgram sentence names exactly the
+session's capture sources, fixed when the session starts: "the live audio
+from your microphone"; "the live audio of *App* (audio from all of its
+windows may be included), not your microphone"; or, for both, "the live audio
+from your microphone and, as a second stream, from *App* (audio from all of its
+windows may be included)", with the cap "counted across both streams". One
+approval covers both streams; turning processing off or Stop ends both. An
+application can join only a session started with it, and only that exact
+reviewed selection (its listing identity and bundle identifier, never a
+name), once: after it ends, the session takes no other application. An
+approval therefore never covers a source it did not name. With the person's
+key a joining application must spend the session's budget; without it the
+application is refused rather than given a fresh cap.
+
+**Both sides of a call.** In a session with both sources, lines are labelled
+by where they were heard: **You** for the microphone, **Them** for the
+application. The labels are not speaker identity (several people can be on
+either side) and they stay on the Mac: the cue model still receives the
+fixed label "Speaker". A kept meeting writes them, with a sentence saying so.
+When the microphone also hears the application through the speakers, the same
+words arrive twice. A microphone line is treated as a likely echo only when it
+is a close copy of one application line timed within 4 seconds: at least six
+words, the shorter line at least 70% of the longer, and the longest run of the
+same words in the same order at least 85% of the longer line
+(`engine/sources.rs`). Lines are compared one at a time, never pooled, so
+replies such as "I don't know", "yes I agree" or a repeated figure are kept.
+A likely echo is never silent: it stays in the transcript, marked "Likely an
+echo of Them · not used for cues", with **It was me** and **Remove**, and is
+kept in the meeting marked "You (likely an echo of Them)" unless the person
+removes it. It is never sent to a cue model, even after **It was me**. The
+guard cannot catch a microphone copy that arrives before the application's
+line, short copies, copies Deepgram recognises very differently, or copies
+split across lines; headphones avoid the problem. If the application's stream fails, or the application stops or
+never starts, the session runs on with the microphone and says "Audio from
+*App* stopped. Only your microphone is heard now"; a microphone stream failure
+ends the session and its application as before.
+
 ## What stops it
 
 | Event | What happens |
 | --- | --- |
 | **Stop live session**, microphone session | The audio already captured is sent, the stream is closed, and the app waits up to 10 seconds for the last results. |
 | **Stop live session**, application-audio session | The stream is closed at once. Queued audio is discarded. |
+| **Stop live session**, both sources | The microphone's stream is drained as above; the application's is closed at once. |
+| The application's stream fails, in a session with both sources | That stream ends; the microphone's continues. The session says the application stopped and why. |
 | End, quit, or a source that is not attached | The stream is closed at once. Queued audio is discarded. |
 | The review is turned off (**Disable processing**, **Off**, or anything else that withdraws it) | Sending stops at once, including audio already queued for the socket, and the stream is closed. The session ends with "cue processing was turned off, so audio stopped being sent". Approving again does not reopen the stream for that session. |
 | Pause cues, with your own Anthropic key | Cue requests stop and the review still holds, so audio is still sent to Deepgram and billed to your account, and the transcript continues (a kept meeting stays complete). The review, the Pause help in the notebook and the companion ("Mic still on · audio to Deepgram") say so. Turning processing off or Stop ends the audio. |

@@ -698,7 +698,7 @@ fn data_policy(model: Model) -> String {
 
 /// The engine for a live session with this connection registered. Sends
 /// nothing until the person reviews and approves the session.
-pub fn connected_engine() -> crate::engine::Engine {
+pub fn connected_engine(sources: &crate::engine::SessionSources) -> crate::engine::Engine {
     let model = model(MODEL).expect("the default model is known");
     let usage = Arc::new(Usage::default());
     if let Ok(mut current) = current().lock() {
@@ -714,7 +714,7 @@ pub fn connected_engine() -> crate::engine::Engine {
     registered(
         adapter,
         model,
-        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::review_sentence(sources),
     )
 }
 

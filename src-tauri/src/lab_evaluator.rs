@@ -1515,7 +1515,7 @@ fn processor_configuration(
     }
 }
 
-pub(crate) fn connected_engine() -> Engine {
+pub(crate) fn connected_engine(sources: &crate::engine::SessionSources) -> Engine {
     let globals = GLOBALS.get();
     let settings = globals.and_then(|g| g.settings.clone().ok());
     let backend = settings
@@ -1526,7 +1526,7 @@ pub(crate) fn connected_engine() -> Engine {
     let Ok(processor) = processor_configuration(
         backend,
         settings.as_ref(),
-        crate::transcription::cloud::review_sentence(),
+        crate::transcription::cloud::review_sentence(sources),
         crate::transcription::cloud::audio_destination(),
     ) else {
         let processor = ProcessorConfiguration::new(

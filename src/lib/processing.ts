@@ -224,6 +224,8 @@ export function sourceProblem(problem: string | null | undefined) {
       return 'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.';
     case 'devSettingInvalid':
       return 'TALKQTE_DEV_STOP_AFTER_S must be a whole number of seconds, so the launch setting started nothing.';
+    case 'notInSession':
+      return 'This live session was started without an application, so its review does not cover one. Stop it, then start a session with the microphone and the application.';
     case 'unavailable':
       return 'Application audio is unavailable. A session from an application needs live transcription, which this build or launch does not have.';
     default:

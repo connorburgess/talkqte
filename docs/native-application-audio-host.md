@@ -192,11 +192,13 @@ With `TALKQTE_DEV_APPLICATION_WITH_MICROPHONE=1` the same attempt instead
 joins a call's other side: after finding the application it waits up to five
 minutes for a live session the person starts from the microphone, then
 reviews the application and attaches it to that session with the ordinary
-`start`. It never starts the microphone or approves processing, and it is
-refused in a lab run, which binds a session for the application alone. The
-timed Stop then stops the application only. Scripted tests cover the wait,
-the attach and the refusals; no device run has used it, and the approval
-text shown for the session still names one capture source, not both.
+`start`. The setting declares that application for the next microphone
+session at launch, so that session's review names both sources and its cap is
+counted across both; a session started without the declaration refuses the
+application (`notInSession`). It never starts the microphone or approves
+processing, and it is refused in a lab run, which binds a session for the
+application alone. The timed Stop then stops the application only. Scripted
+tests cover the wait, the attach and the refusals; no device run has used it.
 
 ## The status
 
@@ -462,9 +464,12 @@ Against the [selected-application acceptance gates](system-audio-plan.md):
   no longer dropped because the other's later line arrived first; the
   transcript and cue requests keep arrival order, so lines from the two can
   appear slightly out of time order. This is covered by a scripted test, not
-  by a device run. Microphone pickup of the same speech could still add
-  duplicate lines, and that is not handled, so transcript quality must not
-  be judged through this host. The refused-line count in the run's record
+  by a device run. Microphone pickup of the application's sound is met by a
+  bounded echo guard (a microphone line mostly repeating application lines
+  within 4 seconds is left out and counted; see
+  [cloud transcription](cloud-transcription.md)), whose
+  real effect is unmeasured, so transcript quality must not be judged through
+  this host yet. The refused-line count in the run's record
   counts every line of the source that was not taken, whether the engine
   refused it or the source was no longer attached.
 - **Performance: open.** The source has its own cloud stream; its network,

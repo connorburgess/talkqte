@@ -125,6 +125,12 @@ impl Control {
         self.0.cancelled.store(true, Ordering::Release);
     }
 
+    /// The reviewed application this operation was approved for.
+    #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
+    pub(crate) fn application(&self) -> &Application {
+        &self.0.application
+    }
+
     /// Identity of the reviewed operation, not of its application or name.
     #[cfg(any(all(target_os = "macos", feature = "native-audio-spike"), test))]
     pub(crate) fn same_operation(&self, other: &Control) -> bool {

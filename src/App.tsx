@@ -24,6 +24,7 @@ import {
   type ContextItem,
   type CueSnapshot,
   type LiveStatus,
+  type Segment,
   type Snapshot,
   type GranolaStatus,
 } from './lib/types';
@@ -49,6 +50,10 @@ import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import {
+  type EchoLine,
+  applicationEndedText,
+  echoText,
+  sourcesHeading,
   transcribedWhere,
   transcriptionDropText,
   transcriptionReconnectText,
@@ -437,6 +442,17 @@ function FloatingQuestion() {
       </div>
     </main>
   );
+}
+
+/** The transcript as shown: its lines and any microphone lines suppressed
+ * as a likely echo, in time order. */
+function transcriptLines(state: Snapshot) {
+  const lines: { segment: Segment; echo?: EchoLine }[] = state.transcript.map(
+    (segment) => ({ segment }),
+  );
+  for (const echo of state.sources?.echoes ?? [])
+    lines.push({ segment: echo, echo });
+  return lines.sort((a, b) => a.segment.atMs - b.segment.atMs);
 }
 
 function Notebook() {
@@ -1357,6 +1373,12 @@ function Notebook() {
                       {transcriptionStopText(state.transcription)}
                     </p>
                   )}
+                  {applicationEndedText(state.sources) && (
+                    <p role="alert">{applicationEndedText(state.sources)}</p>
+                  )}
+                  {echoText(state.sources) && (
+                    <p role="status">{echoText(state.sources)}</p>
+                  )}
                   {transcriptionDropText(state.transcription) && (
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
@@ -1541,23 +1563,64 @@ function Notebook() {
                     {(state.live || simulated) && (
                       <p className="muted small">
                         {state.live
-                          ? sourceApp
-                            ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
-                            : `Your microphone · ${transcribedWhere(state.transcription)}`
+                          ? (sourcesHeading(
+                              state.sources,
+                              state.transcription,
+                            ) ??
+                            (sourceApp
+                              ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
+                              : `Your microphone · ${transcribedWhere(state.transcription)}`))
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
-                    {state.transcript.length ? (
-                      state.transcript.map((segment) => (
+                    {transcriptLines(state).length ? (
+                      transcriptLines(state).map(({ segment, echo }) => (
                         <article
-                          className="transcript-segment"
+                          className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
                           key={segment.id}
                         >
                           <div>
                             <strong>{segment.speaker}</strong>
                             <time>{clockTime(segment.atMs)}</time>
+                            {echo && !echo.kept && (
+                              <span className="transcript-echo-label">
+                                Likely an echo of Them · not used for cues
+                              </span>
+                            )}
                           </div>
                           <p>{segment.text}</p>
+                          {echo && !echo.kept && (
+                            <div className="transcript-echo-actions">
+                              <button
+                                className="secondary-button"
+                                disabled={busy}
+                                onClick={() =>
+                                  void run(() =>
+                                    bridge.command('resolve_echo_line', {
+                                      id: segment.id,
+                                      keep: true,
+                                    }),
+                                  )
+                                }
+                              >
+                                It was me
+                              </button>
+                              <button
+                                className="secondary-button"
+                                disabled={busy}
+                                onClick={() =>
+                                  void run(() =>
+                                    bridge.command('resolve_echo_line', {
+                                      id: segment.id,
+                                      keep: false,
+                                    }),
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
                         </article>
                       ))
                     ) : (

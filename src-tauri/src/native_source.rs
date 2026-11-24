@@ -339,13 +339,16 @@ fn cloud_feed<A: Access>(
                 .cloud_transcription_reconnected(session, lost_ms)
         });
     })
-    // The pump then cancels the source, which ends the session; the session
-    // keeps the reason for the notebook to show.
+    // The pump then cancels the source. A session for the application alone
+    // ends and keeps the reason; one with the microphone too runs on and
+    // says the application's audio stopped, with the reason.
     .on_failure(move |failure| {
         notice.with(|runtime| {
-            runtime
-                .engine
-                .cloud_transcription_stopped(session, failure.code())
+            runtime.engine.source_transcription_stopped(
+                session,
+                crate::engine::LineOrigin::Application,
+                failure.code(),
+            )
         });
     });
     // One replacement stream at a time after a connection failure, under
@@ -704,7 +707,14 @@ mod tests {
 
     fn fixture() -> Fixture {
         let mut runtime = Runtime::default();
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional",
+                )));
         runtime.install_live_start(&ticket).unwrap();
         drop(ticket);
         let session = runtime.engine.session();
@@ -938,9 +948,11 @@ mod tests {
             fixture.transcript(),
             [(100, "Fictional cloud line.".to_string())]
         );
+        // Labelled by its source, since the session has the microphone too;
+        // never by Deepgram's speaker number.
         assert_eq!(
             fixture.runtime.lock().unwrap().engine.state.transcript[0].speaker,
-            "Speaker"
+            crate::engine::THEM
         );
         // The lost stream ended the source; nothing fell back to another path.
         assert!(fixture.control.is_cancelled());

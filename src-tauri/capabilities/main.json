@@ -27,6 +27,7 @@
     "allow-export-markdown",
     "allow-export-preview",
     "allow-set-keep-meeting",
+    "allow-resolve-echo-line",
     "allow-meeting-notes-plan",
     "allow-write-meeting-notes",
     "allow-cancel-meeting-notes",

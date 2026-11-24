@@ -537,6 +537,26 @@ impl Host {
         Ok(())
     }
 
+    /// The name of the application under `review`, if that is the current
+    /// review. Nothing is requested of the OS.
+    pub(crate) fn reviewed_application(&self, review: &str) -> Option<Application> {
+        let state = self.lock();
+        state
+            .review
+            .as_ref()
+            .filter(|(id, _)| id == review)
+            .map(|(_, review)| review.application().clone())
+    }
+
+    /// The listed application with this selection id, if still listed.
+    pub(crate) fn listed_application(&self, selection: &str) -> Option<Application> {
+        self.lock()
+            .listed
+            .iter()
+            .find(|application| application.selection_id() == selection)
+            .cloned()
+    }
+
     /// The person approved exactly the application under review.
     pub(crate) fn start(&self, review: &str) -> Result<(), Error> {
         self.start_with(review, false)
@@ -942,6 +962,7 @@ fn refusal_problem(refused: Refused) -> Option<Problem> {
     Some(match refused {
         Refused::Clock(TimingError::SessionChanged) => Problem::NoLiveSession,
         Refused::Clock(TimingError::Occupied) => Problem::SessionHasSource,
+        Refused::Clock(TimingError::Undeclared) => Problem::NotInSession,
         Refused::Clock(_) => Problem::ClockRefused,
         // The person stopped it before anything started: not a problem.
         Refused::Start(Failure::Cancelled) => return None,
@@ -1080,6 +1101,7 @@ pub(crate) mod app {
                 Ok(ready) => ready,
                 Err(refused) => {
                     self.selections.clear();
+                    application_not_heard(&access);
                     return Err(refused);
                 }
             };
@@ -1089,8 +1111,25 @@ pub(crate) mod app {
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
-            unsafe { native_source::run(access, start, selection, LIMITS, opener, monitor) }
+            let outcome = unsafe {
+                native_source::run(access.clone(), start, selection, LIMITS, opener, monitor)
+            };
+            if outcome.is_err() {
+                application_not_heard(&access);
+            }
+            outcome
         }
+    }
+
+    /// A start refused before the source fed the session: a session with
+    /// the microphone too runs on, and says the application is not heard.
+    fn application_not_heard(access: &AppAccess) {
+        access.with(|runtime| {
+            let session = runtime.engine.session();
+            if runtime.live_source.is_none() {
+                runtime.engine.application_ended(session, "not_started");
+            }
+        });
     }
 
     fn record_startup(
@@ -1233,12 +1272,32 @@ pub(crate) mod app {
     /// the cloud stream this launch selected. A build or launch without one,
     /// or with unusable settings, refuses the start; nothing is transcribed
     /// on this device.
-    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Streams, String> {
+    /// Joining a microphone session, the source spends that session's
+    /// budget, so the session has one cap across both streams.
+    fn recognizer(app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Streams, String> {
         if let Some(reason) = crate::live_unavailable() {
             return Err(reason.into());
         }
-        crate::transcription::cloud::streams()
-            .map_err(|_| "The cloud transcription settings are not usable.".to_string())
+        let (joining, shared) = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .map(|runtime| {
+                let joining = runtime
+                    .engine
+                    .sources()
+                    .is_some_and(crate::engine::SessionSources::both_sources);
+                (joining, runtime.session_budget())
+            })
+            .map_err(|_| "The session is unavailable.".to_string())?;
+        if joining {
+            crate::transcription::cloud::streams_sharing(shared)
+        } else {
+            // A session for the application alone: its own session, its own
+            // budget.
+            crate::transcription::cloud::streams()
+        }
+        .map_err(|_| "The cloud transcription settings are not usable.".to_string())
     }
 
     /// The single command for this development surface, main window only.
@@ -1314,12 +1373,20 @@ pub(crate) mod app {
                     host.start_by_setting_joining(
                         &settings,
                         DevWaits::default(),
-                        Some(move || {
+                        Some(move |application: &Application| {
                             microphone_app
                                 .state::<AppState>()
                                 .0
                                 .lock()
-                                .is_ok_and(|runtime| runtime.microphone_session_takes_a_source())
+                                .is_ok_and(|mut runtime| {
+                                    // Declare it for the next microphone
+                                    // session, which takes it once.
+                                    if runtime.live.is_none() && !runtime.dev_join_declared {
+                                        runtime.dev_join_application = Some(application.clone());
+                                        runtime.dev_join_declared = true;
+                                    }
+                                    runtime.microphone_session_takes_a_source()
+                                })
                         }),
                         |_| true,
                     );

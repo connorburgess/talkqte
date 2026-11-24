@@ -34,6 +34,7 @@ fn main() {
             "export_markdown",
             "export_preview",
             "set_keep_meeting",
+            "resolve_echo_line",
             "meeting_notes_plan",
             "write_meeting_notes",
             "cancel_meeting_notes",

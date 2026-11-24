@@ -61,6 +61,8 @@ let delayProcessingSnapshot = new URLSearchParams(location.search).has(
 );
 const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
+/** The notebook's answers about lines marked as a likely echo. */
+const echoAnswers: unknown[] = [];
 async function sendProcessing(value: Partial<ProcessingSnapshot>) {
   processing = {
     ...processing,
@@ -469,6 +471,9 @@ mockIPC(
               .join('\n')}\n`
           : notes;
       }
+      case 'resolve_echo_line':
+        echoAnswers.push(structuredClone(args));
+        return;
       case 'set_keep_meeting':
         await publish({
           keepMeeting: (args as Commands['set_keep_meeting']).keep,
@@ -544,6 +549,7 @@ declare global {
       state: () => ProcessingSnapshot;
       targets: StopTarget[];
       applicationAudio: unknown[];
+      echoAnswers: unknown[];
       releaseStart: () => void;
       holdStart: () => void;
       failStart: (message: string) => void;
@@ -602,6 +608,7 @@ window.captureTest = {
   state: () => structuredClone(processing),
   targets: stopTargets,
   applicationAudio,
+  echoAnswers,
   holdStart: () => {
     heldStart = true;
   },

@@ -47,7 +47,7 @@ this build does not have, so nothing can be sent. Use opus-5.5 or haiku-5.5, and
 /// nothing until the person reviews and turns the connection on. Unknown
 /// development settings leave it unusable, with that reason shown, rather
 /// than silently reaching another model or none.
-pub fn connected_engine() -> crate::engine::Engine {
+pub fn connected_engine(sources: &crate::engine::SessionSources) -> crate::engine::Engine {
     use crate::engine::{ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure};
     install_signal_cleanup();
     let processor = |model: String, effort: &str, policy: &str| {
@@ -69,7 +69,7 @@ pub fn connected_engine() -> crate::engine::Engine {
     match Choice::from_environment() {
         Ok(choice) => {
             // One review covers both exports when this launch also streams audio.
-            let policy = match crate::transcription::cloud::review_sentence() {
+            let policy = match crate::transcription::cloud::review_sentence(sources) {
                 Some(transcription) => format!("{DATA_POLICY} {transcription}"),
                 None => DATA_POLICY.to_string(),
             };

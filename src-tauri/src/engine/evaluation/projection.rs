@@ -258,6 +258,9 @@ pub enum SourceProblem {
     /// Development builds only: a launch setting could not be read, so the
     /// setting started nothing.
     DevSettingInvalid,
+    /// The live session was not started with this application, so its
+    /// review did not name it. Nothing was captured.
+    NotInSession,
 }
 
 /// What the notebook needs to describe the source truthfully. Metadata only:

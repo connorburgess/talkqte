@@ -2,12 +2,14 @@ use crate::context::ContextItem;
 use serde::{Deserialize, Serialize};
 
 mod evaluation;
+mod sources;
 pub use evaluation::{
     CaptureState, ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus,
     NoteSelection, NoteSummary, ProcessingError, ProcessingLocation, ProcessingReview,
     ProcessingSnapshot, ProcessingTracker, ProcessorConfiguration, ProcessorDisclosure,
     ProcessorSummary, Scope, SourceCapture, SourcePhase, SourceProblem, StartupState, StopTarget,
 };
+pub use sources::{SessionSources, SourcesStatus, THEM, YOU};
 
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
@@ -39,6 +41,10 @@ pub enum LineOrigin {
     Microphone,
     Application,
 }
+
+/// Why a microphone line was not taken: it repeated the application's
+/// sound. Counted in the session's source status.
+pub const ECHO_DROPPED: &str = "That line repeated the application's audio.";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -484,6 +490,10 @@ pub struct Snapshot {
     /// start a session; absent outside live sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcription: Option<CloudTranscription>,
+    /// The capture sources this live session was started with, and how
+    /// they are doing. Absent outside live sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sources: Option<SourcesStatus>,
     /// The person chose to include this session's transcript and the cues
     /// shown in the Markdown export. Off for every new session; nothing is
     /// written unless the person reviews the export and saves it.
@@ -599,6 +609,9 @@ pub struct Engine {
     /// The time of the last line accepted from each origin, indexed by
     /// `LineOrigin`. Scripted lines count as the microphone's.
     line_floor: [u64; 2],
+    /// Recent application lines, so a microphone line that repeats them
+    /// through the speakers can be dropped.
+    echo: sources::EchoGuard,
     /// Lines that asked the user a question by name this session. A model
     /// cue citing one would repeat the "Asked you" cue, so it is not shown.
     asked_lines: Vec<String>,
@@ -693,6 +706,7 @@ impl Engine {
                 user_name: None,
                 focus: vec![],
                 transcription: None,
+                sources: None,
                 keep_meeting: false,
                 meeting_notes: crate::meeting_notes::Phase::None,
             },
@@ -709,6 +723,7 @@ impl Engine {
             cue_deadline: 0,
             cooldown_until: 0,
             line_floor: [0; 2],
+            echo: sources::EchoGuard::default(),
             asked_lines: vec![],
             model_pause_until: 0,
             dismissed_sources: vec![],
@@ -834,6 +849,7 @@ impl Engine {
         self.next_segment = 0;
         self.cooldown_until = 0;
         self.line_floor = [0; 2];
+        self.echo.clear();
         self.asked_lines.clear();
         self.model_pause_until = 0;
         self.dismissed_sources.clear();
@@ -848,6 +864,10 @@ impl Engine {
                 reconnects: 0,
                 lost_ms: 0,
             });
+        self.state.sources = self
+            .state
+            .live
+            .then(|| SourcesStatus::new(SessionSources::microphone()));
         self.state.status = Status::Running;
         self.changed();
         Ok(())
@@ -1037,6 +1057,93 @@ impl Engine {
         }
     }
 
+    /// Declare the capture sources of the running live session. Called once,
+    /// right after the start, before any review can be made: the review is
+    /// worded from them and an application may feed only a session that
+    /// declared it.
+    pub fn set_sources(&mut self, sources: SessionSources) {
+        if !self.state.live {
+            return;
+        }
+        self.state.sources = Some(SourcesStatus::new(sources));
+        self.changed();
+    }
+
+    /// The capture sources this session declared; a live session without a
+    /// declaration has the microphone alone.
+    pub fn sources(&self) -> Option<&SessionSources> {
+        self.state.sources.as_ref().map(|status| &status.sources)
+    }
+
+    /// The declared application began feeding `session`.
+    pub fn application_attached(&mut self, session: u64) {
+        if session != self.generation {
+            return;
+        }
+        if let Some(status) = self.state.sources.as_mut() {
+            if !status.application_attached {
+                status.application_attached = true;
+                self.changed();
+            }
+        }
+    }
+
+    /// The application source of `session` stopped, or never started, while
+    /// the session runs on with its microphone. `code` is a fixed reason;
+    /// the first one stays. Nothing happens in a session without both
+    /// sources: one fed by an application alone ends with its source.
+    pub fn application_ended(&mut self, session: u64, code: &str) {
+        if session != self.generation || self.state.status != Status::Running || self.live_stopping
+        {
+            return;
+        }
+        if let Some(status) =
+            self.state.sources.as_mut().filter(|status| {
+                status.sources.both_sources() && status.application_ended.is_none()
+            })
+        {
+            status.application_ended = Some(code.into());
+            self.changed();
+        }
+    }
+
+    /// A cloud stream for `origin` ended with a failure. In a session with
+    /// both sources, the application's stream failing leaves the microphone
+    /// running, so it is recorded as the application ending, not as the
+    /// session's transcription stopping.
+    pub fn source_transcription_stopped(&mut self, session: u64, origin: LineOrigin, code: &str) {
+        if origin == LineOrigin::Application
+            && self.sources().is_some_and(SessionSources::both_sources)
+        {
+            self.application_ended(session, code);
+        } else {
+            self.cloud_transcription_stopped(session, code);
+        }
+    }
+
+    /// The person's answer about a line suppressed as a likely echo: keep it
+    /// as theirs (shown and kept as an ordinary line; still never sent to a
+    /// cue model) or remove it from the transcript and the kept meeting.
+    pub fn resolve_echo(&mut self, id: &str, keep: bool) -> Result<(), String> {
+        let status = self
+            .state
+            .sources
+            .as_mut()
+            .ok_or("That line is no longer in this session.")?;
+        let index = status
+            .echoes
+            .iter()
+            .position(|echo| echo.line.id == id)
+            .ok_or("That line is no longer in this session.")?;
+        if keep {
+            status.echoes[index].kept = true;
+        } else {
+            status.echoes.remove(index);
+        }
+        self.changed();
+        Ok(())
+    }
+
     /// `ingest_from` for a line from the microphone.
     pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
         self.ingest_from(session, LineOrigin::Microphone, segment)
@@ -1100,7 +1207,27 @@ impl Engine {
         if segment.at_ms < self.line_floor[origin as usize] {
             return Err("Transcript segments must arrive in order.".into());
         }
+        let both = self.sources().is_some_and(SessionSources::both_sources);
+        if both && origin == LineOrigin::Microphone && self.echo.is_echo(segment.at_ms, text) {
+            // The microphone most likely heard the application's sound
+            // through the speakers. Kept aside, shown marked and kept in the
+            // meeting until the person removes it; never sent to a cue model.
+            let line = Segment {
+                text: text.into(),
+                speaker: YOU.into(),
+                ..segment
+            };
+            if let Some(status) = self.state.sources.as_mut() {
+                status.suppressed(line);
+            }
+            self.changed();
+            return Err(ECHO_DROPPED.into());
+        }
         self.line_floor[origin as usize] = segment.at_ms;
+        if both && origin == LineOrigin::Application {
+            self.echo.heard_application(segment.at_ms, text);
+        }
+        let speaker = sources::label(self.sources(), origin).unwrap_or(speaker);
         let segment = Segment {
             text: text.into(),
             speaker: speaker.into(),
@@ -2048,7 +2175,8 @@ impl Engine {
     /// chose to keep the meeting, it also holds the cues this session showed
     /// from its conversation (not note reminders or the Still open list) and
     /// its transcript, with times from the start of the session and no
-    /// speaker labels. Never the name setting, focus lines, imported notes or
+    /// speaker labels; a session with both sources labels each line by its
+    /// source (You or Them), which is not who spoke. Never the name setting, focus lines, imported notes or
     /// audio; words people said aloud, names included, are in the transcript.
     pub fn markdown(&self) -> String {
         let mut out = format!("# TalkQTE notes\n\n{}\n", self.state.notes);
@@ -2082,11 +2210,48 @@ impl Engine {
         if self.state.transcription.is_some() {
             out.push_str("Transcribed by Deepgram. Speakers are not identified.\n\n");
         }
-        if self.state.transcript.is_empty() {
+        let two = self
+            .sources()
+            .filter(|sources| sources.both_sources())
+            .and_then(|sources| sources.application.as_deref());
+        if let Some(application) = two {
+            out.push_str(&format!(
+                "{YOU} marks a line heard by this Mac's microphone and {THEM} a line from {}'s audio. They say where a line was heard, not who said it.\n\n",
+                flat(application)
+            ));
+        }
+        // Lines suppressed as a likely echo stay in the meeting, marked, unless
+        // the person removed them; one they kept as theirs is ordinary.
+        let echoes = self
+            .state
+            .sources
+            .as_ref()
+            .map_or(&[][..], |status| status.echoes.as_slice());
+        let mut lines: Vec<(&Segment, Option<bool>)> = self
+            .state
+            .transcript
+            .iter()
+            .map(|line| (line, None))
+            .chain(echoes.iter().map(|echo| (&echo.line, Some(echo.kept))))
+            .collect();
+        lines.sort_by_key(|(line, _)| line.at_ms);
+        if lines.is_empty() {
             out.push_str("None.\n");
         }
-        for line in &self.state.transcript {
-            out.push_str(&format!("- {} {}\n", clock(line.at_ms), flat(&line.text)));
+        for (line, echo) in lines {
+            let label = match (two, echo) {
+                (Some(_), Some(false)) => format!(" {YOU} (likely an echo of {THEM}):"),
+                (Some(_), _) if line.speaker == YOU || line.speaker == THEM => {
+                    format!(" {}:", line.speaker)
+                }
+                _ => String::new(),
+            };
+            out.push_str(&format!(
+                "- {}{} {}\n",
+                clock(line.at_ms),
+                label,
+                flat(&line.text)
+            ));
         }
         out
     }

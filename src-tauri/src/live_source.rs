@@ -63,6 +63,12 @@ pub(crate) enum Refused {
     /// Another source that is still current already feeds this session. It is
     /// left untouched; attaching never replaces a running source.
     Occupied,
+    /// The session was not started with this application (the reviewed
+    /// selection), so its review did not name it.
+    Undeclared,
+    /// The session's application already fed it and ended; it takes no
+    /// other.
+    Spent,
 }
 
 /// Why the source sink did not take a line.
@@ -99,6 +105,18 @@ impl Runtime {
         self.live_source_operation().is_some()
             && self.live_source.is_none()
             && self
+                .engine
+                .sources()
+                .is_some_and(crate::engine::SessionSources::both_sources)
+            // One application per session: once it has fed the session and
+            // ended, the session takes no other.
+            && !self
+                .engine
+                .state
+                .sources
+                .as_ref()
+                .is_some_and(|status| status.application_attached)
+            && self
                 .live
                 .as_ref()
                 .is_some_and(|live| live.microphone.is_some())
@@ -122,6 +140,18 @@ impl Runtime {
         if self.live_source.is_some() {
             return Err(Refused::Occupied);
         }
+        // Only the exact application the session was started with, whose
+        // review named it, and only once: after it ends the session takes no
+        // other, so no approval can cover a source it did not name.
+        let status = self.engine.state.sources.as_ref();
+        if !status.is_some_and(|status| status.sources.declares(control.application())) {
+            return Err(Refused::Undeclared);
+        }
+        if status.is_some_and(|status| status.application_attached) {
+            return Err(Refused::Spent);
+        }
+        let session = self.engine.session();
+        self.engine.application_attached(session);
         self.live_source = Some(LiveSource {
             #[cfg(all(
                 debug_assertions,
@@ -254,6 +284,9 @@ impl Runtime {
         {
             let session = source.session;
             self.live_source = None;
+            // A session with both sources runs on with its microphone; it
+            // says so instead of reading as if both were still heard.
+            self.engine.application_ended(session, "ended");
             // A session that only this source fed has nothing left to hear.
             self.end_source_session(session);
         }
@@ -297,6 +330,32 @@ impl Runtime {
         self.live.is_none()
     }
 
+    /// The sources of a microphone session about to start: with `joining`,
+    /// the application the person chose beside it; otherwise the one the
+    /// development join setting declared, for this one session only.
+    pub(crate) fn next_microphone_sources(
+        &mut self,
+        joining: Option<&crate::application_audio::Application>,
+    ) -> crate::engine::SessionSources {
+        let dev = self.dev_join_application.take();
+        match joining.or(dev.as_ref()) {
+            Some(application) => crate::engine::SessionSources::both(application),
+            None => crate::engine::SessionSources::microphone(),
+        }
+    }
+
+    /// The Deepgram budget of the running live session, for a second
+    /// source joining it. None outside that session.
+    #[cfg_attr(
+        not(any(all(target_os = "macos", feature = "native-audio-spike"), test)),
+        allow(dead_code)
+    )]
+    pub(crate) fn session_budget(&self) -> Option<crate::transcription::cloud::Budget> {
+        let (session, budget) = self.live_budget.as_ref()?;
+        (self.live_session() == Some(*session) && self.engine.session() == *session)
+            .then(|| budget.clone())
+    }
+
     fn live_session(&self) -> Option<u64> {
         self.live.as_ref().map(|live| live.session)
     }
@@ -329,7 +388,12 @@ impl Runtime {
         {
             return Err(Failure::Busy);
         }
-        let ticket = self.begin_live_start().map_err(|_| Failure::Unavailable)?;
+        let ticket = self
+            .begin_live_start()
+            .map_err(|_| Failure::Unavailable)?
+            .with_sources(crate::engine::SessionSources::application(
+                control.application(),
+            ));
         let session = self
             .install_live_start(&ticket)
             .map_err(|_| Failure::Unavailable)?;
@@ -401,9 +465,18 @@ mod tests {
         Engine,
     };
 
+    /// A live session started with the microphone and the fictional player,
+    /// as the notebook starts one for both sides of a call.
     fn live() -> Runtime {
+        live_with(crate::engine::SessionSources::both((
+            "Fictional player",
+            "fictional-player",
+        )))
+    }
+
+    fn live_with(sources: crate::engine::SessionSources) -> Runtime {
         let mut runtime = Runtime::default();
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket = runtime.begin_live_start().unwrap().with_sources(sources);
         runtime.install_live_start(&ticket).unwrap();
         runtime
     }
@@ -558,7 +631,9 @@ mod tests {
             );
             if case == 0 {
                 drop(runtime.take_live_for_stop());
-                let ticket = runtime.begin_live_start().unwrap();
+                let ticket = runtime.begin_live_start().unwrap().with_sources(
+                    crate::engine::SessionSources::both(("Fictional player", "fictional-player")),
+                );
                 runtime.install_live_start(&ticket).unwrap();
                 assert_ne!(runtime.engine.session(), old_session);
                 assert_eq!(
@@ -619,7 +694,12 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
-            text: "A fictional line.".into(),
+            // Different words for each origin, so none reads as an echo.
+            text: if id.starts_with('m') {
+                format!("Microphone words for {id}.")
+            } else {
+                format!("Player sentence {id} here.")
+            },
         };
         let mut runtime = live();
         let session = runtime.engine.session();
@@ -672,9 +752,12 @@ mod tests {
         runtime.attach_live_source(&source.control).unwrap();
         assert!(!runtime.microphone_session_takes_a_source(), "occupied");
         runtime.retire_live_source();
-        assert!(runtime.microphone_session_takes_a_source());
-        runtime.take_live_for_stop().unwrap();
-        assert!(!runtime.microphone_session_takes_a_source(), "stopping");
+        // Its one application has fed it: the session takes no other.
+        assert!(!runtime.microphone_session_takes_a_source(), "spent");
+        let mut fresh = live();
+        fresh.live.as_mut().unwrap().microphone = Some(1);
+        fresh.take_live_for_stop().unwrap();
+        assert!(!fresh.microphone_session_takes_a_source(), "stopping");
         assert!(!Runtime::default().microphone_session_takes_a_source());
     }
 
@@ -684,7 +767,12 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
-            text: "A fictional line.".into(),
+            // Different words for each origin, so none reads as an echo.
+            text: if id.starts_with('m') {
+                format!("Microphone words for {id}.")
+            } else {
+                format!("Player sentence {id} here.")
+            },
         };
         let mut runtime = live();
         let session = runtime.engine.session();
@@ -719,10 +807,182 @@ mod tests {
     }
 
     #[test]
-    fn a_second_source_is_refused_until_the_first_has_stopped() {
+    fn a_session_for_the_microphone_alone_never_takes_an_application() {
+        let mut runtime = live_with(crate::engine::SessionSources::microphone());
+        runtime.live.as_mut().unwrap().microphone = Some(1);
+        // Its review named the microphone only, so no application joins it.
+        assert!(!runtime.microphone_session_takes_a_source());
+        let source = source("fictional-player");
+        assert_eq!(
+            runtime.attach_live_source(&source.control),
+            Err(Refused::Undeclared)
+        );
+        assert!(runtime.live_source.is_none());
+        assert!(!source.control.is_cancelled(), "refused, not stopped");
+    }
+
+    #[test]
+    fn both_sources_label_their_lines_drop_echoes_and_say_when_the_application_stops() {
+        let line = |id: &str, at_ms, text: &str| crate::engine::Segment {
+            id: id.into(),
+            at_ms,
+            speaker: "Speaker".into(),
+            text: text.into(),
+        };
+        let mut runtime = live();
+        runtime.live.as_mut().unwrap().microphone = Some(1);
+        let session = runtime.engine.session();
+        let source = source("fictional-player");
+        runtime.attach_live_source(&source.control).unwrap();
+        runtime.engine.advance(20_000);
+        let question = "Can you send the revised fictional budget by Friday?";
+        runtime
+            .ingest_source_line(session, &source.control, line("a1", 1_000, question))
+            .unwrap();
+        // The microphone heard the speakers: dropped and counted.
+        assert_eq!(
+            runtime.engine.ingest(session, line("m1", 1_300, question)),
+            Err(crate::engine::ECHO_DROPPED.into())
+        );
+        runtime
+            .engine
+            .ingest(session, line("m2", 3_000, "Yes, I will send it tomorrow."))
+            .unwrap();
+        let lines: Vec<_> = runtime
+            .engine
+            .state
+            .transcript
+            .iter()
+            .map(|line| (line.id.as_str(), line.speaker.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            [("a1", crate::engine::THEM), ("m2", crate::engine::YOU)]
+        );
+        let status = runtime.engine.state.sources.clone().unwrap();
+        assert!(status.application_attached);
+        assert_eq!(status.echo_dropped, 1);
+        assert_eq!(status.application_ended, None);
+        // The kept meeting says which source each line came from, and that
+        // this is not who spoke.
+        runtime.engine.set_keep_meeting(true);
+        let kept = runtime.engine.markdown();
+        assert!(kept.contains("- 00:01 Them: Can you send"));
+        assert!(kept.contains("- 00:03 You: Yes, I will send it tomorrow."));
+        assert!(kept.contains("not who said it"));
+        assert!(kept.contains("Fictional player's audio"));
+        // The suppressed line is not lost: it is shown and kept, marked.
+        assert_eq!(status.echoes.len(), 1);
+        assert_eq!(status.echoes[0].line.id, "m1");
+        assert!(kept.contains("- 00:01 You (likely an echo of Them): Can you send"));
+        // The person says it was theirs: kept as an ordinary line, still not
+        // in the transcript the cue model reads.
+        runtime.engine.resolve_echo("m1", true).unwrap();
+        let kept = runtime.engine.markdown();
+        assert!(kept.contains("- 00:01 You: Can you send"));
+        assert!(!runtime
+            .engine
+            .state
+            .transcript
+            .iter()
+            .any(|line| line.id == "m1"));
+        // Or removes it: gone from the meeting.
+        runtime.engine.resolve_echo("m1", false).unwrap();
+        assert!(!runtime.engine.markdown().contains("00:01 You"));
+        assert!(runtime.engine.resolve_echo("m1", true).is_err());
+        // The application stops by itself: the session runs on with the
+        // microphone and says the application is not heard.
+        source.gate.stop(&source.control).unwrap();
+        runtime.sync();
+        assert!(runtime.live_source.is_none());
+        assert!(runtime.live_source_operation().is_some(), "still running");
+        assert_eq!(
+            runtime
+                .engine
+                .state
+                .sources
+                .as_ref()
+                .unwrap()
+                .application_ended
+                .as_deref(),
+            Some("ended")
+        );
+        runtime
+            .engine
+            .ingest(
+                session,
+                line("m3", 4_000, "Shall we move on to the agenda?"),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn the_development_join_setting_declares_one_session_only() {
+        let mut runtime = Runtime::default();
+        let listed =
+            Application::new("fictional-player".into(), "Fictional player".into()).unwrap();
+        runtime.dev_join_application = Some(listed.clone());
+        assert!(runtime.next_microphone_sources(None).declares(&listed));
+        // Every later microphone session is the microphone alone.
+        assert_eq!(
+            runtime.next_microphone_sources(None),
+            crate::engine::SessionSources::microphone()
+        );
+        // The person's own choice always wins.
+        let chosen = Application::new("fictional-call".into(), "Fictional Call".into()).unwrap();
+        runtime.dev_join_application = Some(listed.clone());
+        let sources = runtime.next_microphone_sources(Some(&chosen));
+        assert!(sources.declares(&chosen) && !sources.declares(&listed));
+    }
+
+    #[test]
+    fn stop_ends_both_sources_of_a_session() {
+        let mut runtime = live();
+        runtime.live.as_mut().unwrap().microphone = Some(1);
+        let source = source("fictional-player");
+        runtime.attach_live_source(&source.control).unwrap();
+        let live = runtime.take_live_for_stop().unwrap();
+        // The application's operation is cancelled at once; the microphone's
+        // generation is handed to the Stop path that releases it.
+        assert!(source.control.is_cancelled());
+        assert_eq!(live.microphone, Some(1));
+        // Stopping is not the application failing: nothing says it ended.
+        assert_eq!(
+            runtime
+                .engine
+                .state
+                .sources
+                .as_ref()
+                .unwrap()
+                .application_ended,
+            None
+        );
+    }
+
+    #[test]
+    fn an_application_joining_a_microphone_session_spends_its_budget() {
+        let mut runtime = live();
+        let session = runtime.engine.session();
+        let budget = crate::transcription::cloud::Budget::new(std::time::Duration::from_secs(60));
+        runtime.live_budget = Some((session, budget.clone()));
+        let shared = runtime
+            .session_budget()
+            .expect("the running session's budget");
+        // One budget: what one stream spends, the other cannot.
+        let all = shared.reserve(u64::MAX);
+        assert!(all > 0);
+        assert_eq!(budget.reserve(1), 0);
+        // A later session never inherits it.
+        runtime.take_live_for_stop().unwrap();
+        assert!(runtime.session_budget().is_none());
+    }
+
+    #[test]
+    fn a_second_source_is_refused_and_the_session_takes_no_other_after_the_first() {
         let mut runtime = live();
         let first = source("fictional-player");
-        let second = source("fictional-other-player");
+        // Another operation on the same declared selection.
+        let second = source("fictional-player");
         runtime.attach_live_source(&first.control).unwrap();
         assert_eq!(
             runtime.attach_live_source(&second.control),
@@ -734,14 +994,52 @@ mod tests {
             Err(Refused::Occupied)
         );
         assert!(!first.control.is_cancelled() && !second.control.is_cancelled());
-        // The first source stops by itself; the live session continues.
+        // The first source stops by itself; the live session continues but
+        // takes no other source, not even the same application again.
         first.gate.stop(&first.control).unwrap();
-        runtime.attach_live_source(&second.control).unwrap();
         runtime.sync();
-        assert!(!second.control.is_cancelled());
         assert!(runtime.live_source_operation().is_some());
-        runtime.take_live_for_stop().unwrap();
-        assert!(second.control.is_cancelled());
+        assert_eq!(
+            runtime.attach_live_source(&second.control),
+            Err(Refused::Spent)
+        );
+        assert!(runtime.live_source.is_none());
+    }
+
+    #[test]
+    fn only_the_application_the_session_was_started_with_can_attach() {
+        let mut runtime = live();
+        runtime.live.as_mut().unwrap().microphone = Some(1);
+        // Same name, different reviewed selection: a different application.
+        let impostor = source("fictional-other-player");
+        assert_eq!(
+            runtime.attach_live_source(&impostor.control),
+            Err(Refused::Undeclared)
+        );
+        // The scenario from review: the approved application quits, and a
+        // different one is started from the main window.
+        let approved = source("fictional-player");
+        runtime.attach_live_source(&approved.control).unwrap();
+        approved.gate.stop(&approved.control).unwrap();
+        runtime.sync();
+        assert!(!runtime.microphone_session_takes_a_source());
+        assert_eq!(
+            runtime.attach_live_source(&impostor.control),
+            Err(Refused::Undeclared)
+        );
+        let session = runtime.engine.session();
+        assert!(runtime
+            .ingest_source_line(
+                session,
+                &impostor.control,
+                crate::engine::Segment {
+                    id: "x1".into(),
+                    at_ms: 0,
+                    speaker: "Speaker".into(),
+                    text: "Words from another application entirely.".into(),
+                },
+            )
+            .is_err());
     }
 
     #[test]
@@ -884,7 +1182,14 @@ mod tests {
         assert!(runtime.end_source_session(session));
         assert!(!runtime.end_source_session(session));
         // A later ordinary session is not ended by the old session's step.
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional-player",
+                )));
         let next = runtime.install_live_start(&ticket).unwrap();
         assert!(!runtime.end_source_session(session));
         assert_eq!(runtime.engine.session(), next);

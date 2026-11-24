@@ -336,7 +336,14 @@ impl Drop for Fixture {
 fn fixture(live: bool) -> Fixture {
     let mut runtime = Runtime::default();
     if live {
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket =
+            runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both((
+                    "Fictional player",
+                    "fictional-0",
+                )));
         runtime.install_live_start(&ticket).unwrap();
     }
     let runtime = Arc::new(Mutex::new(runtime));
@@ -712,12 +719,15 @@ fn a_listing_cancelled_before_the_worker_takes_it_never_asks_the_os() {
 fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session() {
     use app::before_native_start;
     let listed = ["fictional-0", "fictional-1"];
-    let live = || {
-        let mut runtime = Runtime::default();
-        let ticket = runtime.begin_live_start().unwrap();
-        runtime.install_live_start(&ticket).unwrap();
-        Arc::new(Mutex::new(runtime))
-    };
+    let live =
+        || {
+            let mut runtime = Runtime::default();
+            let ticket = runtime.begin_live_start().unwrap().with_sources(
+                crate::engine::SessionSources::both(("Fictional player", "fictional-0")),
+            );
+            runtime.install_live_start(&ticket).unwrap();
+            Arc::new(Mutex::new(runtime))
+        };
     let control = || {
         let gate = Gate::default();
         let review = gate
@@ -760,7 +770,9 @@ fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session()
             let mut runtime = replaced.lock().unwrap();
             drop(runtime.take_live_for_stop());
             runtime.engine.end();
-            let ticket = runtime.begin_live_start().unwrap();
+            let ticket = runtime.begin_live_start().unwrap().with_sources(
+                crate::engine::SessionSources::both(("Fictional player", "fictional-0")),
+            );
             runtime.install_live_start(&ticket).unwrap();
             Ok(())
         }),
@@ -891,11 +903,12 @@ fn a_start_that_cannot_attach_ends_off_with_its_reason_and_sends_no_native_reque
     assert!(!off.may_be_capturing);
     assert_eq!(fixture.script.begins.load(Ordering::SeqCst), 0);
 
-    // A live session that already has another source.
+    // A live session that already has another source: another operation on
+    // the same declared selection, the only kind a session can take.
     let fixture = self::fixture(true);
     let other_gate = Gate::default();
     let other = other_gate
-        .review(Application::new("other".into(), "Fictional player".into()).unwrap())
+        .review(Application::new("fictional-0".into(), "Fictional player".into()).unwrap())
         .unwrap();
     fixture
         .runtime
@@ -1630,7 +1643,7 @@ mod by_setting {
         let f = fixture(true);
         let asked = std::sync::atomic::AtomicUsize::new(0);
         // The person starts the microphone a few polls after launch.
-        let running = || asked.fetch_add(1, Ordering::SeqCst) >= 3;
+        let running = |_: &Application| asked.fetch_add(1, Ordering::SeqCst) >= 3;
         let outcome = f.host.start_by_setting_joining(
             &joining("Fictional player"),
             waits(),
@@ -1657,7 +1670,7 @@ mod by_setting {
         let outcome = f.host.start_by_setting_joining(
             &joining("Fictional player"),
             short,
-            Some(|| false),
+            Some(|_: &Application| false),
             |_| true,
         );
         assert_eq!(outcome, Outcome::Refused("microphone_not_started"));
