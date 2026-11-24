@@ -51,25 +51,6 @@ pub(crate) fn record(app: &tauri::AppHandle, change: impl FnOnce(&mut Settings))
     }
 }
 
-/// Saves the display choices and name as the engine now holds them.
-pub(crate) fn record_engine(app: &tauri::AppHandle, engine: &crate::Engine) {
-    let state = &engine.state;
-    let (size, position, sensitivity, overlay, name) = (
-        state.question_size,
-        state.companion_position,
-        state.sensitivity,
-        state.overlay_enabled,
-        state.user_name.clone(),
-    );
-    record(app, |settings| {
-        settings.question_size = size;
-        settings.companion_position = position;
-        settings.sensitivity = sensitivity;
-        settings.overlay_enabled = overlay;
-        settings.user_name = name;
-    });
-}
-
 /// Saves the call-starting prompt's choices.
 pub(crate) fn record_call_prompt(app: &tauri::AppHandle, watcher: &crate::call_prompt::Watcher) {
     let enabled = watcher.enabled();
