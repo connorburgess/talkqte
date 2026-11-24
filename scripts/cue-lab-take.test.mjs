@@ -677,6 +677,15 @@ function standInTake(options, { trace, hold, cloud }) {
     get dispatchesUsed() {
       return 0;
     },
+    // As the real take: frozen after calibration (fictional numbers).
+    get clockCalibration() {
+      return Object.freeze({
+        nativeMs: 1200,
+        monotonicMs: 5400.5,
+        uncertaintyMs: 0.4,
+        sessionId: '1',
+      });
+    },
   };
 }
 
@@ -931,6 +940,13 @@ test('a full fixture take reaches its terminal state, writes the evidence report
   assert.equal(outcome.recorder.finalized, true);
   assert.equal(outcome.evidence.timing, 'attached');
   assert.equal(outcome.evidence.recording, 'attached');
+  // The broker's clock bridge is kept for the timing estimates.
+  assert.deepEqual(outcome.clockCalibration, {
+    nativeMs: 1200,
+    monotonicMs: 5400.5,
+    uncertaintyMs: 0.4,
+    sessionId: '1',
+  });
   assert.equal(outcome.evidence.recordingDurationMs, 4321.5);
   assert.equal(outcome.player.retired, true);
   const manifest = JSON.parse(readFileSync(outcome.evidence.manifest));

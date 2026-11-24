@@ -1567,8 +1567,13 @@ function cloudMarkdown(c) {
     '',
     `Final end of speech → transcript line: ${c.finalToSegment.count} finals; median ${c.finalToSegment.medianMs ?? 'unknown'} ms, max ${c.finalToSegment.maxMs ?? 'unknown'} ms (${c.finalToSegment.basis}). The provider's speaker label is untrusted and not reported.`,
     '',
+    FINAL_VERSUS_HEARD,
+    '',
   ];
 }
+// How the native figure above differs from the budget row's heard end.
+export const FINAL_VERSUS_HEARD =
+  'This is not the "Heard end → transcript line" target below. It starts from the transcription service\'s own end-of-speech time, on the app\'s clock, so it leaves out how far that time is from the end of the sound the player made. The target starts from the heard end of each line, which needs a measured end per line and an exact line-to-transcript identity; until the evidence has both, that row stays unmeasured. Labelled per-line estimates from the recording come from scripts/cue-lab-take-timing.mjs (docs/lab-take-timing.md) and never fill that row.';
 function budgetMarkdown(b) {
   const cell = (s) =>
     s.result === 'unmeasured'
@@ -1580,6 +1585,8 @@ function budgetMarkdown(b) {
     '### Timing targets',
     '',
     `Compared with docs/budgets.md for ${b.basis}. Within means even the longest possible duration meets the target; over means even the shortest exceeds it. Unmeasured samples are not counted as passing, and no result here confirms a budget.`,
+    '',
+    'A row is measured only from a heard end with actual event timing joined to its transcript line by an explicit identity event, and from painted frames carrying the cue identity, through declared clock anchors. Recording-derived estimates (scripts/cue-lab-take-timing.mjs) join by order and time overlap and are kept out of these rows.',
     '',
     '| Target | Measured samples | Unmeasured | Result |',
     '| --- | --- | --- | --- |',
