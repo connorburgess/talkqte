@@ -9221,7 +9221,7 @@ Date: 2026-11-23 · Length: 06:42
                   >Surface 06 · Designed, not built</span
                 >
                 <span class="mono-label" style="color: var(--g-amber-ink)"
-                  >All previously listed screens have shipped</span
+                  >Kept meetings: built, awaiting styling</span
                 >
               </div>
               <h2>Designed, Not Built</h2>
@@ -9279,6 +9279,21 @@ Date: 2026-11-23 · Length: 06:42
                 the shared <code>setting</code>,
                 <code>processing-option</code> and
                 <code>secondary-button</code> styles; not drawn here yet.
+              </p>
+              <p class="up-boundary" id="upcoming-kept-meetings">
+                <strong>Settings → Kept meetings &amp; post-session offer</strong>
+                (<code>KeepInHistory.tsx</code>,
+                <code>MeetingHistorySettings.tsx</code>): built plainly with
+                shared tokens and no one-sided borders; tiles for every state are
+                still to be added here. Component boundaries:
+                <code>KeepInHistory.tsx</code> (after a live session ends: the
+                offer with title and the optional application name; kept; kept
+                with an Update; a failed keep), and
+                <code>MeetingHistorySettings.tsx</code> (Settings → Kept
+                meetings: the offer setting, where the files are, Delete all
+                with its inline confirmation, and the lab-run, unavailable and
+                newer-version states). Styles:
+                <code>meeting-history.css</code>.
               </p>
             </div>
           </div>

@@ -2,6 +2,7 @@ use crate::context::ContextItem;
 use serde::{Deserialize, Serialize};
 
 mod evaluation;
+mod history;
 mod sources;
 pub use evaluation::{
     CaptureState, ConversationScope, EvaluationIssue, EvaluationOutcome, EvaluationStatus,
@@ -635,6 +636,9 @@ pub struct Engine {
     /// Cues this session showed, oldest first, for an export that keeps the
     /// meeting. Never sent anywhere.
     shown_cues: Vec<ShownCue>,
+    /// When this session started, milliseconds since 1970 (UTC), for a
+    /// meeting the person keeps.
+    started_at_ms: u64,
     last_recorded_cue: Option<String>,
     /// This session's model-written meeting notes, if the person asked.
     meeting_notes: crate::meeting_notes::Record,
@@ -757,6 +761,7 @@ impl Engine {
             live_stopping: false,
             evaluated_cue: None,
             shown_cues: vec![],
+            started_at_ms: 0,
             last_recorded_cue: None,
             meeting_notes: Default::default(),
             next_segment: 0,
@@ -873,6 +878,7 @@ impl Engine {
         // Keeping the meeting is chosen per session, never carried over.
         self.state.keep_meeting = false;
         self.shown_cues.clear();
+        self.started_at_ms = history::now_ms();
         // Meeting notes belong to the session they were written for; a
         // request still in flight for the last one stops, and its result
         // is dropped.

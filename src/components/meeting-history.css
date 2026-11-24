@@ -1,0 +1,110 @@
+/* Kept meetings: the keep offer, the Settings section and the history
+   (Direction C). Built plainly with shared tokens for the design lane to
+   style. Uniform all-round borders only; zero one-sided accent borders. */
+.keep-history {
+  display: grid;
+  gap: var(--space-12);
+  margin: var(--space-16) 0;
+  padding: var(--space-16);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  color: var(--ink);
+  min-width: 0;
+}
+.keep-history.is-kept {
+  background: var(--cue-asked-surface);
+  border: 1px solid var(--accent-ink);
+}
+.keep-history h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+.keep-history > p:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-control);
+}
+.keep-history-help,
+.history-help {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.keep-history-field,
+.history-field {
+  display: grid;
+  gap: var(--space-4);
+  font-size: 13px;
+  font-weight: 600;
+}
+.keep-history-field input,
+.history-field input {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 400;
+}
+.keep-history-check,
+.history-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: 14px;
+}
+.keep-history-check input,
+.history-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ink);
+}
+.keep-history-actions,
+.keep-history-row,
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.keep-history [role='alert'],
+.history [role='alert'],
+.history-settings [role='alert'] {
+  padding: 8px 12px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.history-settings {
+  display: grid;
+  gap: var(--space-12);
+}
+.history-confirm {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+}
+/* The shared secondary button, in the danger colour, for Delete. */
+.secondary-button.history-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .keep-history,
+  .keep-history *,
+  .history-settings * {
+    transition: none;
+    animation: none;
+  }
+}

@@ -308,7 +308,7 @@ pub(crate) fn lab_run() -> bool {
 /// The lab launcher (`scripts/cue-lab-launcher.mjs`) always sets the run
 /// identifier and the timing log; the others mark a lab launch made by hand.
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-const LAB_SETTINGS: &[&str] = &[
+pub(crate) const LAB_SETTINGS: &[&str] = &[
     "TALKQTE_DEV_LAB_RUN_ID",
     "TALKQTE_TIMING_LOG",
     "TALKQTE_DEV_CUE_BACKEND",
@@ -319,7 +319,7 @@ const LAB_SETTINGS: &[&str] = &[
 ];
 
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-fn lab_run_in(present: impl Fn(&str) -> bool) -> bool {
+pub(crate) fn lab_run_in(present: impl Fn(&str) -> bool) -> bool {
     LAB_SETTINGS.iter().any(|name| present(name))
 }
 

@@ -117,6 +117,17 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",
+        // Kept meetings: keeping, listing, opening, renaming and deleting
+        // them is the notebook's alone.
+        "allow-meeting-history-status",
+        "allow-set-offer-to-keep",
+        "allow-keep-meeting-in-history",
+        "allow-update-kept-session-meeting",
+        "allow-kept-meetings",
+        "allow-open-kept-meeting",
+        "allow-rename-kept-meeting",
+        "allow-delete-kept-meeting",
+        "allow-delete-all-kept-meetings",
     ]);
     assert!(
         notebook_only.is_subset(&main),

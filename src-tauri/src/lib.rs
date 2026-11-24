@@ -79,6 +79,8 @@ pub mod live;
 mod live_control;
 mod live_source;
 mod login_item;
+pub mod meeting_history;
+mod meeting_history_commands;
 pub mod meeting_notes;
 mod meeting_notes_commands;
 mod menu_bar;
@@ -1821,6 +1823,15 @@ pub fn run() {
             meeting_notes_commands::discard_meeting_notes,
             meeting_notes_commands::meeting_notes_model,
             meeting_notes_commands::set_meeting_notes_model,
+            meeting_history_commands::meeting_history_status,
+            meeting_history_commands::set_offer_to_keep,
+            meeting_history_commands::keep_meeting_in_history,
+            meeting_history_commands::update_kept_session_meeting,
+            meeting_history_commands::kept_meetings,
+            meeting_history_commands::open_kept_meeting,
+            meeting_history_commands::rename_kept_meeting,
+            meeting_history_commands::delete_kept_meeting,
+            meeting_history_commands::delete_all_kept_meetings,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,
@@ -1863,6 +1874,8 @@ pub fn run() {
             // The person's saved settings, before anything is published. A
             // lab run reads none (settings.rs).
             settings_commands::load(app.handle());
+            // Kept meetings: off in a lab run, read only when asked.
+            meeting_history_commands::manage(app);
             // A lab launch may give the user's name; it is set before the
             // first session, as if typed in Settings, over any saved name,
             // and is never written to the settings file.
