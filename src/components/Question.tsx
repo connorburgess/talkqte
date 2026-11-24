@@ -112,6 +112,12 @@ function lead(cue: Cue) {
   }
 }
 
+/** What assistive technology is told when a cue appears: its lead and its
+ * words, as the card shows them. */
+export function cueAnnouncement(cue: Cue) {
+  return `${lead(cue)}: ${cue.question}`;
+}
+
 /** Where the cue came from and, in a few words, why it is here now. */
 function origin(cue: Cue) {
   const from =
@@ -334,7 +340,10 @@ export function Question({
             {asked && <AtSign className="cue-asked-mark" aria-hidden="true" />}
             {purpose}
           </span>{' '}
-          <h2 aria-live={announce ? 'polite' : undefined}>
+          {/* Read by the notebook's cue region, which stays mounted; this
+              heading arrives with the card, so a live region here is not
+              reliably read. */}
+          <h2>
             {said && '“'}
             <Words text={cue.question} cap={CUE_WORDS} spoken={said} />
             {said && '”'}
