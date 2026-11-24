@@ -881,9 +881,20 @@ mod tests {
         assert_eq!(keys.get(Provider::Anthropic).unwrap_err(), KeyError::Store);
         *store.fail.lock().unwrap() = false;
         assert_eq!(keys.status().anthropic.state, KeyState::NotSet);
+        #[cfg(target_os = "macos")]
         assert_eq!(
             KeyError::Store.message(),
             "The Keychain could not be used. Nothing was changed."
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            KeyError::Store.message(),
+            "Windows Credential Manager could not be used. Nothing was changed."
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            KeyError::Store.message(),
+            "The keyring could not be used. Unlock it or allow access, then try again. Nothing was changed."
         );
     }
 
