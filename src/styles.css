@@ -415,6 +415,23 @@ svg {
   max-width: 68ch;
   line-height: 1.55;
 }
+.session-state p[role='alert'],
+.session-state p[role='status'] {
+  padding: 8px 12px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-state p[role='alert'] {
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.session-state p[role='status'] {
+  background: var(--band);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
 .session-actions {
   display: flex;
   flex-wrap: wrap;
@@ -634,14 +651,17 @@ svg {
 .transcript-segment + .transcript-segment {
   border-top: 1px solid var(--line);
 }
-.transcript-segment > div {
+.transcript-segment-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   font-size: 14px;
   font-weight: 600;
 }
-.transcript-segment time {
+.transcript-segment-head time {
+  margin-left: auto;
+  order: 2;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -653,21 +673,47 @@ svg {
   line-height: 1.6;
   margin-top: var(--space-4);
 }
+.transcript-segment.is-echo {
+  margin: var(--space-8) 0;
+  padding: var(--space-12) 14px;
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
 .transcript-segment.is-echo p {
   color: var(--muted);
 }
 .transcript-echo-label {
-  margin-left: auto;
-  margin-right: var(--space-12);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
 }
 .transcript-echo-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-start;
   gap: var(--space-8);
-  margin-top: var(--space-8);
+  margin-top: var(--space-12);
+}
+.transcript-echo-actions .secondary-button {
+  min-height: 44px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.transcript-echo-remove:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.transcript-echo-remove:hover:not(:disabled) {
+  background: var(--danger-surface);
 }
 .context-panel {
   margin-top: var(--space-8);
@@ -1222,26 +1268,112 @@ svg {
   font-size: 14px;
 }
 .call-prompt {
+  position: relative;
   color: var(--companion-fg);
-  padding: var(--space-12) var(--space-16);
+  padding: 6px 10px;
 }
 .call-prompt-title {
-  font-size: 15px;
-  font-weight: 650;
-  line-height: 1.35;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: -0.015em;
+  color: var(--companion-fg);
+  padding-right: 36px;
+}
+.call-prompt.is-large .call-prompt-title {
+  font-size: 17px;
+  line-height: 1.24;
 }
 .call-prompt-detail {
-  font-size: 13px;
-  line-height: 1.5;
-  margin-top: var(--space-4);
-  opacity: 0.85;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 4px;
+  color: var(--companion-muted);
+}
+.call-prompt.is-large .call-prompt-detail {
+  font-size: 14px;
+  line-height: 1.4;
 }
 .call-prompt-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-8);
-  margin-top: var(--space-12);
+  gap: 6px;
+  margin-top: 8px;
+}
+.call-prompt .primary-button {
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--companion-live);
+  border: 1px solid var(--companion-live);
+  color: var(--companion-bg);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.call-prompt .primary-button:hover:not(:disabled) {
+  background: #f2c478;
+  border-color: #f2c478;
+}
+.call-prompt .secondary-button {
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #181f28;
+  border: 1px solid #637286;
+  color: var(--companion-fg);
+  font-size: 12px;
+  font-weight: 500;
+}
+.call-prompt .secondary-button:hover:not(:disabled) {
+  background: var(--companion-hover);
+  border-color: var(--companion-muted);
+}
+.call-prompt .companion-control {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0 0 12px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--companion-muted);
+}
+.call-prompt .companion-control:hover:not(:disabled) {
+  background: var(--companion-hover);
+  color: var(--companion-fg);
+}
+.call-prompt.is-large .primary-button {
+  font-size: 13.5px;
+}
+.call-prompt.is-large .secondary-button {
+  font-size: 13px;
+}
+.call-prompt-setting-option {
+  margin-top: var(--space-8);
+}
+.call-prompt-not-for {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  margin-top: var(--space-8);
+}
+.call-prompt-not-for .secondary-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.call-prompt-setting-error {
+  margin-top: var(--space-8);
+  padding: 8px 12px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 13px;
 }
 .visually-hidden {
   position: absolute;

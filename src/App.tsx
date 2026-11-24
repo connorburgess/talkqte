@@ -441,6 +441,7 @@ function FloatingQuestion() {
           <CallPrompt
             offer={state.callPrompt}
             busy={busy}
+            large={state.questionSize === 'large'}
             onAnswer={(answer) =>
               void run(() =>
                 bridge.command('respond_to_call_prompt', {
@@ -1673,7 +1674,7 @@ function Notebook() {
                           className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
                           key={segment.id}
                         >
-                          <div>
+                          <div className="transcript-segment-head">
                             <strong>{segment.speaker}</strong>
                             <time>{clockTime(segment.atMs)}</time>
                             {echo && !echo.kept && (
@@ -1700,7 +1701,7 @@ function Notebook() {
                                 It was me
                               </button>
                               <button
-                                className="secondary-button"
+                                className="secondary-button transcript-echo-remove"
                                 disabled={busy}
                                 onClick={() =>
                                   void run(() =>
