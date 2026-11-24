@@ -842,16 +842,18 @@ fn live_status() -> LiveStatus {
 /// Microphone audio handed to a cloud stream, a tenth of a second at a time.
 const CLOUD_CHUNK_MS: u64 = 100;
 
-/// What the notebook shows about prior notes picked from a file.
+/// What the notebook shows about prior notes picked from a file, Granola or
+/// kept meetings.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PickedNotes {
-    file_name: String,
-    notes: Vec<notes_file::NoteSummary>,
-    /// Notes in the file that are not listed: beyond the limit or repeated.
-    skipped: usize,
+pub(crate) struct PickedNotes {
+    pub(crate) file_name: String,
+    pub(crate) notes: Vec<notes_file::NoteSummary>,
+    /// Notes in the source that are not listed: beyond the limit or without
+    /// kept notes.
+    pub(crate) skipped: usize,
     /// Whether a note without a date asks for one: a Markdown or text file.
-    asks_for_dates: bool,
+    pub(crate) asks_for_dates: bool,
 }
 
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
@@ -1065,7 +1067,8 @@ fn remove_context_from(
 ) -> Result<usize, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let removed = runtime.context.remove_all_from(context::Provider::File)
-        + runtime.context.remove_all_from(context::Provider::Granola);
+        + runtime.context.remove_all_from(context::Provider::Granola)
+        + runtime.context.remove_all_from(context::Provider::History);
     runtime.pending_import = None;
     runtime.refresh.forget_all();
     publish_context(&app, &mut runtime);
@@ -1834,6 +1837,7 @@ pub fn run() {
             meeting_history_commands::delete_all_kept_meetings,
             meeting_history_commands::kept_meeting_export_preview,
             meeting_history_commands::export_kept_meeting,
+            meeting_history_commands::list_kept_meetings_for_context,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,

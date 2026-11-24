@@ -531,8 +531,41 @@ mockIPC(
         return preview.suggestGranolaFocus();
       case 'pick_context_file':
         return preview.pickContextFile();
+      case 'list_kept_meetings_for_context':
+        return historyFixture.listForContext();
+      case 'cancel_context_import':
+        historyFixture.cancelPendingContext();
+        return;
       case 'import_context_notes': {
         const { ids } = args as { ids: string[] };
+        if (historyFixture.hasPendingContext()) {
+          const { outcome, items } = historyFixture.importPendingContext(ids);
+          const merged = [...(await preview.contextItemsNow()), ...items];
+          const noteMap = new Map(
+            processing.notes.map((note) => [
+              `${note.provider}:${note.sourceId}`,
+              note,
+            ]),
+          );
+          for (const item of items) {
+            noteMap.set(`${item.provider}:${item.sourceId}`, {
+              provider: item.provider,
+              sourceId: item.sourceId,
+              revision: item.revision,
+              title: item.title,
+              sourceDate: item.sourceDate,
+            });
+          }
+          processing = {
+            ...processing,
+            revision: processing.revision + 1,
+            scopeRevision: processing.scopeRevision + 1,
+            notes: [...noteMap.values()],
+          };
+          await emit('processing:changed', structuredClone(processing));
+          await emit('context:changed', merged);
+          return outcome;
+        }
         const outcome = preview.importContextNotes(ids);
         await emit('context:changed', await preview.contextItemsNow());
         return outcome;

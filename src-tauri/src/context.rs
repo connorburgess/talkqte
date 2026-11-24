@@ -22,6 +22,7 @@ pub const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 pub enum Provider {
     Granola,
     File,
+    History,
 }
 
 impl Provider {
@@ -30,6 +31,7 @@ impl Provider {
         match self {
             Provider::Granola => "granola",
             Provider::File => "file",
+            Provider::History => "history",
         }
     }
 }

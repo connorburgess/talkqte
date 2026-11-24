@@ -123,8 +123,12 @@ function NoteLabel({ note }: { note: ProcessingNote }) {
     <>
       <strong>{note.title}</strong>
       <span>
-        {note.provider === 'granola' ? 'Granola' : 'Imported file'} ·{' '}
-        {note.sourceDate} · prior note
+        {note.provider === 'granola'
+          ? 'Granola'
+          : note.provider === 'history'
+            ? 'Kept meeting'
+            : 'Imported file'}{' '}
+        · {note.sourceDate} · prior note
       </span>
     </>
   );

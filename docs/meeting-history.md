@@ -26,6 +26,7 @@ Nothing is kept unless the person keeps that meeting.
   when the session differs from what was kept. A new session ends that link:
   a kept meeting is only ever updated from the session it came from.
 - **Meetings page (`src/components/MeetingHistory.tsx`).** Lists kept meetings newest first, searches across titles, notes, kept meeting notes, cues and transcript text, opens any meeting read-only (metadata, notes, kept meeting notes, cues shown and transcript with `You`/`Them` and echo labels), renames a meeting inline, deletes one with an inline confirmation, and exports a kept meeting as Markdown through the same preview-before-destination dialog.
+- **Prior context (`Choose kept meetings`).** Lists kept meetings that have kept meeting notes or the person's own notes (`HistorySource` in `src-tauri/src/meeting_history.rs`) into the same `Prior context` chooser (`Provider::History`). Only the ticked meetings' kept meeting notes and user notes (bounded to 2,000 characters, never transcripts, cues, or application names) enter memory, off unless selected, and appear explicitly in the session's processing review with citations back to that meeting (`prior:history:<id>`).
 - The export review's **Also keep this meeting** is unchanged: it only
   decides whether that one Markdown export includes the transcript and cues.
 
@@ -116,6 +117,7 @@ the main thread (`src-tauri/src/meeting_history_commands.rs`).
 | `delete_all_kept_meetings`    | Deletes the whole folder                                                                               |
 | `kept_meeting_export_preview` | Builds the Markdown preview for one kept meeting and holds it for save                                 |
 | `export_kept_meeting`         | Saves the exact reviewed Markdown for a kept meeting through the native dialog                         |
+| `list_kept_meetings_for_context` | Lists kept meetings' notes and meeting notes (never transcripts) for Prior context selection        |
 
 ## Evidence
 

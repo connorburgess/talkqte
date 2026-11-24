@@ -282,7 +282,7 @@ impl Harness {
 
 #[test]
 fn selected_snapshot_needs_a_separate_grant_and_cites_only_a_and_current_speech() {
-    for provider in [Provider::File, Provider::Granola] {
+    for provider in [Provider::File, Provider::Granola, Provider::History] {
         let mut h = Harness::new(provider);
         h.speech();
         h.no_calls();

@@ -46,6 +46,7 @@
     "allow-delete-all-kept-meetings",
     "allow-kept-meeting-export-preview",
     "allow-export-kept-meeting",
+    "allow-list-kept-meetings-for-context",
     "allow-discard-meeting-notes",
     "allow-meeting-notes-model",
     "allow-set-meeting-notes-model",

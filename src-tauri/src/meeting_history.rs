@@ -290,6 +290,126 @@ impl Meeting {
         }
         out
     }
+
+    /// What this kept meeting supplies as prior context: only its kept meeting
+    /// notes and the person's own notes (never the transcript, cues, or
+    /// application name), bounded to `context::MAX_EXCERPT_CHARS`.
+    pub fn context_item(&self) -> Option<crate::context::ContextItem> {
+        let source_date = i64::try_from(self.content.started_at_ms)
+            .ok()
+            .and_then(chrono::DateTime::from_timestamp_millis)
+            .map(|when| when.format("%Y-%m-%d").to_string())
+            .filter(|date| crate::context::valid_date(date))?;
+        let meeting_notes = self
+            .content
+            .meeting_notes
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let notes = Some(self.content.notes.trim()).filter(|text| !text.is_empty());
+        let excerpt = match (meeting_notes, notes) {
+            (Some(mn), Some(n)) => format!("Meeting notes:\n{mn}\n\nYour notes:\n{n}"),
+            (Some(mn), None) => mn.to_string(),
+            (None, Some(n)) => n.to_string(),
+            (None, None) => return None,
+        };
+        let excerpt: String = excerpt
+            .chars()
+            .take(crate::context::MAX_EXCERPT_CHARS)
+            .collect();
+        Some(crate::context::ContextItem {
+            provider: crate::context::Provider::History,
+            source_id: self.id.clone(),
+            title: self.title.clone(),
+            source_date,
+            excerpt,
+            revision: self.revision,
+        })
+    }
+}
+
+fn preview_of(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = flat.chars();
+    let head: String = chars.by_ref().take(120).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
+/// Kept meetings listed for prior-context selection, carrying only their kept
+/// meeting notes and the person's own notes.
+pub struct HistorySource {
+    items: Vec<crate::context::ContextItem>,
+    pub skipped: usize,
+}
+
+impl HistorySource {
+    pub fn read(store: &Store) -> Result<Self, Error> {
+        let listing = store.list(None);
+        match listing.availability {
+            Availability::On => {}
+            Availability::Newer => return Err(Error::Newer),
+            Availability::LabRun | Availability::Unavailable => return Err(Error::Off),
+        }
+        let mut items = Vec::new();
+        let mut skipped = 0;
+        for summary in listing.meetings {
+            if items.len() >= crate::notes_file::MAX_NOTES {
+                skipped += 1;
+                continue;
+            }
+            match store
+                .open_meeting(&summary.id)
+                .ok()
+                .and_then(|meeting| meeting.context_item())
+            {
+                Some(item) => items.push(item),
+                None => skipped += 1,
+            }
+        }
+        Ok(Self { items, skipped })
+    }
+
+    pub fn summaries(&self) -> Vec<crate::notes_file::NoteSummary> {
+        self.items
+            .iter()
+            .map(|item| crate::notes_file::NoteSummary {
+                source_id: item.source_id.clone(),
+                title: item.title.clone(),
+                source_date: item.source_date.clone(),
+                preview: preview_of(&item.excerpt),
+            })
+            .collect()
+    }
+}
+
+impl crate::context::NoteSource for HistorySource {
+    fn provider(&self) -> crate::context::Provider {
+        crate::context::Provider::History
+    }
+
+    fn capabilities(&self) -> crate::context::Capabilities {
+        crate::context::Capabilities {
+            import_notes: true,
+            live_input: false,
+            writeback: false,
+        }
+    }
+
+    fn fetch(
+        &mut self,
+        selection: &[String],
+    ) -> Result<Vec<crate::context::ContextItem>, crate::context::SourceError> {
+        Ok(self
+            .items
+            .iter()
+            .filter(|item| selection.iter().any(|id| id.trim() == item.source_id))
+            .cloned()
+            .collect())
+    }
 }
 
 fn chars(text: &str) -> usize {

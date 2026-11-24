@@ -85,7 +85,7 @@ function validateInput(input, contract) {
       ]),
     );
     add(note);
-    check(['file', 'granola'].includes(note.provider));
+    check(['file', 'granola', 'history'].includes(note.provider));
     const prefix = `prior:${note.provider}:`;
     check(note.id.startsWith(prefix) && note.id.length > prefix.length);
     check(

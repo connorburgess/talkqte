@@ -1,7 +1,12 @@
 // Fictional kept meetings for browser tests: an in-memory stand-in for the
 // Rust history commands. It writes nothing; storage, permissions, versions
 // and bounds are tested in Rust.
-import { clockTime, type Snapshot } from '../../src/lib/types';
+import {
+  clockTime,
+  type ContextItem,
+  type PickedNotes,
+  type Snapshot,
+} from '../../src/lib/types';
 import type {
   HistoryAvailability,
   KeptMeeting,
@@ -35,6 +40,78 @@ let unreadable = 0;
 let pendingExport: string | null = null;
 const exported: string[] = [];
 let cancelNextExport = false;
+let pendingContext: ContextItem[] | null = null;
+
+function toContextItem(meeting: KeptMeeting): ContextItem | null {
+  const mn = meeting.meetingNotes?.trim() || '';
+  const n = meeting.notes.trim();
+  const excerpt =
+    mn && n ? `Meeting notes:\n${mn}\n\nYour notes:\n${n}` : mn || n;
+  if (!excerpt) return null;
+  const date = new Date(meeting.startedAtMs).toISOString().slice(0, 10);
+  return {
+    provider: 'history',
+    sourceId: meeting.id,
+    title: meeting.title,
+    sourceDate: date,
+    excerpt: excerpt.slice(0, 2000),
+    revision: meeting.revision,
+  };
+}
+
+export function listForContext(): PickedNotes {
+  if (availability === 'newer')
+    throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
+  if (availability !== 'on')
+    throw 'Kept meetings are not available in this launch.';
+  const sorted = [...meetings].sort((a, b) => b.startedAtMs - a.startedAtMs);
+  const items: ContextItem[] = [];
+  let skipped = 0;
+  for (const meeting of sorted) {
+    const item = toContextItem(meeting);
+    if (item && items.length < 200) items.push(item);
+    else skipped++;
+  }
+  pendingContext = items;
+  return {
+    fileName: 'kept meetings',
+    notes: items.map((item) => {
+      const flat = item.excerpt.replace(/\s+/g, ' ').trim();
+      return {
+        sourceId: item.sourceId,
+        title: item.title,
+        sourceDate: item.sourceDate,
+        preview: flat.length > 120 ? `${flat.slice(0, 120)}…` : flat,
+      };
+    }),
+    skipped,
+    asksForDates: false,
+  };
+}
+
+export function hasPendingContext() {
+  return pendingContext !== null;
+}
+
+export function cancelPendingContext() {
+  pendingContext = null;
+}
+
+export function importPendingContext(ids: string[]) {
+  const list = pendingContext ?? [];
+  pendingContext = null;
+  const selected = list.filter((item) => ids.includes(item.sourceId));
+  return {
+    outcome: {
+      added: selected.length,
+      updated: 0,
+      unchanged: 0,
+      overLimit: 0,
+      rejected: 0,
+    },
+    items: selected,
+  };
+}
 
 const summary = (meeting: KeptMeeting): KeptSummary => ({
   id: meeting.id,

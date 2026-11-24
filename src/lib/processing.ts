@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 export interface ProcessingNote {
-  provider: 'file' | 'granola';
+  provider: 'file' | 'granola' | 'history';
   sourceId: string;
   revision: number;
   title: string;

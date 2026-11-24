@@ -100,6 +100,18 @@ export async function granolaStatus() {
   return invoke<GranolaStatus>('granola_status');
 }
 
+/** Lists kept meetings' notes and meeting notes (never transcripts) to choose from. */
+export async function listKeptMeetingsForContext() {
+  if (preview)
+    return {
+      fileName: 'kept meetings',
+      notes: [],
+      skipped: 0,
+      asksForDates: false,
+    } satisfies PickedNotes;
+  return invoke<PickedNotes>('list_kept_meetings_for_context');
+}
+
 /** Lists the signed-in person's recent Granola notes to choose from. */
 export async function listGranolaNotes() {
   if (preview) return (await preview).listGranolaNotes();
