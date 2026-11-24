@@ -337,3 +337,29 @@ test('the source status is mounted before its first line, so the line is announc
   });
   await expect(live).toHaveCount(0);
 });
+
+test('a source started by the development launch setting says so, and its refusal says why', async ({
+  page,
+}) => {
+  const section = await processingControl(page);
+  await send(page, {
+    capture: 'running',
+    microphone: 'off',
+    source: {
+      phase: 'listening',
+      mayBeCapturing: true,
+      stalled: false,
+      canRetry: false,
+      application: 'Fictional player',
+      problem: null,
+      operation: 'fictional-operation',
+      sourceSession: true,
+      bySetting: true,
+    },
+  });
+  await expect(
+    section.getByText(
+      'Application audio from Fictional player is being captured, including all of its windows. Started by the TALKQTE_DEV_APPLICATION_SOURCE launch setting.',
+    ),
+  ).toBeVisible();
+});

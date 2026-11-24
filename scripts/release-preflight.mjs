@@ -143,6 +143,10 @@ export function configuredDevelopmentFeatures(manifest, config) {
  * adds only launch settings, which link nothing of their own. */
 export const DEVELOPMENT_FRAMEWORKS = {};
 
+/** Bytes a development feature puts in the executable (`DEVELOPMENT_MARKER`
+ * in src-tauri/src/lib.rs), followed by the feature's name. */
+export const DEVELOPMENT_MARKER = 'talkqte-development-feature:';
+
 const DYLIB_COMMANDS = new Set([
   0xc, // LC_LOAD_DYLIB
   0x80000018, // LC_LOAD_WEAK_DYLIB
@@ -768,6 +772,24 @@ export function checkBundle(app, sources, options = {}) {
       findings.push(
         ok('build paths', 'no home-folder paths in the executable'),
       );
+
+    const marked = [
+      ...new Set(
+        (
+          readFileSync(executable, 'latin1').match(
+            new RegExp(`${DEVELOPMENT_MARKER}[a-z-]+`, 'g'),
+          ) ?? []
+        ).map((marker) => marker.slice(DEVELOPMENT_MARKER.length)),
+      ),
+    ];
+    findings.push(
+      marked.length
+        ? fail(
+            'development feature marker',
+            `the executable was built with ${marked.join(', ')}`,
+          )
+        : ok('development feature marker', 'none in the executable'),
+    );
 
     let libraries;
     try {

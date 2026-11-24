@@ -1,3 +1,16 @@
+// `native-audio-spike` reads launch settings that list applications and start
+// capture with the scope notice taken as acknowledged. It exists for debug
+// lab builds only: a release build with it must not exist.
+#[cfg(all(not(debug_assertions), feature = "native-audio-spike"))]
+compile_error!("native-audio-spike is a development feature; never build a release with it");
+
+/// Marks an executable built with `native-audio-spike`, so the release
+/// pre-flight can tell a development build from its bytes
+/// (`scripts/release-preflight.mjs`).
+#[cfg(feature = "native-audio-spike")]
+#[used]
+static DEVELOPMENT_MARKER: [u8; 46] = *b"talkqte-development-feature:native-audio-spike";
+
 pub mod anthropic_api;
 pub mod application_audio;
 #[cfg(target_os = "macos")]

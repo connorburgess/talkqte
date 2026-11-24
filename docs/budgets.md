@@ -10,7 +10,7 @@ Status: agreed by the owner as the target set, 9 November 2026. These are target
 | macOS        | macOS 14 Sonoma or later                               | The app bundle requires macOS 14.0 or later. Narrowing to 14 limits the test matrix; this needs checking against the capture APIs chosen for system audio. Only macOS 26.4 has been tested.          |
 | Language     | English                                                | Cloud transcription requests English ([cloud transcription](cloud-transcription.md#when-audio-is-sent)). The former `tiny.en` model was English-only too. No other language has been tested.                                            |
 | Meeting apps | Google Meet in Chrome, then Zoom desktop               | Meet matches the phone goal in the [mobile plan](mobile.md). Each app must pass the native companion checks in the [validation record](native-validation.md) before it is listed.                    |
-| Audio        | Built-in microphone and speakers, and wired headphones | Bluetooth and external interfaces come later. Capturing the other side of a call is not implemented yet.                                                                                             |
+| Audio        | Built-in microphone and speakers, and wired headphones | Bluetooth and external interfaces come later. Capturing the other side of a call through one chosen application is implemented and not yet run on a device.                                                                                             |
 
 ## Proposed budgets
 

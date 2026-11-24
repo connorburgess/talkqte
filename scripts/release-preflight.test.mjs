@@ -890,6 +890,18 @@ test("an executable that loads the development feature's framework fails", (t) =
   );
 });
 
+test('an executable carrying the development feature marker fails', (t) => {
+  const { root, app } = fixture(t, {
+    binary: Buffer.concat([
+      machO([SYSTEM]),
+      Buffer.from('\0talkqte-development-feature:native-audio-spike\0'),
+    ]),
+  });
+  assert.deepEqual(failures(preflight({ root, app, run: tools() })), [
+    'development feature marker: the executable was built with native-audio-spike',
+  ]);
+});
+
 test('an ordinary build that loads ScreenCaptureKit passes: it is no development marker', (t) => {
   const { root, app } = fixture(t, {
     libraries: [

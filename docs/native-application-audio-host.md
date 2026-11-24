@@ -30,6 +30,12 @@ in-app notice carries the disclosure; the microphone usage string was
 corrected to say audio goes to Deepgram after approval. The deployment target
 stays macOS 14.0; ScreenCaptureKit audio needs 13.0.
 
+Two limits carry over to the ordinary build: the filter uses the first
+display reported, so an application only on another display is untested; and
+the helper processes captured with an application are fixed when it is
+listed, so a browser tab or call window whose audio starts in a helper opened
+later may not be captured.
+
 None of it has been run: no application was listed, no prompt shown and no
 stream created. Roadmap item **T2** stays open; the device checks it still
 needs are listed there.
@@ -208,14 +214,13 @@ audio, with no microphone.
   while unwinding.
 - A session stopped before its source began ends Off with no problem.
 
-In a build with this feature, the notebook's Cue processing panel offers the
-Start: the scope notice and a warning that listing can show the Screen
-Recording prompt, then **List applications**, a choice of one listed
-application, and **Start session from** that application, which reviews it
-and starts a session for it alone. Only a build that reports a source shows
-it. Retrying a failed cleanup is still only the development command.
+Until 24 November 2026 the Cue processing panel offered this start in a
+development build; the notebook's **Listen to** → **One application only**
+now does, in every macOS build. Retrying a failed cleanup is still only the
+development command.
 
-For unattended lab runs, `TALKQTE_DEV_APPLICATION_SOURCE`, read once at launch,
+For unattended lab runs, in a debug build with `native-audio-spike` only (a
+release with the feature does not compile), `TALKQTE_DEV_APPLICATION_SOURCE`, read once at launch,
 takes the same steps through the same host: one listing, a review of the one
 application with exactly that name, and a session for it alone.
 `TALKQTE_DEV_STOP_AFTER_S` later asks the host's ordinary Stop. A refusal,

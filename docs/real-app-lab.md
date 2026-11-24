@@ -174,18 +174,19 @@ If selecting "Google Chrome for Testing" captures nothing, that route is out.
 
 ## Start capture
 
-In the notebook's **Cue processing** panel, under **Development build** →
-"Application audio" at the end of the panel:
+In the notebook, under **Listen to** below the session strip (before a
+session):
 
-1. Read the notice, then press **List applications**.
+1. Choose **One application only**, read the notice, then press **List
+   applications**.
 2. **The first listing shows the macOS Screen Recording prompt.** On recent
    macOS this is listed as "Screen & System Audio Recording". Grant it to
    TalkQTE in System Settings → Privacy & Security, then quit and reopen the
    app if macOS asks (_to confirm_), and list again. The permission is granted
    once per build.
-3. Choose **QuickTime Player**, which is listed near the top, and press **Start session from QuickTime
-   Player**. That starts a session for QuickTime Player alone, with no
-   microphone.
+3. Choose **QuickTime Player**, which is listed near the top, and press
+   **Start live session**. That starts a session for QuickTime Player alone,
+   with no microphone.
 
 Wait until the notebook's Cue processing panel says "Application audio from
 QuickTime Player is being captured", then press play in QuickTime Player.

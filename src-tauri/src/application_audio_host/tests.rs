@@ -2180,3 +2180,52 @@ mod startup_diagnostics {
         }
     }
 }
+
+/// The application-audio capability added at startup, through the generated
+/// manifest and real IPC: the notebook may call the command, the companion
+/// may not, and before the capability is added nobody may.
+#[test]
+fn only_the_notebook_may_call_application_audio() {
+    use tauri::Manager;
+    let mut context = crate::application_context();
+    context.config_mut().app.windows.clear();
+    let app = tauri::test::mock_builder()
+        .invoke_handler(tauri::generate_handler![app::application_audio])
+        .build(context)
+        .unwrap();
+    app.manage(Host::new(|| -> Box<dyn Backend> {
+        panic!("a snapshot never reaches the backend")
+    }));
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+        .build()
+        .unwrap();
+    let invoke = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>| {
+        tauri::test::get_ipc_response(
+            window,
+            tauri::webview::InvokeRequest {
+                cmd: "application_audio".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "http://127.0.0.1:1420".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(
+                    serde_json::json!({"action": {"kind": "snapshot"}}),
+                ),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+    };
+    let denied = invoke(&main).unwrap_err();
+    assert!(denied.to_string().contains("not allowed"), "{denied}");
+    app::allow(app.handle()).unwrap();
+    let snapshot = invoke(&main)
+        .unwrap()
+        .deserialize::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(snapshot["phase"], "off");
+    let denied = invoke(&cue).unwrap_err();
+    assert!(denied.to_string().contains("not allowed"), "{denied}");
+}
