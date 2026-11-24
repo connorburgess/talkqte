@@ -1,6 +1,6 @@
 # Platform plan
 
-Planning baseline, 8 November 2026. These are delivery priorities and validation tasks, not current support claims. The prototype currently runs from source on macOS.
+Planning baseline, 8 November 2026. These are delivery priorities and validation tasks, not current support claims. The prototype currently runs from source on macOS. Unsigned Windows and Ubuntu test builds are made in CI ([below](#unsigned-ci-builds-for-windows-and-ubuntu)); they are not releases.
 
 | Platform           | Direction                                                 | Next evidence                                                                                                                |
 | ------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -8,6 +8,35 @@ Planning baseline, 8 November 2026. These are delivery priorities and validation
 | Windows            | Next planned desktop platform                             | Build and launch in Parallels, then validate capture, focus, and distribution on the claimed configurations                  |
 | Ubuntu/Linux       | Exploratory; general support undecided                    | Build and run an Ubuntu ARM64 guest, record audio/window limitations, and assess maintenance effort                          |
 | iPhone and Android | Future companion goal, including Google Meet on the phone | Establish a supported live-context source and usable cue surface independently; prove same-phone capture before promising it |
+
+## Unsigned CI builds for Windows and Ubuntu
+
+The [Windows and Ubuntu builds workflow](../.github/workflows/platform-builds.yml) runs on every pull request and on manual dispatch. It builds the release app (no development features) and uploads, per platform, the installers, `SHA256SUMS.txt`, the third-party notices for that build's Rust target and a `README-UNSIGNED.txt` naming the commit and run. Nothing is signed or notarised, nothing is published as a release, and no update feed exists. Artifacts are kept for 14 days. To download one, open the workflow run from the pull request's checks (or **Actions → Windows and Ubuntu builds (unsigned)**), then the **Artifacts** list at the bottom of the run summary, or use `gh run download <run-id> -n <artifact-name>`.
+
+| Artifact | Contents | Built on | What CI checks |
+| --- | --- | --- | --- |
+| `talkqte-windows-x64-unsigned-<sha>` | NSIS `*-setup.exe` and MSI | `windows-2025` | Rust tests and Clippy; silent per-user NSIS install, the app's `TalkQTE` window appears with a WebView2 child process, silent uninstall removes it |
+| `talkqte-windows-arm64-unsigned-<sha>` | NSIS `*-setup.exe` (WiX, which Tauri uses for MSI, has no Arm64 target) | `windows-11-arm` | The same install, launch and uninstall; tests and Clippy run in the [checks workflow](../.github/workflows/checks.yml) |
+| `talkqte-ubuntu-x64-unsigned-<sha>` | `.deb` and `.AppImage` | `ubuntu-24.04` | Rust tests and Clippy; the built app opens its `TalkQTE` window under Xvfb; the `.deb` installs with its dependencies in an `ubuntu:26.04` container and the installed app opens its window there |
+| `talkqte-ubuntu-arm64-unsigned-<sha>` | `.deb` and `.AppImage` | `ubuntu-24.04-arm` | The same as x64 |
+
+The Ubuntu packages are built on 24.04 so their library requirements are met on 24.04 and on the current LTS, 26.04, where the installed package is launched. The AppImage is built but not launched in CI; it also carries Ubuntu 24.04 system libraries (WebKitGTK, GTK and others) under their own licences, which the artifact's notices do not list. The installed `.deb` is launched as an ordinary user.
+
+A launch check proves that the app starts and creates its window on that runner. It does not show that anything in the window works, and it involves no microphone, display a person sees, meeting app, keyring prompt or network provider. Windows SmartScreen and an unsigned-publisher warning will appear on a real machine; Ubuntu installs the `.deb` without any signature check. The installed apps do not yet carry their own copy of the third-party notices; it is beside the installer in the artifact.
+
+### What each build does, by capability
+
+As of this branch. "CI" is the hosted-runner evidence above; "VM" is the owner's Parallels records below; anything else is unverified.
+
+| Capability | Windows (x64, Arm64) | Ubuntu (x64, Arm64) | Where macOS-only code lives |
+| --- | --- | --- | --- |
+| Install, launch, window | CI: installs, launches, uninstalls | CI: launches under Xvfb on 24.04 and, installed, on 26.04 | — |
+| Notebook, onboarding, settings, export | Built; Arm64 VM ran the fictional demo on an older commit | Built; Arm64 VM ran the demo under Wayland on an older commit | Interface copy names macOS throughout |
+| Provider keys | Kept in memory only, lost on quit (no Credential Manager store yet) | Kept in memory only (no Secret Service store yet) | `src-tauri/src/provider_keys.rs` (Keychain) |
+| Microphone check and live session | Reports the platform unsupported | Reports the platform unsupported | `src-tauri/src/microphone/native.rs`; cpal is a macOS-only dependency |
+| Another application's audio | Not built | Not built | `src-tauri/src/application_audio*`, `native_source.rs` (ScreenCaptureKit) |
+| Companion window | Always on top and not focusable through Tauri; placement in steps; focus over full-screen apps unverified | The same; GNOME Wayland neither lets an app keep a window on top nor report its position | `src-tauri/src/companion_macos.rs` |
+| Call-starting offer | The setting exists, but nothing is read | The same | `src-tauri/src/call_prompt.rs` (Core Audio, NSWorkspace) |
 
 ## Windows validation
 
