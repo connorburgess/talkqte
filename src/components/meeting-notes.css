@@ -1,0 +1,141 @@
+/* Model-written meeting notes after a live session (Direction C).
+   Uniform all-round borders only; zero one-sided accent borders. */
+.meeting-notes {
+  display: grid;
+  gap: var(--space-12);
+  margin: var(--space-16) 0;
+  padding: var(--space-16);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  color: var(--ink);
+  min-width: 0;
+}
+.meeting-notes h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+.meeting-notes h3 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.meeting-notes p,
+.meeting-notes li {
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+.meeting-notes-help {
+  color: var(--muted);
+}
+.meeting-notes > button {
+  justify-self: start;
+}
+.meeting-notes-confirm,
+.meeting-notes-result,
+.meeting-notes-writing {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+.meeting-notes-confirm {
+  padding: var(--space-12) var(--space-16);
+  background: var(--cue-asked-surface);
+  border: 1.5px solid var(--accent-ink);
+  border-radius: var(--radius-control);
+}
+.meeting-notes-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.meeting-notes-choice input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+.meeting-notes-choice label {
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.meeting-notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+.meeting-notes-writing {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.meeting-notes-result > label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.meeting-notes textarea {
+  width: 100%;
+  min-height: 16rem;
+  padding: var(--space-12);
+  font: 14px/1.55 var(--font-mono);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  resize: vertical;
+}
+.meeting-notes pre {
+  margin: 0;
+  padding: var(--space-12);
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 13px/1.55 var(--font-mono);
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.meeting-notes-sources summary {
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.meeting-notes-sources > ul {
+  display: grid;
+  gap: var(--space-12);
+  margin-top: var(--space-12);
+  padding-left: var(--space-16);
+}
+.meeting-notes-sources ul ul {
+  margin-top: var(--space-4);
+  padding-left: var(--space-16);
+  color: var(--muted);
+}
+.meeting-notes-at {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.meeting-notes-error {
+  padding: 8px 12px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+}
+@media (max-width: 520px) {
+  .meeting-notes-writing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meeting-notes,
+  .meeting-notes * {
+    transition: none;
+    animation: none;
+  }
+}

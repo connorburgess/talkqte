@@ -4,6 +4,7 @@ import { fictionalPermissions } from './processing-permissions';
 import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
 import * as providerKeysFixture from './native-provider-keys';
+import * as meetingNotesFixture from './native-meeting-notes';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
@@ -272,6 +273,8 @@ mockIPC(
       return permissionFixture.command(command, args);
     if (providerKeysFixture.commands.includes(command))
       return providerKeysFixture.command(command, args);
+    if (meetingNotesFixture.commands.includes(command))
+      return meetingNotesFixture.command(command, args, publish, () => session);
     switch (command) {
       case 'application_audio':
         // Development builds only: record what the notebook asked for.
@@ -454,7 +457,11 @@ mockIPC(
       case 'export_preview': {
         if (session.live && session.status === 'running')
           throw new Error('Live sessions are not saved or exported.');
-        const notes = preview.exportPreview();
+        const kept = meetingNotesFixture.keptNotes();
+        // Stands in for the engine adding kept meeting notes after the notes.
+        const notes = kept
+          ? `${preview.exportPreview()}\n${kept}\n`
+          : preview.exportPreview();
         // Stands in for the engine's kept-meeting export.
         return session.keepMeeting
           ? `${notes}\n## Transcript\n\n${session.transcript

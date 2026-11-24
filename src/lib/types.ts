@@ -89,6 +89,8 @@ export interface Snapshot extends CueSnapshot {
   focus: string[];
   /** Session-only: include the transcript and cues shown in the export. */
   keepMeeting?: boolean;
+  /** Session-only: where this session's model-written notes stand. */
+  meetingNotes?: import('./meetingNotes').MeetingNotesPhase;
 }
 export type Commands = {
   set_live_cues_paused: { paused: boolean };

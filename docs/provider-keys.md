@@ -4,7 +4,9 @@ TalkQTE runs on the person's own provider accounts: one Deepgram API key for
 transcription and one Anthropic API key for cue decisions. This page describes
 how the keys are stored and the commands the notebook uses. Live sessions use
 the Deepgram key for [transcription](cloud-transcription.md) and the
-Anthropic key for [cue decisions](own-key-cues.md).
+Anthropic key for [cue decisions](own-key-cues.md). After a session, the
+Anthropic key can also write [meeting notes](meeting-notes.md), one confirmed
+request per meeting.
 
 ## In Settings
 
@@ -47,12 +49,12 @@ fictional keys in memory and cannot check one.
 All four are main-window commands and return the same status payload. The
 first-run screen reads `provider_keys_status` at launch.
 
-| Command | Arguments | What it does |
-| --- | --- | --- |
-| `provider_keys_status` | none | Reads which keys are stored. Sends nothing. |
-| `set_provider_key` | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider. |
-| `test_provider_key` | `{ provider }` | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`) or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`). Neither is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
-| `remove_provider_key` | `{ provider }` | Deletes the key from the Keychain. |
+| Command                | Arguments           | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider_keys_status` | none                | Reads which keys are stored. Sends nothing.                                                                                                                                                                                                                                                                                                                                                           |
+| `set_provider_key`     | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider.                                                                                                                                                                                                                                                                                                                     |
+| `test_provider_key`    | `{ provider }`      | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`) or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`). Neither is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
+| `remove_provider_key`  | `{ provider }`      | Deletes the key from the Keychain.                                                                                                                                                                                                                                                                                                                                                                    |
 
 `provider` is `"deepgram"` or `"anthropic"`. The payload:
 

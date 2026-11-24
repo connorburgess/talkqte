@@ -69,7 +69,7 @@ const INVALID_REPLIES_IN_A_ROW: u32 = 3;
 pub struct Model {
     pub id: &'static str,
     thinking: Option<&'static str>,
-    price: [f64; 4],
+    pub(crate) price: [f64; 4],
 }
 
 pub const MODELS: [Model; 3] = [
@@ -374,7 +374,7 @@ impl<T: Transport> AnthropicApi<T> {
 
 /// What a streamed reply came to, before its text is checked.
 #[derive(Debug, PartialEq, Eq)]
-enum Outcome {
+pub(crate) enum Outcome {
     Decision(String),
     Cancelled,
     Refusal,
@@ -575,6 +575,17 @@ fn read_stream(
     model: Model,
     cancel: &Cancellation,
 ) -> (Outcome, TokenUsage, bool) {
+    read_bounded_stream(body, model, MAX_TEXT_BYTES, &|| cancel.is_cancelled())
+}
+
+/// [`read_stream`] with its own bound on the reply text and its own
+/// cancellation check, for the one meeting-notes request.
+pub(crate) fn read_bounded_stream(
+    body: Box<dyn Read + Send>,
+    model: Model,
+    max_text_bytes: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> (Outcome, TokenUsage, bool) {
     let mut reader = BufReader::new(body);
     let mut usage = TokenUsage::default();
     let mut text = String::new();
@@ -583,7 +594,7 @@ fn read_stream(
     let mut stopped = false;
     let mut line = Vec::new();
     let outcome = loop {
-        if cancel.is_cancelled() {
+        if cancelled() {
             break Some(Outcome::Cancelled);
         }
         line.clear();
@@ -595,7 +606,7 @@ fn read_stream(
             Ok(_) if line.len() > MAX_LINE_BYTES => break Some(Outcome::Protocol),
             Ok(_) => {}
             Err(_) => {
-                break Some(if cancel.is_cancelled() {
+                break Some(if cancelled() {
                     Outcome::Cancelled
                 } else {
                     Outcome::Provider
@@ -617,7 +628,7 @@ fn read_stream(
             }
             Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
                 text.push_str(event["delta"]["text"].as_str().unwrap_or(""));
-                if text.len() > MAX_TEXT_BYTES {
+                if text.len() > max_text_bytes {
                     break Some(Outcome::OutputLimit);
                 }
             }
