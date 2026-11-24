@@ -38,6 +38,8 @@ export const RUST_FEATURES = [];
  * IGNORED_NOTICES, so a new one cannot be skipped without a decision. */
 const VENDORED_NOTICES = {
   'regex-syntax': ['src/unicode_tables/LICENSE-UNICODE'],
+  // A copy of spin's lazy initialiser (Windows and Linux builds only).
+  'tracing-core': ['src/spin/LICENSE'],
   ring: [
     'src/polyfill/once_cell/LICENSE-APACHE',
     'src/polyfill/once_cell/LICENSE-MIT',
