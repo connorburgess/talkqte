@@ -224,6 +224,11 @@ impl Invalid {
     }
 }
 
+/// Said when no connection to Anthropic could be made: nothing was sent and
+/// the request is still available.
+pub const UNSENT_OFFLINE: &str =
+    "Anthropic could not be reached, so nothing was sent. Check your internet connection, then choose Write meeting notes again.";
+
 /// Why a sent request produced no notes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -873,6 +878,11 @@ fn write_with<T: Transport>(
     }
     let reply = transport.post(&key, body.as_bytes(), DEADLINE);
     drop(key);
+    // Offline, or no connection could be made: nothing left the Mac, so the
+    // meeting's one request is still there to send.
+    if reply.as_ref().err() == Some(&NoReply::Unsent) {
+        return unsent(Failure::Unreachable);
+    }
     // From here something reached, or may have reached, the provider.
     let failed = |failure, spent| Written {
         result: Err(failure),
@@ -881,7 +891,7 @@ fn write_with<T: Transport>(
     };
     let reply = match reply {
         Ok(reply) => reply,
-        Err(NoReply) => {
+        Err(_) => {
             let failure = if cancelled() {
                 Failure::Cancelled
             } else {
