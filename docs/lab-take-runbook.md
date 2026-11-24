@@ -296,7 +296,7 @@ Proves it: the recorder accepts its first frame within 3 s of approval; the play
 
 The runner does this after the take settles, and only after native release and recorder finalization:
 
-1. Snapshots the timing file with `snapshotLabTiming` ([timing snapshot](lab-timing-snapshot.md)) and attaches it as `native-timing` on the `native-logger` clock (released by Stop, or ended by native itself).
+1. Snapshots the timing file with `snapshotLabTiming` ([timing snapshot](lab-timing-snapshot.md)) and attaches it as `native-timing` on the `native-logger` clock: released by Stop, ended by native itself, or, after a failure, with release unconfirmed and the recorder's finalization stated either way ([when release is not confirmed](lab-timing-snapshot.md#when-release-is-not-confirmed)). It prints `Native timing attached: <rows> rows, <bytes> of <bytes> bytes seen at open; source …`, or `Native timing not attached: <reason>`. An attached snapshot never claims complete coverage.
 2. Measures the recording (`recorder.output`) with the duration helper and attaches it with that `durationMs`.
 3. `writer.close()` writes the manifest.
 4. Writes the report into `<evidence>/tq-evidence-XXXX/report` (`writeEvidenceReport`, metadata only).
@@ -327,7 +327,7 @@ Proves it, each separately:
 
 ## After a failure
 
-Keep everything: the attempt marker, the evidence folder (partial recording included, with `take-outcome.json`), and the run's `tq-owned-*` folder until its token is swept. Record the first failure as reported; later failures never replace it.
+Keep everything: the attempt marker, the evidence folder (partial recording included, with `take-outcome.json`), and the run's `tq-owned-*` folder until its token is swept. The native timing log is already in the evidence folder as a bounded snapshot whenever the app was launched (`evidence.timingDetail` in the outcome says what it covers), so it does not need copying by hand; the original stays in the `tq-owned-*` folder. Record the first failure as reported; later failures never replace it.
 
 Do not retry, restart or resume the same take, kill the app and call it release, or work around a permission prompt. If release is unconfirmed, cleanup counts as failed (`failed-cleanup`); the take keeps the player, and the runner retires it once the take has settled. Whether the app released its capture is then the owner's to check. The runner refuses the same plan again; a new take needs a new plan and its review ([owner decisions](#owner-decisions)).
 
