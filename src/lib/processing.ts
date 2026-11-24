@@ -77,12 +77,12 @@ export interface ProcessingSnapshot {
   /** Conversation lines are being sent to the processor right now. */
   sending?: boolean;
   approvalBySetting?: boolean;
-  /** Development builds only: the microphone alone, beside a combined capture. */
+  /** macOS builds: the microphone alone, beside a combined capture. */
   microphone?: ProcessingSnapshot['capture'];
-  /** Development builds only: the selected-application source. */
+  /** macOS builds: the selected-application source. */
   source?: SourceCapture;
 }
-/** The selected-application source in a development build. Off only when
+/** The selected-application source in a macOS build. Off only when
  * nothing was started or native cleanup was confirmed. */
 export interface SourceCapture {
   phase:
@@ -103,7 +103,7 @@ export interface SourceCapture {
   operation: string | null;
   /** The live session was started for this source alone; no microphone. */
   sourceSession: boolean;
-  /** Development builds only: started by the launch setting, which stands
+  /** macOS builds: started by the launch setting, which stands
    * for the acknowledged scope notice. */
   bySetting?: boolean;
 }
@@ -253,12 +253,12 @@ export const noteKey = (note: NoteSelection) =>
   JSON.stringify([note.provider, note.sourceId, note.revision]);
 export const processingApi = {
   snapshot: () => invoke<ProcessingSnapshot>('processing_snapshot'),
-  /** Development builds only: Stop exactly this application source. */
+  /** macOS builds: Stop exactly this application source. */
   stopSource: (operation: string) =>
     invoke<unknown>('application_audio', {
       action: { kind: 'stop', operation },
     }).then(() => {}),
-  /** Development builds only: the application-audio host's command. */
+  /** macOS builds: the application-audio host's command. */
   applicationAudio: (action: ApplicationAudioAction) =>
     invoke<ApplicationAudioStatus>('application_audio', { action }),
   listenApplicationAudio: (receive: (status: ApplicationAudioStatus) => void) =>

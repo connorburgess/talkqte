@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>TalkQTE uses the microphone only after you start it: to show whether there is input and, during a live session you start, to transcribe speech. TalkQTE does not save audio. Only development builds can send it to a transcription service, and only after you approve that for the session.</string>
+    <string>TalkQTE uses the microphone only after you start it: to show whether there is input and, during a live session you start, to transcribe speech. TalkQTE does not save audio. It sends audio to Deepgram for transcription, with your own Deepgram key, only after you approve that for the session.</string>
 </dict>
 </plist>

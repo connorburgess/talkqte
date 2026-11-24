@@ -50,6 +50,12 @@ import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import {
+  SessionSources,
+  microphoneOnly,
+  ready,
+  type SourceChoice,
+} from './components/SessionSources';
+import {
   type EchoLine,
   applicationEndedText,
   echoText,
@@ -61,6 +67,7 @@ import {
 } from './lib/transcription';
 import {
   microphoneNotCapturing,
+  processingApi,
   sourceOnlyApplication,
 } from './lib/processing';
 
@@ -143,7 +150,7 @@ function FloatingQuestion() {
   // What the bar says about capture, in words: read by assistive technology
   // always, and shown whenever the glyph alone would not say it.
   const listening = mic?.status === 'listening';
-  // Development builds only: a session fed by an application alone.
+  // A session fed by an application alone (macOS builds).
   const appAudio = live && !!state?.sourceSession && !listening;
   // Capture is on and nothing about it is changing or wrong.
   const capturing =
@@ -476,7 +483,7 @@ function Notebook() {
   const microphone = useMicrophone();
   const capture = useCaptureControl();
   // A session fed by a selected application alone, with the microphone off
-  // (development builds only); null otherwise.
+  // (macOS builds); null otherwise.
   const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
@@ -499,15 +506,41 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
+  const [sources, setSources] = useState<SourceChoice>(microphoneOnly);
+  // Only a build that can hear an application reports one beside the
+  // microphone; any other build starts from the microphone as before.
+  const canChooseSources = !!capture.state?.source;
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
+    const choice = canChooseSources ? sources : microphoneOnly;
     void run(async () => {
       setNotice('');
       try {
-        await bridge.command('start_live_session');
+        if (choice.mode === 'microphone' || !choice.application) {
+          await bridge.command('start_live_session');
+          return;
+        }
+        // Review exactly the chosen application, then start with it: the
+        // session declares it, so its one approval names what is sent.
+        const review = await processingApi.applicationAudio({
+          kind: 'review',
+          source: choice.application.id,
+        });
+        if (!review?.operation)
+          throw new Error('The selected application changed. Choose it again.');
+        if (choice.mode === 'both')
+          await bridge.command('start_live_session', {
+            application: review.operation,
+          });
+        else
+          await processingApi.applicationAudio({
+            kind: 'startSession',
+            review: review.operation,
+          });
+        setSources((current) => ({ ...current, application: null }));
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -1442,11 +1475,18 @@ function Notebook() {
                       <button
                         className="primary-button"
                         ref={startButton}
-                        disabled={busy || startPending || microphone.active}
+                        disabled={
+                          busy ||
+                          startPending ||
+                          microphone.active ||
+                          (canChooseSources && !ready(sources))
+                        }
                         title={
                           microphone.active
                             ? 'Stop the microphone check first.'
-                            : undefined
+                            : canChooseSources && !ready(sources)
+                              ? 'Choose the application first.'
+                              : undefined
                         }
                         onClick={startLive}
                       >
@@ -1458,6 +1498,18 @@ function Notebook() {
                 )}
               </div>
             </section>
+            {canChooseSources &&
+              liveStatus?.available &&
+              !preparing &&
+              !finishing &&
+              !live &&
+              !simulated && (
+                <SessionSources
+                  value={sources}
+                  onChange={setSources}
+                  disabled={busy || startPending}
+                />
+              )}
 
             <MeetingNotes snapshot={state} />
 
@@ -2150,13 +2202,13 @@ function Notebook() {
                 </h2>
                 <p>
                   Start live session in the notebook to get questions from what
-                  your microphone hears. TalkQTE does not transcribe on this
-                  device. A development build can send the session’s audio to
-                  Deepgram for transcription once you enable cue processing for
-                  that session; other builds have no live transcription. Audio
-                  is not recorded by TalkQTE. The transcript stays in memory
-                  until you start another session or close the app; it is never
-                  saved or exported.
+                  your microphone hears and, on a Mac, from one application you
+                  choose, such as the app your call is in. TalkQTE does not
+                  transcribe on this device: the session’s audio is sent to
+                  Deepgram with your key once you enable cue processing for that
+                  session. Audio is not recorded by TalkQTE. The transcript
+                  stays in memory until you start another session or close the
+                  app, unless you choose to keep the meeting and export it.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus

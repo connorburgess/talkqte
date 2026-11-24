@@ -9,7 +9,6 @@ import {
   type ProcessingScope,
   type ProcessingSnapshot,
 } from '../lib/processing';
-import { ApplicationAudioStart } from './ApplicationAudioStart';
 import './processing.css';
 
 /** Present to assistive technology, absent from the visual layout. */
@@ -415,13 +414,9 @@ export function ProcessingControl({
             ended: 'Session ended',
           }[snapshot.phase];
 
-  const showAppAudioStart =
-    !!snapshot?.source &&
-    ['off', 'listing', 'reviewing'].includes(snapshot.source.phase);
   const showLabDetails = isLabProcessor(snapshot?.processor?.id);
   const showApprovalBySetting = !!snapshot?.approvalBySetting;
-  const showDevGroup =
-    showAppAudioStart || showLabDetails || showApprovalBySetting;
+  const showDevGroup = showLabDetails || showApprovalBySetting;
 
   return (
     <section
@@ -838,10 +833,6 @@ export function ProcessingControl({
           <p id="processing-dev-title" className="processing-dev-label">
             Development build
           </p>
-          {showAppAudioStart && (
-            // Only a native-audio-spike build reports a source at all.
-            <ApplicationAudioStart />
-          )}
           {showLabDetails && (
             <details className="processing-dev-details">
               <summary>Lab run details</summary>

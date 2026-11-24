@@ -737,11 +737,7 @@ impl Runtime {
 
     /// `ingest_timed` for a line from the named capture.
     #[cfg_attr(
-        not(any(
-            feature = "cloud-transcription",
-            all(target_os = "macos", feature = "native-audio-spike"),
-            test
-        )),
+        not(any(feature = "cloud-transcription", target_os = "macos", test)),
         allow(dead_code)
     )]
     pub(crate) fn ingest_timed_from(

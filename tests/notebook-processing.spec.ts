@@ -471,13 +471,7 @@ test('desktop toolbar omits the prototype label and the development group appear
       },
     }),
   );
-  await expect(devHeading).toBeVisible();
-
-  await page.evaluate(() =>
-    window.captureTest.send({
-      approvalBySetting: false,
-      source: undefined,
-    }),
-  );
+  // Application audio is in every macOS build now: a source alone is no
+  // development signal.
   await expect(devHeading).toHaveCount(0);
 });

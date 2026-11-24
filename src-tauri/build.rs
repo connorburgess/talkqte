@@ -1,10 +1,8 @@
-/// The development-only application-audio command exists, and is allowed,
-/// only in a macOS build with the `native-audio-spike` feature.
+/// The application-audio command exists, and is allowed for the main window,
+/// only in a macOS build: ScreenCaptureKit is macOS's.
 fn with_development_commands(commands: &[&'static str]) -> &'static [&'static str] {
     let mut commands = commands.to_vec();
-    if std::env::var_os("CARGO_FEATURE_NATIVE_AUDIO_SPIKE").is_some()
-        && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         commands.push("application_audio");
     }
     commands.leak()

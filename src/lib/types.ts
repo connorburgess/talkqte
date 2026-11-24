@@ -68,7 +68,7 @@ export interface CueSnapshot {
   modelIssue?: import('./processing').ProcessingIssue;
   modelProvider?: string;
   modelLab?: boolean;
-  /** Development builds only: the running session is fed by a selected
+  /** macOS builds: the running session is fed by a selected
    * application alone, with no microphone. */
   sourceSession?: boolean;
   /** Where a live session's audio is transcribed: present for every live
@@ -110,7 +110,9 @@ export type Commands = {
   set_keep_meeting: { keep: boolean };
   /** Keep a line marked as a likely echo as the person's own, or remove it. */
   resolve_echo_line: { id: string; keep: boolean };
-  start_live_session: undefined;
+  /** `application`: the review of an application to hear beside the
+   * microphone; the session declares it, and its review names both. */
+  start_live_session: { application?: string } | undefined;
   stop_live_session: undefined;
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };

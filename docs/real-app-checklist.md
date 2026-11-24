@@ -45,10 +45,10 @@ One page to follow at the Mac for a recorded run of the real TalkQTE app hearing
 
 7. **Check the log is on** once the session starts (step 9): `run-01.stderr` then has a line `TalkQTE timing log: on`. The file is opened at the first session, so the line is not there before.
 8. **Open the meeting video in QuickTime Player**, paused at the start. Nothing else plays in QuickTime Player. Keep its window and the TalkQTE companion both visible.
-9. **Start the session.** In the notebook's Cue processing panel, under **Development build** → "Application audio" at the end of the panel:
-   - press **List applications**;
+9. **Start the session.** In the notebook, under **Listen to** below the session strip:
+   - choose **One application only**, then press **List applications**;
    - choose **QuickTime Player**; only regular applications with a bundle identifier and a normal-level window are offered, with meeting/player apps first;
-   - press **Start session from QuickTime Player**;
+   - press **Start live session**;
    - wait for "Application audio from QuickTime Player is being captured". Do not press play yet;
    - approve the session's cue processing review (**Enable for this session**). Until then nothing is sent to Deepgram and the captured audio is thrown away.
 10. **Dry-run the recorder.** Every line should read `ready`:

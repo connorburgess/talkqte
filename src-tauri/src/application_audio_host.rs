@@ -1302,8 +1302,8 @@ pub(crate) mod app {
 
     /// The single command for this development surface, main window only.
     #[tauri::command]
-    pub(crate) fn application_audio(
-        window: tauri::WebviewWindow,
+    pub(crate) fn application_audio<R: tauri::Runtime>(
+        window: tauri::WebviewWindow<R>,
         host: tauri::State<'_, Host>,
         action: Action,
     ) -> Result<Snapshot, Error> {
@@ -1312,6 +1312,16 @@ pub(crate) mod app {
         }
         host.apply(action)?;
         Ok(host.snapshot())
+    }
+
+    /// Allow the one application-audio command for the main window only. It
+    /// is added at startup because only a macOS build has the command.
+    pub(crate) fn allow<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+        app.add_capability(
+            tauri::ipc::CapabilityBuilder::new("application-audio")
+                .window("main")
+                .permission("allow-application-audio"),
+        )
     }
 
     /// Register the host, allow its one command for the main window, and
@@ -1325,14 +1335,16 @@ pub(crate) mod app {
             })
         });
         app.manage(host.clone());
-        app.add_capability(
-            tauri::ipc::CapabilityBuilder::new("application-audio")
-                .window("main")
-                .permission("allow-application-audio"),
-        )?;
+        allow(app)?;
         // Freeze source and finite Stop settings once, shared by arming and
         // autostart so the approved source cannot change between those steps.
+        // The development launch settings exist only in a debug build with
+        // `native-audio-spike` (a release with the feature does not compile);
+        // any other build starts nothing by itself.
+        #[cfg(all(debug_assertions, feature = "native-audio-spike"))]
         let settings = DevSettings::read(|name| std::env::var(name).ok());
+        #[cfg(not(all(debug_assertions, feature = "native-audio-spike")))]
+        let settings: Option<DevSettings> = None;
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_lab_source::initialize(settings.as_ref(), |name| std::env::var(name).ok())
             .map_err(std::io::Error::other)?;
@@ -1422,6 +1434,10 @@ pub(crate) mod app {
 
 pub(crate) use app::{exit, install, source_status};
 
+#[cfg_attr(
+    not(any(all(debug_assertions, feature = "native-audio-spike"), test)),
+    allow(dead_code)
+)]
 mod dev_start;
 pub(crate) use dev_start::{Settings as DevSettings, Waits as DevWaits};
 
