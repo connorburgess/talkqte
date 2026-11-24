@@ -27,6 +27,9 @@ pub(crate) struct StartTicket {
     gate: StartGate,
     guard: StartGuard,
     operation: String,
+    /// The capture sources the session will have; the microphone alone
+    /// unless the start says otherwise.
+    sources: engine::SessionSources,
 }
 
 impl StartGate {
@@ -52,6 +55,7 @@ impl StartGate {
             gate: self.clone(),
             guard: StartGuard(flag),
             operation,
+            sources: engine::SessionSources::microphone(),
         })
     }
 
@@ -124,6 +128,14 @@ impl StartGate {
 }
 
 impl StartTicket {
+    /// The session this start installs has these capture sources. Its
+    /// review names them, and an application can feed it only if they
+    /// include that application.
+    pub(crate) fn with_sources(mut self, sources: engine::SessionSources) -> Self {
+        self.sources = sources;
+        self
+    }
+
     pub(crate) fn guard(&self) -> StartGuard {
         self.guard.clone()
     }
@@ -219,8 +231,9 @@ impl Runtime {
             feature = "lab-evaluator"
         ))]
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
-        let mut engine = carry_over(&self.engine, crate::live_engine());
+        let mut engine = carry_over(&self.engine, crate::live_engine(&ticket.sources));
         engine.start()?;
+        engine.set_sources(ticket.sources.clone());
         #[cfg(all(
             debug_assertions,
             any(feature = "claude-cli", feature = "lab-evaluator"),

@@ -48,6 +48,9 @@ import { useCaptureControl } from './lib/useCaptureControl';
 import { keysStatus, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import {
+  applicationEndedText,
+  echoText,
+  sourcesHeading,
   transcribedWhere,
   transcriptionDropText,
   transcriptionReconnectText,
@@ -1346,6 +1349,12 @@ function Notebook() {
                       {transcriptionStopText(state.transcription)}
                     </p>
                   )}
+                  {applicationEndedText(state.sources) && (
+                    <p role="alert">{applicationEndedText(state.sources)}</p>
+                  )}
+                  {echoText(state.sources) && (
+                    <p role="status">{echoText(state.sources)}</p>
+                  )}
                   {transcriptionDropText(state.transcription) && (
                     <p role="status">
                       {transcriptionDropText(state.transcription)}
@@ -1523,9 +1532,13 @@ function Notebook() {
                     {(state.live || simulated) && (
                       <p className="muted small">
                         {state.live
-                          ? sourceApp
-                            ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
-                            : `Your microphone · ${transcribedWhere(state.transcription)}`
+                          ? (sourcesHeading(
+                              state.sources,
+                              state.transcription,
+                            ) ??
+                            (sourceApp
+                              ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
+                              : `Your microphone · ${transcribedWhere(state.transcription)}`))
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}

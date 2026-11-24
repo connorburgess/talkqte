@@ -16,6 +16,9 @@ pub enum TimingError {
     /// The live session already has a source, or this source already has its
     /// accepted binding. The session itself has not changed.
     Occupied,
+    /// The live session was not started with an application, so its review
+    /// never named one. The session itself has not changed.
+    Undeclared,
 }
 
 /// A missing frame range. Millisecond endpoints are floored independently, so

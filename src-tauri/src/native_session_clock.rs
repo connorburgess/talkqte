@@ -115,6 +115,7 @@ impl Runtime {
             .map_err(|refused| match refused {
                 Refused::SessionChanged => TimingError::SessionChanged,
                 Refused::Occupied => TimingError::Occupied,
+                Refused::Undeclared => TimingError::Undeclared,
             })?;
         Ok(MeasuredBinding {
             session: snapshot.session,
@@ -205,7 +206,10 @@ pub(crate) mod tests {
 
     fn setup() -> (Runtime, Gate, Review, Control) {
         let mut runtime = Runtime::default();
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket = runtime
+            .begin_live_start()
+            .unwrap()
+            .with_sources(crate::engine::SessionSources::both("Fictional player"));
         runtime.install_live_start(&ticket).unwrap();
         drop(ticket);
         let gate = Gate::default();
@@ -320,7 +324,9 @@ pub(crate) mod tests {
                         2 => {
                             runtime.take_live_for_stop();
                             runtime.engine.end();
-                            let ticket = runtime.begin_live_start().unwrap();
+                            let ticket = runtime.begin_live_start().unwrap().with_sources(
+                                crate::engine::SessionSources::both("Fictional player"),
+                            );
                             runtime.install_live_start(&ticket).unwrap();
                         }
                         _ => {}

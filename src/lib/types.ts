@@ -75,6 +75,8 @@ export interface CueSnapshot {
    * session, which only a development build with cloud transcription can
    * start. */
   transcription?: import('./transcription').CloudTranscription;
+  /** The capture sources this live session was started with. */
+  sources?: import('./transcription').SessionSources;
 }
 export interface Snapshot extends CueSnapshot {
   title: string;

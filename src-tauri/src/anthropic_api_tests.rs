@@ -402,14 +402,21 @@ fn unusable_replies_skip_the_request_until_three_in_a_row() {
 fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
     use crate::transcription::cloud::Language;
     // The longer, multilingual wording must also fit the review's bound.
-    let multi = crate::transcription::cloud::review_sentence_for_own_key(Language::Multilingual);
+    // The longest: Multilingual, with both sources and the longest name.
+    let multi = crate::transcription::cloud::review_sentence_for_own_key(
+        Language::Multilingual,
+        &crate::engine::SessionSources::both(&"W".repeat(200)),
+    );
     let longest = format!("{} {multi}", data_policy(haiku()));
     assert!(
         longest.len() <= 2_048,
         "the review's bound: {}",
         longest.len()
     );
-    let deepgram = crate::transcription::cloud::review_sentence_for_own_key(Language::English);
+    let deepgram = crate::transcription::cloud::review_sentence_for_own_key(
+        Language::English,
+        &crate::engine::SessionSources::microphone(),
+    );
     let policy = format!("{} {deepgram}", data_policy(haiku()));
     for part in [
         "Anthropic API (US), with your own Anthropic API key",

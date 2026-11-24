@@ -70,3 +70,53 @@ export function transcribedWhere(
 ): string {
   return `transcribed by ${transcription?.provider ?? 'the transcription service'} once cue processing is enabled`;
 }
+
+/** The capture sources a live session was started with, and how they are
+ * doing. Metadata only. */
+export interface SessionSources {
+  microphone: boolean;
+  /** The selected application's name, as listed. */
+  application?: string;
+  /** The application began feeding the session. */
+  applicationAttached?: boolean;
+  /** Why the application is no longer heard while the microphone runs on. */
+  applicationEnded?: string;
+  /** Microphone lines dropped as repeats of the application's sound. */
+  echoDropped?: number;
+}
+
+/** Both the microphone and an application feed the session. */
+export function bothSources(sources: SessionSources | undefined): boolean {
+  return Boolean(sources?.microphone && sources.application);
+}
+
+/** The transcript's first line: where its audio comes from. */
+export function sourcesHeading(
+  sources: SessionSources | undefined,
+  transcription: CloudTranscription | undefined,
+): string | null {
+  if (!sources || !bothSources(sources)) return null;
+  return `You: your microphone · Them: audio from ${sources.application} · ${transcribedWhere(transcription)}. The labels say where a line was heard, not who said it.`;
+}
+
+/** Said while a two-source session runs on without its application. */
+export function applicationEndedText(
+  sources: SessionSources | undefined,
+): string | null {
+  if (!sources || !bothSources(sources) || !sources.applicationEnded)
+    return null;
+  const what =
+    sources.applicationEnded === 'not_started'
+      ? 'did not start'
+      : sources.applicationEnded === 'ended'
+        ? 'stopped'
+        : `stopped: ${STOP_REASONS[sources.applicationEnded] ?? 'it stopped unexpectedly'}`;
+  return `Audio from ${sources.application} ${what}. Only your microphone is heard now; Cue processing says why. Stop and start again to hear both.`;
+}
+
+/** Said once the echo guard has dropped microphone lines. */
+export function echoText(sources: SessionSources | undefined): string | null {
+  const dropped = sources?.echoDropped ?? 0;
+  if (!dropped) return null;
+  return `${dropped === 1 ? '1 microphone line was' : `${dropped} microphone lines were`} left out as a repeat of ${sources?.application ?? 'the application'}'s sound through your speakers. Headphones avoid this.`;
+}

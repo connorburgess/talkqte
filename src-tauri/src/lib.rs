@@ -119,6 +119,12 @@ struct Runtime {
     live_source: Option<live_source::LiveSource>,
     /// A live session started for an application source alone, if any.
     source_session: Option<live_source::SourceSession>,
+    /// The Deepgram budget of the running microphone session, made by its
+    /// start, so an application joining that session spends the same one.
+    live_budget: Option<(u64, transcription::cloud::Budget)>,
+    /// The application the development join setting will attach to the
+    /// next microphone session, which is then declared with it.
+    dev_join_application: Option<String>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -154,6 +160,8 @@ impl Default for Runtime {
             lab_stop_drains: dev_stop::Drains::default(),
             live_source: None,
             source_session: None,
+            live_budget: None,
+            dev_join_application: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -402,7 +410,7 @@ fn snapshot(
 /// backend; otherwise the Anthropic API with the person's own key when one is
 /// stored, or the plain engine with no cue backend. Each sends nothing until
 /// the person approves the session review.
-pub(crate) fn live_engine() -> Engine {
+pub(crate) fn live_engine(sources: &engine::SessionSources) -> Engine {
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -412,16 +420,17 @@ pub(crate) fn live_engine() -> Engine {
     if lab_evaluator::selected() {
         // An explicit malformed selection stays unavailable in the lab path;
         // only an absent selector may use the existing default below.
-        return lab_evaluator::connected_engine();
+        return lab_evaluator::connected_engine(sources);
     }
     #[cfg(feature = "claude-cli")]
-    return claude_cli::connected_engine();
+    return claude_cli::connected_engine(sources);
     #[cfg(not(feature = "claude-cli"))]
     if provider_keys::global().is_set(provider_keys::Provider::Anthropic) {
         // The person's own key: sends nothing until the session review is
         // approved, and never falls back to another service.
-        anthropic_api::connected_engine()
+        anthropic_api::connected_engine(sources)
     } else {
+        let _ = sources;
         Engine::live()
     }
 }
@@ -1343,20 +1352,35 @@ async fn start_live_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     microphone: tauri::State<'_, microphone::Controller>,
+    application: Option<String>,
 ) -> Result<(), String> {
     {
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
         }
-        let start = state
-            .0
-            .lock()
-            .map_err(|_| "The session is unavailable.")?
-            .begin_live_start()?;
+        // The application under review, if the person chose one beside the
+        // microphone. The session declares it, so its review names both.
+        let joining = match application {
+            None => None,
+            Some(review) => Some(application_source::reviewed(&app, &review)?),
+        };
+        let start = {
+            let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+            let declared = joining
+                .as_ref()
+                .map(|(name, _)| name.clone())
+                .or_else(|| runtime.dev_join_application.clone());
+            let sources = match declared {
+                Some(name) => engine::SessionSources::both(&name),
+                None => engine::SessionSources::microphone(),
+            };
+            runtime.begin_live_start()?.with_sources(sources)
+        };
         // Made only once this start holds the gate, so a refused second
         // start can never replace or reuse this session's minute budget.
         let streams = transcription::cloud::streams()
             .map_err(|_| "The cloud transcription settings are not usable.")?;
+        let budget = streams.budget();
         // Nothing is opened here: the stream opens once the review is
         // approved. The start can still be cancelled before capture.
         let (start, streams) =
@@ -1368,6 +1392,8 @@ async fn start_live_session(
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
             let session = runtime.install_live_start(&start)?;
+            // An application joining this session spends the same budget.
+            runtime.live_budget = budget.map(|budget| (session, budget));
             publish(&app, &mut runtime);
             session
         };
@@ -1504,6 +1530,16 @@ async fn start_live_session(
                     tauri::async_runtime::spawn_blocking(move || {
                         microphone::stop_blocking(&handle, controller, generation)
                     });
+                } else if let Some((_, review)) = joining {
+                    // The microphone is capturing for this session; now the
+                    // reviewed application joins it. A refusal leaves the
+                    // microphone running and the session says so.
+                    if application_source::join(&app, &review).is_err() {
+                        if let Ok(mut runtime) = state.0.lock() {
+                            runtime.engine.application_ended(session, "not_started");
+                            publish(&app, &mut runtime);
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -1530,6 +1566,43 @@ async fn start_live_session(
                 Err(error)
             }
         }
+    }
+}
+
+/// The application the person chose to hear beside the microphone.
+mod application_source {
+    /// The name of the application under `review`, and the review, if that
+    /// review is the host's current one.
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    pub(crate) fn reviewed(
+        app: &tauri::AppHandle,
+        review: &str,
+    ) -> Result<(String, String), String> {
+        use tauri::Manager;
+        app.try_state::<crate::application_audio_host::Host>()
+            .and_then(|host| host.reviewed_application(review))
+            .map(|name| (name, review.to_owned()))
+            .ok_or_else(|| "The selected application changed. Choose it again.".into())
+    }
+
+    /// Start the reviewed application into the running microphone session.
+    #[cfg(all(target_os = "macos", feature = "native-audio-spike"))]
+    pub(crate) fn join(app: &tauri::AppHandle, review: &str) -> Result<(), ()> {
+        use tauri::Manager;
+        let host = app
+            .try_state::<crate::application_audio_host::Host>()
+            .ok_or(())?;
+        host.start(review).map_err(drop)
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    pub(crate) fn reviewed(_: &tauri::AppHandle, _: &str) -> Result<(String, String), String> {
+        Err("This build cannot hear another application.".into())
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "native-audio-spike")))]
+    pub(crate) fn join(_: &tauri::AppHandle, _: &str) -> Result<(), ()> {
+        Err(())
     }
 }
 
@@ -1993,7 +2066,7 @@ mod lab_clock_tests {
     fn selector_child() {
         lab_evaluator::initialize_from_environment();
         let case = std::env::var("TALKQTE_TEST_SELECTOR_CASE").unwrap();
-        let mut engine = live_engine();
+        let mut engine = live_engine(&engine::SessionSources::microphone());
         engine.start().unwrap();
         let snapshot = engine.processing_snapshot(engine::CaptureState::Off, 0);
         match case.as_str() {

@@ -45,7 +45,13 @@ pub(crate) trait Backend {
     /// Start a live session for the source alone, with no microphone. The
     /// returned step ends that session, if it is still the current one.
     /// `control` is the approved start's; the session's Stop cancels it.
-    fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure>;
+    /// `application` is the reviewed application's name, which the
+    /// session declares as its one source.
+    fn begin_session(
+        &mut self,
+        control: &Control,
+        application: &str,
+    ) -> Result<Box<dyn FnOnce()>, Failure>;
 }
 
 /// Runs its step when dropped, including while unwinding.
@@ -252,6 +258,8 @@ enum Command {
     List(Listed),
     Run {
         source: String,
+        /// The application's name, which a session for it alone declares.
+        name: String,
         start: Start,
         monitor: Monitor,
         finish: Finish,
@@ -443,6 +451,7 @@ impl Host {
                         }
                         Command::Run {
                             source,
+                            name,
                             start,
                             monitor,
                             finish,
@@ -453,7 +462,7 @@ impl Host {
                             // unwinding included, and before the outcome is
                             // reported, so Off never shows beside it.
                             let session = if session_only {
-                                match backend.begin_session(&start.control()) {
+                                match backend.begin_session(&start.control(), &name) {
                                     Ok(end) => {
                                         session_started.store(true, Ordering::Release);
                                         Some(OnDrop(Some(end)))
@@ -537,6 +546,17 @@ impl Host {
         Ok(())
     }
 
+    /// The name of the application under `review`, if that is the current
+    /// review. Nothing is requested of the OS.
+    pub(crate) fn reviewed_application(&self, review: &str) -> Option<String> {
+        let state = self.lock();
+        state
+            .review
+            .as_ref()
+            .filter(|(id, _)| id == review)
+            .map(|(_, review)| review.application().name().to_owned())
+    }
+
     /// The person approved exactly the application under review.
     pub(crate) fn start(&self, review: &str) -> Result<(), Error> {
         self.start_with(review, false)
@@ -584,6 +604,7 @@ impl Host {
         worker
             .send(Command::Run {
                 source: application.selection_id().to_owned(),
+                name: application.name().to_owned(),
                 start,
                 monitor: monitor.clone(),
                 finish: Finish(ended.clone()),
@@ -942,6 +963,7 @@ fn refusal_problem(refused: Refused) -> Option<Problem> {
     Some(match refused {
         Refused::Clock(TimingError::SessionChanged) => Problem::NoLiveSession,
         Refused::Clock(TimingError::Occupied) => Problem::SessionHasSource,
+        Refused::Clock(TimingError::Undeclared) => Problem::NotInSession,
         Refused::Clock(_) => Problem::ClockRefused,
         // The person stopped it before anything started: not a problem.
         Refused::Start(Failure::Cancelled) => return None,
@@ -1021,7 +1043,11 @@ pub(crate) mod app {
     }
 
     impl Backend for Native {
-        fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+        fn begin_session(
+            &mut self,
+            control: &Control,
+            application: &str,
+        ) -> Result<Box<dyn FnOnce()>, Failure> {
             #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
             if !crate::dev_lab_source::current() {
                 return Err(Failure::SourceUnavailable);
@@ -1037,6 +1063,7 @@ pub(crate) mod app {
             let session = begin_session_checked(
                 &access,
                 control,
+                application,
                 availability,
                 || controller.try_not_capturing(),
                 record_startup,
@@ -1080,6 +1107,7 @@ pub(crate) mod app {
                 Ok(ready) => ready,
                 Err(refused) => {
                     self.selections.clear();
+                    application_not_heard(&access);
                     return Err(refused);
                 }
             };
@@ -1089,8 +1117,25 @@ pub(crate) mod app {
             // through the gate, and this is the worker that constructed it.
             // The remaining obligations of NativeOwner::begin are unverified
             // device gates; see docs/native-audio-owner.md.
-            unsafe { native_source::run(access, start, selection, LIMITS, opener, monitor) }
+            let outcome = unsafe {
+                native_source::run(access.clone(), start, selection, LIMITS, opener, monitor)
+            };
+            if outcome.is_err() {
+                application_not_heard(&access);
+            }
+            outcome
         }
+    }
+
+    /// A start refused before the source fed the session: a session with
+    /// the microphone too runs on, and says the application is not heard.
+    fn application_not_heard(access: &AppAccess) {
+        access.with(|runtime| {
+            let session = runtime.engine.session();
+            if runtime.live_source.is_none() {
+                runtime.engine.application_ended(session, "not_started");
+            }
+        });
     }
 
     fn record_startup(
@@ -1112,6 +1157,7 @@ pub(crate) mod app {
     pub(in crate::application_audio_host) fn begin_session_checked<A: Access>(
         access: &A,
         control: &Control,
+        application: &str,
         availability: Result<(), crate::LiveUnavailable>,
         microphone: impl FnOnce() -> Option<bool>,
         mut report: impl FnMut(
@@ -1146,7 +1192,7 @@ pub(crate) mod app {
                 }
                 return Err(failure);
             }
-            let result = runtime.begin_source_session(control);
+            let result = runtime.begin_source_session(control, application);
             report(
                 if result.is_ok() {
                     Stage::SessionCreated
@@ -1233,11 +1279,19 @@ pub(crate) mod app {
     /// the cloud stream this launch selected. A build or launch without one,
     /// or with unusable settings, refuses the start; nothing is transcribed
     /// on this device.
-    fn recognizer(_app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Streams, String> {
+    /// Joining a microphone session, the source spends that session's
+    /// budget, so the session has one cap across both streams.
+    fn recognizer(app: &tauri::AppHandle) -> Result<crate::transcription::cloud::Streams, String> {
         if let Some(reason) = crate::live_unavailable() {
             return Err(reason.into());
         }
-        crate::transcription::cloud::streams()
+        let shared = app
+            .state::<AppState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|runtime| runtime.session_budget());
+        crate::transcription::cloud::streams_sharing(shared)
             .map_err(|_| "The cloud transcription settings are not usable.".to_string())
     }
 
@@ -1280,6 +1334,16 @@ pub(crate) mod app {
         #[cfg(all(debug_assertions, feature = "lab-evaluator"))]
         crate::dev_stop::install(app, host.clone(), settings.as_ref())
             .map_err(std::io::Error::other)?;
+        // Joining the person's microphone session: the next one declares
+        // this application, so its review names both sources.
+        if let Some(settings) = settings
+            .as_ref()
+            .filter(|settings| settings.with_microphone == Ok(true))
+        {
+            if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+                runtime.dev_join_application = Some(settings.application.clone());
+            }
+        }
         // Act once on its own thread: it waits for listing and the start.
         if let Some(settings) = settings {
             let host = host.clone();

@@ -14,6 +14,7 @@
 
 use super::SAMPLE_RATE;
 use crate::engine::Segment;
+use crate::engine::SessionSources;
 use std::time::Duration;
 
 /// The only provider implemented, as the app names it.
@@ -852,7 +853,8 @@ fn readiness_for(settings: Result<Settings, SttFailure>) -> Result<(), Readiness
 pub struct Streams {
     opener: Opener,
     reopener: Option<Reopener>,
-    #[cfg(test)]
+    /// The session budget with the person's key; `None` with development
+    /// settings, whose launch budget is already shared by every source.
     budget: Option<Budget>,
 }
 
@@ -861,9 +863,14 @@ impl Streams {
         Self {
             opener,
             reopener,
-            #[cfg(test)]
             budget: None,
         }
+    }
+
+    /// The minute budget these streams spend, to give a session's second
+    /// source the same one.
+    pub fn budget(&self) -> Option<Budget> {
+        self.budget.clone()
     }
 
     pub fn into_parts(self) -> (Opener, Option<Reopener>) {
@@ -879,7 +886,21 @@ impl Streams {
 /// and shared by this opener and its reopener only, so no other start can
 /// replace or reuse it; with development settings the launch budget is used.
 pub fn streams() -> Result<Streams, SttFailure> {
-    Ok(streams_for(source().map_err(|_| SttFailure::Settings)?))
+    Ok(streams_for(
+        source().map_err(|_| SttFailure::Settings)?,
+        None,
+    ))
+}
+
+/// Streams for a session's second capture source, spending `budget`, the
+/// budget its first source's [`streams`] made, so the session has one cap
+/// across both. With development settings the launch budget is used, as for
+/// every source. Refused when neither is usable, like [`streams`].
+pub fn streams_sharing(budget: Option<Budget>) -> Result<Streams, SttFailure> {
+    Ok(streams_for(
+        source().map_err(|_| SttFailure::Settings)?,
+        budget,
+    ))
 }
 
 /// The language a source's streams use: the launch setting for a
@@ -891,7 +912,7 @@ fn language_of(source: &Source) -> Language {
     }
 }
 
-fn streams_for(source: Source) -> Streams {
+fn streams_for(source: Source, shared: Option<Budget>) -> Streams {
     let language = language_of(&source);
     match source {
         Source::Dev(settings) => Streams::new(
@@ -899,52 +920,81 @@ fn streams_for(source: Source) -> Streams {
             Some(super::deepgram::reopener(settings)),
         ),
         Source::OwnKey => {
-            let budget = Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60));
+            let budget = shared.unwrap_or_else(|| {
+                Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60))
+            });
             let (opener, reopener) = super::deepgram::key_streams(budget.clone(), language);
-            let streams = Streams::new(opener, Some(reopener));
-            #[cfg(test)]
-            let streams = Streams {
+            Streams {
                 budget: Some(budget),
-                ..streams
-            };
-            #[cfg(not(test))]
-            let _ = budget;
-            streams
+                ..Streams::new(opener, Some(reopener))
+            }
         }
     }
 }
 
 /// The sentence the session review adds when cloud transcription is
-/// selected, so one approval covers both exports.
-pub fn review_sentence() -> Option<String> {
-    review_sentence_for(&source().ok()?)
+/// selected, so one approval covers both exports. It names exactly the
+/// session's capture sources.
+pub fn review_sentence(sources: &SessionSources) -> Option<String> {
+    review_sentence_for(&source().ok()?, sources)
 }
 
 /// The review sentence with the person's own key, for checks of a whole
 /// review's text.
 #[cfg(test)]
-pub(crate) fn review_sentence_for_own_key(language: Language) -> String {
-    review_sentence_with(&Source::OwnKey, language).expect("always worded")
+pub(crate) fn review_sentence_for_own_key(language: Language, sources: &SessionSources) -> String {
+    review_sentence_with(&Source::OwnKey, language, sources).expect("always worded")
 }
 
-fn review_sentence_for(source: &Source) -> Option<String> {
-    review_sentence_with(source, language_of(source))
+fn review_sentence_for(source: &Source, sources: &SessionSources) -> Option<String> {
+    review_sentence_with(source, language_of(source), sources)
 }
 
-fn review_sentence_with(source: &Source, language: Language) -> Option<String> {
+/// What the session's audio is, in the review's words.
+fn audio_of(sources: &SessionSources) -> String {
+    match (sources.microphone, sources.application.as_deref()) {
+        (true, None) => "the live audio from your microphone".into(),
+        (false, Some(app)) => format!(
+            "the live audio of {app} (audio from all of its windows may be included), not your microphone,"
+        ),
+        (true, Some(app)) => format!(
+            "the live audio from your microphone and, as a second stream, from {app} (audio from all of its windows may be included),"
+        ),
+        (false, None) => "no audio".into(),
+    }
+}
+
+fn review_sentence_with(
+    source: &Source,
+    language: Language,
+    sources: &SessionSources,
+) -> Option<String> {
     let label = language.review_label();
-    let sent = format!("Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3, {label}) for transcription");
+    let audio = audio_of(sources);
+    let sent = format!(
+        "Audio: this approval also sends {audio} to Deepgram (US, model Nova-3, {label}) for transcription"
+    );
     const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
     const END: &str =
         "If transcription stops, nothing is transcribed and nothing falls back to another service.";
+    let both = sources.both_sources();
     Some(match source {
         Source::Dev(settings) => format!(
             "{sent}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
             settings.minute_cap
         ),
-        Source::OwnKey => format!(
-            "{sent}, with your own Deepgram API key: Deepgram bills your account for each minute of audio. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session. Pausing cues does not stop the audio; turning processing off or Stop does. {END}"
-        ),
+        Source::OwnKey => {
+            let across = if both {
+                ", counted across both streams, so two at once use it twice as fast"
+            } else {
+                ""
+            };
+            format!(
+                "{sent}, with your own Deepgram API key: Deepgram bills your account for each minute of audio{}. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session{across}. Pausing cues does not stop the audio; turning processing off or Stop does{}. {END}",
+                if both { " of each stream" } else { "" },
+                if both { ", for both" } else { "" },
+            )
+        }
     })
 }
 
@@ -1629,7 +1679,7 @@ mod tests {
         assert!(!dev_selected());
         assert!(!selected());
         assert!(streams().is_err());
-        assert_eq!(review_sentence(), None);
+        assert_eq!(review_sentence(&SessionSources::microphone()), None);
     }
 
     #[test]
@@ -1637,8 +1687,8 @@ mod tests {
         // The first start's streams, then a second start's (as a start refused
         // at the gate would have made, were they made before it): spending
         // the second's whole budget leaves the first's untouched.
-        let first = streams_for(Source::OwnKey);
-        let second = streams_for(Source::OwnKey);
+        let first = streams_for(Source::OwnKey, None);
+        let second = streams_for(Source::OwnKey, None);
         let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
         assert_eq!(second.budget.as_ref().unwrap().reserve(u64::MAX), cap);
         assert_eq!(first.budget.as_ref().unwrap().reserve(u64::MAX), cap);
@@ -1647,7 +1697,7 @@ mod tests {
 
     #[test]
     fn the_review_names_the_persons_key_billing_opt_out_and_session_cap() {
-        let own = review_sentence_for(&Source::OwnKey).unwrap();
+        let own = review_sentence_for(&Source::OwnKey, &SessionSources::microphone()).unwrap();
         for part in [
             "to Deepgram (US, model Nova-3, English)",
             "with your own Deepgram API key",
@@ -1662,22 +1712,77 @@ mod tests {
             assert!(own.contains(part), "missing: {part}");
         }
         // The development wording is unchanged.
-        let dev = review_sentence_for(&Source::Dev(Settings {
-            token_file: std::env::temp_dir().join("fictional-stt-token"),
-            minute_cap: 5,
-            language: Language::English,
-        }))
+        let dev = review_sentence_for(
+            &Source::Dev(Settings {
+                token_file: std::env::temp_dir().join("fictional-stt-token"),
+                minute_cap: 5,
+                language: Language::English,
+            }),
+            &SessionSources::microphone(),
+        )
         .unwrap();
         assert!(dev.contains("At most 5 minutes of audio for this whole launch"));
         assert!(!dev.contains("your own"));
     }
 
     #[test]
+    fn the_review_names_exactly_the_sessions_sources() {
+        let own = |sources: &SessionSources| {
+            review_sentence_with(&Source::OwnKey, Language::English, sources).unwrap()
+        };
+        let microphone = own(&SessionSources::microphone());
+        assert!(microphone.contains("sends the live audio from your microphone to Deepgram"));
+        assert!(!microphone.contains("application"));
+        assert!(!microphone.contains("both"));
+        let alone = own(&SessionSources::application("Fictional Call"));
+        assert!(alone.contains("the live audio of Fictional Call (audio from all of its windows may be included), not your microphone,"));
+        let both = own(&SessionSources::both("Fictional Call"));
+        for part in [
+            "from your microphone and, as a second stream, from Fictional Call (audio from all of its windows may be included)",
+            "each minute of audio of each stream",
+            "At most 120 minutes of audio for this session, counted across both streams",
+            "turning processing off or Stop does, for both",
+        ] {
+            assert!(both.contains(part), "missing: {part}");
+        }
+        // The old wording that named one of two possible sources is gone.
+        for sentence in [microphone, alone, both] {
+            assert!(!sentence.contains("the microphone, or the selected application"));
+        }
+    }
+
+    #[test]
+    fn a_second_source_spends_the_first_sources_budget() {
+        let first = streams_for(Source::OwnKey, None);
+        let second = streams_for(Source::OwnKey, first.budget());
+        let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
+        // The application's stream uses 40 minutes; the microphone's stream
+        // has only the rest of the session's 120.
+        let forty = 40 * 60 * SAMPLE_RATE as u64;
+        assert_eq!(second.budget().unwrap().reserve(forty), forty);
+        assert_eq!(first.budget().unwrap().reserve(u64::MAX), cap - forty);
+        assert_eq!(second.budget().unwrap().reserve(1), 0);
+        // A source without a shared budget gets a fresh one.
+        let other = streams_for(Source::OwnKey, None);
+        assert_eq!(other.budget().unwrap().reserve(u64::MAX), cap);
+    }
+
+    #[test]
     fn the_language_is_named_in_the_review_and_set_for_the_next_session() {
-        let english = review_sentence_with(&Source::OwnKey, Language::English).unwrap();
+        let english = review_sentence_with(
+            &Source::OwnKey,
+            Language::English,
+            &SessionSources::microphone(),
+        )
+        .unwrap();
         assert!(english.contains("Deepgram (US, model Nova-3, English)"));
         assert!(!english.contains("higher rate"));
-        let multi = review_sentence_with(&Source::OwnKey, Language::Multilingual).unwrap();
+        let multi = review_sentence_with(
+            &Source::OwnKey,
+            Language::Multilingual,
+            &SessionSources::microphone(),
+        )
+        .unwrap();
         assert!(multi.contains(
             "Deepgram (US, model Nova-3, Multilingual, which Deepgram bills at a higher rate than English)"
         ));

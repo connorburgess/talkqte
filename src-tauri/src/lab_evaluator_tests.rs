@@ -948,11 +948,13 @@ pub(super) fn selected_settings() -> Settings {
 fn selected_registration_disclosure_is_bounded_and_defaults_still_refuse_notes() {
     let settings = selected_settings();
     // Exact current cloud review sentence with its largest allowed minute cap.
-    let audio="Audio: this approval also sends the live audio of the session's capture source (the microphone, or the selected application) to Deepgram (US, model Nova-3) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most 10 minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.";
+    // The longest current cloud review sentence: both sources, the longest
+    // application name, the multilingual label and the largest minute cap.
+    let audio = format!("Audio: this approval also sends the live audio from your microphone and, as a second stream, from {} (audio from all of its windows may be included), to Deepgram (US, model Nova-3, Multilingual, which Deepgram bills at a higher rate than English) for transcription. Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent. At most 60 minutes of audio for this whole launch, across sessions and sources. If transcription stops, nothing is transcribed and nothing falls back to another service.", "W".repeat(60));
     let selected = processor_configuration(
         Backend::Api,
         Some(&settings),
-        Some(audio.into()),
+        Some(audio),
         Some("Deepgram".into()),
     )
     .unwrap();

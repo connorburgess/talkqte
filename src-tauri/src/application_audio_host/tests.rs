@@ -173,7 +173,11 @@ fn applications() -> Vec<Application> {
 }
 
 impl Backend for Fake {
-    fn begin_session(&mut self, control: &Control) -> Result<Box<dyn FnOnce()>, Failure> {
+    fn begin_session(
+        &mut self,
+        control: &Control,
+        application: &str,
+    ) -> Result<Box<dyn FnOnce()>, Failure> {
         while self.script.session_waits.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -189,7 +193,7 @@ impl Backend for Fake {
                 Some(crate::microphone::not_capturing(microphone, true)),
                 !self.script.recognizer_missing.load(Ordering::SeqCst),
             )?;
-            runtime.begin_source_session(control)?
+            runtime.begin_source_session(control, application)?
         };
         let runtime = self.runtime.clone();
         Ok(Box::new(move || {
@@ -336,7 +340,10 @@ impl Drop for Fixture {
 fn fixture(live: bool) -> Fixture {
     let mut runtime = Runtime::default();
     if live {
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket = runtime
+            .begin_live_start()
+            .unwrap()
+            .with_sources(crate::engine::SessionSources::both("Fictional player"));
         runtime.install_live_start(&ticket).unwrap();
     }
     let runtime = Arc::new(Mutex::new(runtime));
@@ -714,7 +721,10 @@ fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session()
     let listed = ["fictional-0", "fictional-1"];
     let live = || {
         let mut runtime = Runtime::default();
-        let ticket = runtime.begin_live_start().unwrap();
+        let ticket = runtime
+            .begin_live_start()
+            .unwrap()
+            .with_sources(crate::engine::SessionSources::both("Fictional player"));
         runtime.install_live_start(&ticket).unwrap();
         Arc::new(Mutex::new(runtime))
     };
@@ -760,7 +770,10 @@ fn before_the_native_request_a_start_is_checked_for_stop_selection_and_session()
             let mut runtime = replaced.lock().unwrap();
             drop(runtime.take_live_for_stop());
             runtime.engine.end();
-            let ticket = runtime.begin_live_start().unwrap();
+            let ticket = runtime
+                .begin_live_start()
+                .unwrap()
+                .with_sources(crate::engine::SessionSources::both("Fictional player"));
             runtime.install_live_start(&ticket).unwrap();
             Ok(())
         }),
@@ -1987,6 +2000,7 @@ mod startup_diagnostics {
                 app::begin_session_checked(
                     &runtime,
                     &review.control(),
+                    "Fictional Player",
                     Err(failure),
                     || {
                         microphone_reads += 1;
@@ -2006,6 +2020,7 @@ mod startup_diagnostics {
             app::begin_session_checked(
                 &NoAccess,
                 &review.control(),
+                "Fictional Player",
                 Ok(()),
                 || panic!("unavailable Runtime must not inspect microphone"),
                 |s, r| events.push((s, r))
@@ -2026,6 +2041,7 @@ mod startup_diagnostics {
                 app::begin_session_checked(
                     &runtime,
                     &review.control(),
+                    "Fictional Player",
                     Ok(()),
                     || microphone,
                     |s, r| events.push((s, r))
@@ -2045,6 +2061,7 @@ mod startup_diagnostics {
             app::begin_session_checked(
                 &runtime,
                 &cancelled.control(),
+                "Fictional Player",
                 Ok(()),
                 || Some(true),
                 |s, r| events.push((s, r))
@@ -2059,6 +2076,7 @@ mod startup_diagnostics {
         let session = app::begin_session_checked(
             &runtime,
             &review.control(),
+            "Fictional Player",
             Ok(()),
             || Some(true),
             |s, r| events.push((s, r)),
