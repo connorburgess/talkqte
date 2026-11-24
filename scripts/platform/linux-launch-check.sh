@@ -17,7 +17,12 @@ log="$(mktemp)"
 
 "$app" >"$log" 2>&1 &
 pid=$!
-cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+# Stop the app; force it after 5 s so a stuck process cannot hold the check.
+cleanup() {
+  kill "$pid" 2>/dev/null || true
+  for _ in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || return 0; sleep 1; done
+  kill -KILL "$pid" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 for _ in $(seq "$wait_seconds"); do
