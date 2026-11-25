@@ -715,3 +715,149 @@ fn a_failed_request_is_recorded_as_failed() {
     assert_eq!(engine.meeting_notes().spent_micro_usd(), None);
     assert!(engine.keep_meeting_notes("anything").is_err());
 }
+
+#[test]
+fn openai_and_gemini_meeting_notes_reuse_same_contract_and_custom_models_omit_cost() {
+    let case = &fixture()["cases"][0];
+    let transcript = segments(&case["transcript"]);
+    let reply_text = case["reply"].to_string();
+
+    // OpenAI built-in model: body uses Responses API, plan includes estimate.
+    let openai_built_in = ResolvedModel::from_curated(
+        llm_provider::curated_model(CueProvider::OpenAi, "gpt-5").unwrap(),
+    );
+    let prepared = prepare_for(openai_built_in, &transcript, None).unwrap();
+    let plan = prepared.plan_view();
+    assert_eq!(plan.provider, CueProvider::OpenAi);
+    assert_eq!(plan.provider_name, "OpenAI");
+    assert!(!plan.custom_model);
+    assert!(plan.likely_micro_usd.is_some());
+    assert!(plan.worst_micro_usd.is_some());
+    assert_eq!(plan.spend_cap_micro_usd, Some(SPEND_CAP_MICRO_USD));
+    let body = prepared.body();
+    assert_eq!(body["model"], "gpt-5");
+    assert_eq!(body["instructions"], system_prompt());
+    assert_eq!(body["store"], false);
+    assert_eq!(body["text"]["format"]["schema"], *schema());
+
+    let (a, b) = reply_text.split_at(reply_text.len() / 2);
+    let openai_sse: String = [
+        json!({"type": "response.created", "response": {"model": "gpt-5", "status": "in_progress"}}),
+        json!({"type": "response.output_text.delta", "delta": a}),
+        json!({"type": "response.output_text.delta", "delta": b}),
+        json!({"type": "response.completed", "response": {"model": "gpt-5", "status": "completed", "usage": {"input_tokens": 1000, "output_tokens": 200}}}),
+    ]
+    .iter()
+    .map(|e| format!("data: {e}\n\n"))
+    .collect();
+    let written = write_provider(
+        &prepared,
+        Secret::for_test("sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ"),
+        || {},
+        &|| false,
+        |_, _| {
+            Ok(Reply {
+                status: 200,
+                body: Box::new(std::io::Cursor::new(openai_sse.into_bytes())),
+            })
+        },
+        |reply_body| {
+            let (outcome, usage, complete) = crate::openai_api::read_bounded_stream(
+                reply_body,
+                &prepared.target().id,
+                MAX_TEXT_BYTES,
+                &|| false,
+            );
+            let cost = complete
+                .then(|| prepared.target().price.map(|p| usage.cost_micro_usd(p)))
+                .flatten();
+            (
+                match outcome {
+                    llm_provider::Outcome::Decision(t) => Outcome::Decision(t),
+                    _ => Outcome::Protocol,
+                },
+                cost,
+            )
+        },
+    );
+    let draft = written.result.unwrap();
+    assert!(draft.spent_micro_usd.is_some());
+    assert!(draft.markdown.contains("## Meeting notes"));
+
+    // Gemini custom model: plan omits cost estimates and skips $1.00 dollar cap.
+    let gemini_custom = ResolvedModel::resolve(
+        CueProvider::Gemini,
+        Some("gemini-3-pro-preview"),
+        llm_provider::default_notes_model(CueProvider::Gemini),
+    );
+    let prepared = prepare_for(gemini_custom, &transcript, None).unwrap();
+    assert!(prepared.check_cap().is_ok());
+    let plan = prepared.plan_view();
+    assert_eq!(plan.provider, CueProvider::Gemini);
+    assert_eq!(plan.provider_name, "Gemini");
+    assert!(plan.custom_model);
+    assert_eq!(plan.likely_micro_usd, None);
+    assert_eq!(plan.worst_micro_usd, None);
+    assert_eq!(plan.spend_cap_micro_usd, None);
+    let body = prepared.body();
+    assert_eq!(
+        body["systemInstruction"]["parts"][0]["text"],
+        system_prompt()
+    );
+    assert_eq!(body["generationConfig"]["responseJsonSchema"], *schema());
+
+    let gemini_sse = format!(
+        "data: {}\n\n",
+        json!({
+            "modelVersion": "gemini-3-pro-preview",
+            "candidates": [{"content": {"parts": [{"text": reply_text}]}, "finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 150}
+        })
+    );
+    let written = write_provider(
+        &prepared,
+        Secret::for_test("AIzaSyFICTIONALfictional0123456789abcdef"),
+        || {},
+        &|| false,
+        |_, _| {
+            Ok(Reply {
+                status: 200,
+                body: Box::new(std::io::Cursor::new(gemini_sse.into_bytes())),
+            })
+        },
+        |reply_body| {
+            let (outcome, usage, complete) = crate::gemini_api::read_bounded_stream(
+                reply_body,
+                &prepared.target().id,
+                MAX_TEXT_BYTES,
+                &|| false,
+            );
+            let cost = complete
+                .then(|| prepared.target().price.map(|p| usage.cost_micro_usd(p)))
+                .flatten();
+            (
+                match outcome {
+                    llm_provider::Outcome::Decision(t) => Outcome::Decision(t),
+                    _ => Outcome::Protocol,
+                },
+                cost,
+            )
+        },
+    );
+    assert!(written.result.is_ok());
+    assert_eq!(written.spent_micro_usd, None);
+
+    // Provider-specific error messages.
+    assert!(Refusal::KeyNotSet
+        .message_for(CueProvider::OpenAi)
+        .contains("OpenAI"));
+    assert!(Refusal::KeyNotSet
+        .message_for(CueProvider::Gemini)
+        .contains("Gemini"));
+    assert!(Failure::SignIn
+        .message_for(CueProvider::OpenAi)
+        .contains("OpenAI"));
+    assert!(Failure::UsageLimit
+        .message_for(CueProvider::Gemini)
+        .contains("Gemini"));
+}
