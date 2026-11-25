@@ -351,6 +351,9 @@ fn chosen(app: &tauri::AppHandle, id: &str) {
         }
         STOP => crate::stop_live_from_menu(app),
         OFFER => {
+            if crate::settings::lab_run() {
+                return;
+            }
             let settings = {
                 let state = app.state::<crate::AppState>();
                 let Ok(mut runtime) = state.0.lock() else {

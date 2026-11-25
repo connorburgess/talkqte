@@ -102,6 +102,8 @@ test('the menu bar’s call-starting switch is the one in Settings', async ({
   const offer = page.getByRole('checkbox', {
     name: 'Offer in the dock when a call seems to start',
   });
+  await expect(offer).toBeChecked();
+  await page.evaluate(() => window.captureTest.menuBarOffer(false));
   await expect(offer).not.toBeChecked();
   await page.evaluate(() => window.captureTest.menuBarOffer(true));
   await expect(offer).toBeChecked();

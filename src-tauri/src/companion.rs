@@ -15,6 +15,8 @@ use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 pub enum Mode {
     Hidden,
     Compact,
+    /// A compact call-starting offer when no session is running.
+    Prompt,
     /// A cue is showing. The window is one size for it, held or answered.
     Question,
 }
@@ -23,8 +25,10 @@ impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.cue.is_some() || state.call_prompt.is_some() || state.end_prompt.is_some() {
+        } else if state.cue.is_some() || state.end_prompt.is_some() {
             Self::Question
+        } else if state.call_prompt.is_some() {
+            Self::Prompt
         } else if microphone == MicrophoneStatus::Off
             && matches!(state.status, Status::Ready | Status::Ended)
         {
@@ -68,6 +72,9 @@ const COMPACT_WIDTH: f64 = 320.0;
 /// A cue's height in logical pixels: an ordinary cue and the one line it
 /// cites fit without scrolling. Large text adds `LARGE_EXTRA`.
 const QUESTION_HEIGHT: f64 = 232.0;
+/// Compact height of the call-starting offer in logical pixels. Large text
+/// adds `LARGE_EXTRA`.
+const PROMPT_HEIGHT: f64 = 160.0;
 const LARGE_EXTRA: f64 = 44.0;
 
 /// The companion's frame for a mode. A position the person dragged the
@@ -89,12 +96,13 @@ fn frame_at(
         1.0
     };
     let margin = (20.0 * scale).round() as u32;
-    let question = mode == Mode::Question;
+    let question = matches!(mode, Mode::Question | Mode::Prompt);
     let logical_width = COMPACT_WIDTH;
     let width =
         ((logical_width * scale).round() as u32).min(area.0.saturating_sub(2 * margin).max(1));
     let logical_height = match mode {
         Mode::Question => QUESTION_HEIGHT,
+        Mode::Prompt => PROMPT_HEIGHT,
         _ => 76.0,
     } + if question && text_size == QuestionSize::Large {
         // Large text wraps more in the narrow window.
@@ -469,8 +477,26 @@ mod tests {
         });
         assert_eq!(
             Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
-            Mode::Question
+            Mode::Prompt
         );
+        let compact = frame(
+            (0, 0),
+            (1600, 1000),
+            1.0,
+            Mode::Prompt,
+            CompanionPosition::BottomRight,
+            QuestionSize::Standard,
+        );
+        let large = frame(
+            (0, 0),
+            (1600, 1000),
+            1.0,
+            Mode::Prompt,
+            CompanionPosition::BottomRight,
+            QuestionSize::Large,
+        );
+        assert_eq!((compact.width, compact.height), (320, 160));
+        assert_eq!((large.width, large.height), (320, 204));
         // The person hid the companion: the offer does not bring it back.
         engine.set_overlay(false);
         let mut hidden = engine.cue_snapshot();

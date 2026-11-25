@@ -36,9 +36,10 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
     if engine.set_user_name(settings.user_name.clone()).is_err() {
         let _ = engine.set_user_name(None);
     }
+    let lab = crate::settings::lab_run();
     runtime.call_prompt.restore(
-        settings.call_prompt_enabled,
-        settings.call_prompt_auto_start && !crate::settings::lab_run(),
+        settings.call_prompt_enabled && !lab,
+        settings.call_prompt_auto_start && !lab,
         &settings.call_prompt_not_for,
     );
 }
@@ -108,11 +109,11 @@ pub(crate) fn set_panel_sizes(
 /// Deletes the settings file and returns every setting to its default.
 /// Refused during a live session, whose language and choices are fixed.
 #[tauri::command]
-pub(crate) fn reset_settings(
+pub(crate) async fn reset_settings(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    store: tauri::State<Store>,
+    state: tauri::State<'_, AppState>,
+    store: tauri::State<'_, Store>,
 ) -> Result<(), String> {
     main_only(&window)?;
     {
@@ -125,6 +126,7 @@ pub(crate) fn reset_settings(
         crate::companion::reset_drag(&app);
         crate::publish(&app, &mut runtime);
     }
+    crate::refresh_auto_prior_context(&app).await;
     crate::companion::refresh(&app);
     Ok(())
 }

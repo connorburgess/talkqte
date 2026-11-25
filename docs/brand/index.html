@@ -5543,109 +5543,318 @@
           <div id="dock-call-prompt">
             <div class="dock-matrix-head">
               <h3>
-                5. Call-Starting Offer (320 × 232px standard · 320 × 276px
+                5. Call-Starting Offer (320 × 160px standard · 320 × 204px
                 large)
               </h3>
               <span class="mono-label" style="color: var(--g-muted)"
-                >CallPrompt.tsx · Solar Amber Start · 44px targets · never takes
-                focus or auto-starts</span
+                >CallPrompt.tsx · Calibrated Cue mark · Solar Amber Start · 44px
+                targets · never takes focus</span
               >
             </div>
             <div class="dock-grid">
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >21 · Meeting app offer (standard · 320 × 232px)</span
+                  >21 · Meeting app offer (standard · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    A call seems to be starting in Fictional Call.
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone and Fictional Call? You
-                    choose and approve everything in the notebook; nothing is
-                    heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Call
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Not for Fictional Call</span>
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Call</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >22 · Browser offer with caveat (standard · 320 × 232px)</span
+                  >22 · Browser offer (standard · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    The microphone is in use and Fictional Browser is in front.
-                    A call?
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone? You approve it in the
-                    notebook; nothing is heard until then. You can add Fictional
-                    Browser there, but a browser’s audio includes every tab and
-                    may not be heard yet.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Browser
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn"
-                      >Not for Fictional Browser</span
-                    >
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Browser</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >23 · Unknown app offer (no app named · 320 × 232px)</span
+                  >23 · Unknown app offer (no app named · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    The microphone is in use. A call?
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone? You approve it in the
-                    notebook; nothing is heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Start listening?
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: flex-end;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >24 · Meeting app offer · Larger text (320 × 276px)</span
+                  >24 · Meeting app offer · Larger text (320 × 204px)</span
                 >
-                <div class="dock-prompt is-large">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    A call seems to be starting in Fictional Call.
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone and Fictional Call? You
-                    choose and approve everything in the notebook; nothing is
-                    heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt is-large" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Call
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 13px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Not for Fictional Call</span>
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Call</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5655,12 +5864,10 @@
               <code>src/components/CallPrompt.tsx</code> (styled in
               <code>src/styles.css</code>), mounted in
               <code>FloatingQuestion</code> when no session is running and
-              <code>callPrompt</code> is present. Four answers:
-              <code>Start session…</code>,
-              <code>Not for &lt;App&gt;</code> (when named),
-              <code>Don’t ask again</code>, and top-right <code>×</code> (<code
-                >Not now</code
-              >). Settings opt-in lives in
+              <code>callPrompt</code> is present. Four controls:
+              <code>Start</code>, <code>Not now</code>,
+              <code>Not for &lt;App&gt;</code> (when named), and
+              <code>Off</code>. Settings controls live in
               <code>src/components/CallPromptSetting.tsx</code> (Panel 15).
             </div>
             <div class="dock-prompt-spec">
@@ -6564,6 +6771,57 @@
                     style="padding: 4px 10px; font-size: 12px"
                     >Disconnect Granola</span
                   >
+                </div>
+                <div class="panel-note-row" style="margin-top: 10px">
+                  <div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                      "
+                    >
+                      <strong style="font-size: 13px"
+                        >Orchard gate supplier</strong
+                      >
+                      <span
+                        class="mono-label"
+                        style="
+                          padding: 2px 6px;
+                          background: var(--g-asked-bg, #fdf6e9);
+                          border: 1px solid var(--g-accent-ink, #875500);
+                          border-radius: 2px;
+                          color: var(--g-accent-ink, #875500);
+                        "
+                        >AUTO</span
+                      >
+                    </div>
+                    <span
+                      class="mono-label"
+                      style="
+                        display: block;
+                        color: var(--g-muted);
+                        margin-top: 2px;
+                      "
+                      >2026-11-02 · AUTO-SELECTED FROM KEPT MEETINGS</span
+                    >
+                    <p class="panel-muted" style="margin-top: 4px">
+                      Check south latch bolts before supplier delivery.
+                    </p>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      color: var(--g-muted);
+                      font-size: 12px;
+                    "
+                  >
+                    <span style="text-decoration: underline">Archive</span
+                    ><span>×</span>
+                  </div>
                 </div>
                 <div class="panel-note-row" style="margin-top: 10px">
                   <div>
@@ -9559,15 +9817,18 @@ Date: 2026-11-23 · Length: 06:42
                 non-empty live session stop: <code>Meeting saved</code> /
                 <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
-                list, search, empty/unreadable/lab-run/newer states, read-only
-                meeting detail with notes/meeting notes/cues/transcript, inline
-                rename, inline delete confirmation, and export review dialog),
-                and <code>MeetingHistorySettings.tsx</code> (Settings → Kept
+                list, search, Archive/Unarchive with
+                <code>Show archived</code> filter,
+                empty/unreadable/lab-run/newer states, read-only meeting detail
+                with notes/meeting notes/cues/transcript, inline rename, inline
+                delete confirmation, and export review dialog), and
+                <code>MeetingHistorySettings.tsx</code> (Settings → Kept
                 meetings: the <code>After a live session ends</code> choice
                 (<code>auto</code> default, <code>ask</code>, <code>off</code>),
-                where the files are, Delete all with its inline confirmation,
-                and the lab-run, unavailable and newer-version states). Styles:
-                <code>meeting-history.css</code>.
+                <code>Auto-select relevant past meetings as prior context</code>
+                toggle, where the files are, Delete all with its inline
+                confirmation, and the lab-run, unavailable and newer-version
+                states). Styles: <code>meeting-history.css</code>.
               </p>
             </div>
           </div>

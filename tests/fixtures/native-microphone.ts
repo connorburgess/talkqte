@@ -91,8 +91,6 @@ const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
-// The call-starting prompt's settings and the companion's answers.
-let callPrompt = { enabled: false, autoStart: false, notFor: [] as string[] };
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -111,6 +109,12 @@ const savedSettings = {
       }>;
     }
   ).standInSavedSettings,
+};
+// The call-starting prompt's settings and the companion's answers.
+let callPrompt = {
+  enabled: savedSettings.status.saving !== 'labRun',
+  autoStart: false,
+  notFor: [] as string[],
 };
 
 /** The menu bar item and the system's login item, as the stand-in plays
@@ -544,6 +548,7 @@ mockIPC(
       );
       if (
         command === 'keep_meeting_in_history' ||
+        command === 'set_kept_meeting_archived' ||
         command === 'delete_kept_meeting' ||
         command === 'delete_all_kept_meetings'
       ) {
@@ -552,6 +557,28 @@ mockIPC(
           await publish({ endPrompt: updated ?? undefined });
         }
         await emit('meeting-history:changed');
+      }
+      if (
+        command === 'set_auto_prior_context' ||
+        command === 'set_kept_meeting_archived' ||
+        command === 'delete_kept_meeting' ||
+        command === 'delete_all_kept_meetings'
+      ) {
+        if (
+          command === 'set_auto_prior_context' ||
+          command === 'set_kept_meeting_archived'
+        ) {
+          historyFixture.refreshAutoContext(
+            session.focus,
+            session.title || null,
+            session.status,
+            session.live,
+          );
+        }
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
       }
       return result;
     }
@@ -720,7 +747,21 @@ mockIPC(
           });
         }
         try {
-          return preview.command('set_focus', { lines });
+          const out = preview.command('set_focus', { lines });
+          if (
+            historyFixture.refreshAutoContext(
+              lines,
+              session.title || null,
+              session.status,
+              session.live,
+            )
+          ) {
+            await emit('context:changed', [
+              ...(await preview.contextItemsNow()),
+              ...historyFixture.selectedContextItems(),
+            ]);
+          }
+          return out;
         } finally {
           completedFocus++;
         }
@@ -742,7 +783,10 @@ mockIPC(
         return preview.command('set_user_name', { name });
       }
       case 'context_items':
-        return [];
+        return [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ];
       case 'granola_status':
         return preview.granolaStatus();
       case 'connect_granola':
@@ -764,7 +808,10 @@ mockIPC(
         const { ids } = args as { ids: string[] };
         if (historyFixture.hasPendingContext()) {
           const { outcome, items } = historyFixture.importPendingContext(ids);
-          const merged = [...(await preview.contextItemsNow()), ...items];
+          const merged = [
+            ...(await preview.contextItemsNow()),
+            ...historyFixture.selectedContextItems(),
+          ];
           const noteMap = new Map(
             processing.notes.map((note) => [
               `${note.provider}:${note.sourceId}`,
@@ -791,21 +838,34 @@ mockIPC(
           return outcome;
         }
         const outcome = preview.importContextNotes(ids);
-        await emit('context:changed', await preview.contextItemsNow());
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return outcome;
       }
       case 'remove_context_from': {
-        const removed = preview.removeAllContext();
-        await emit('context:changed', await preview.contextItemsNow());
+        const removed =
+          preview.removeAllContext() + historyFixture.removeAllHistoryContext();
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return removed;
       }
-      case 'remove_context_item':
-        preview.command(
-          'remove_context_item',
-          args as Commands['remove_context_item'],
-        );
-        await emit('context:changed', await preview.contextItemsNow());
+      case 'remove_context_item': {
+        const target = args as Commands['remove_context_item'];
+        if (target.provider === 'history') {
+          historyFixture.removeHistoryContextItem(target.sourceId);
+        } else {
+          preview.command('remove_context_item', target);
+        }
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return;
+      }
       case 'live_status': {
         const stt = providerKeysFixture.providerKeysTest.provider();
         const provider = stt === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
@@ -858,9 +918,26 @@ mockIPC(
       case 'reset_settings':
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
-        callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        callPrompt = {
+          enabled: savedSettings.status.saving !== 'labRun',
+          autoStart: false,
+          notFor: [],
+        };
         updatesState.checkAtLaunch = true;
         historyFixture.resetAfterSessionKeep();
+        if (
+          historyFixture.refreshAutoContext(
+            session.focus,
+            session.title || null,
+            session.status,
+            session.live,
+          )
+        ) {
+          await emit('context:changed', [
+            ...(await preview.contextItemsNow()),
+            ...historyFixture.selectedContextItems(),
+          ]);
+        }
         await emitUpdates();
         return;
       case 'update_status':

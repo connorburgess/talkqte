@@ -91,6 +91,10 @@ pub struct Settings {
     /// Check for signed app updates when TalkQTE launches (ignored in lab
     /// runs and in builds without an update-signing public key).
     pub check_for_updates_at_launch: bool,
+    /// Pre-select up to 3 relevant recent kept meetings as prior context
+    /// (notes only, never transcripts or archived meetings). On by default;
+    /// never enabled, read, or written in lab runs.
+    pub auto_prior_context: bool,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -116,12 +120,13 @@ impl Default for Settings {
             overlay_enabled: true,
             panels: Panels::default(),
             user_name: None,
-            call_prompt_enabled: false,
+            call_prompt_enabled: true,
             call_prompt_auto_start: false,
             call_prompt_not_for: Vec::new(),
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
             check_for_updates_at_launch: true,
+            auto_prior_context: true,
         }
     }
 }
@@ -253,6 +258,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
             "checkForUpdatesAtLaunch",
             defaults.check_for_updates_at_launch,
         ),
+        auto_prior_context: field(&object, "autoPriorContext", defaults.auto_prior_context),
     }
 }
 
@@ -280,6 +286,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
         "checkForUpdatesAtLaunch": settings.check_for_updates_at_launch,
+        "autoPriorContext": settings.auto_prior_context,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -437,6 +444,13 @@ impl Store {
         let (saving, saved) = match path.as_deref().map(read) {
             Some(Contents::Newer) => (Saving::Newer, Settings::default()),
             Some(Contents::Settings(saved)) => (saving, saved),
+            None if lab_run => (
+                saving,
+                Settings {
+                    call_prompt_enabled: false,
+                    ..Settings::default()
+                },
+            ),
             None => (saving, Settings::default()),
         };
         let store = Self(Mutex::new(Inner {
@@ -571,12 +585,13 @@ mod tests {
                 notes_ratio: Some(0.6),
             },
             user_name: Some("Zoë O’Neil-Ray".into()),
-            call_prompt_enabled: true,
+            call_prompt_enabled: false,
             call_prompt_auto_start: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
             check_for_updates_at_launch: false,
+            auto_prior_context: false,
         }
     }
 
@@ -595,7 +610,7 @@ mod tests {
     fn the_file_is_the_owners_alone_and_leaves_no_temporary_file() {
         let folder = folder();
         let (store, _) = Store::open(Some(folder.file()), false);
-        store.record(|settings| settings.call_prompt_enabled = true);
+        store.record(|settings| settings.call_prompt_enabled = false);
         store.record(|settings| settings.sensitivity = Sensitivity::Quiet);
         #[cfg(unix)]
         {
@@ -620,6 +635,7 @@ mod tests {
             keys,
             [
                 "afterSessionKeep",
+                "autoPriorContext",
                 "callPrompt",
                 "checkForUpdatesAtLaunch",
                 "companionPosition",
@@ -773,7 +789,15 @@ mod tests {
         let before = fs::read(folder.file()).unwrap();
 
         let (lab, applied) = Store::open(Some(folder.file()), true);
-        assert_eq!(applied, Settings::default());
+        assert!(!applied.call_prompt_enabled);
+        assert!(!applied.call_prompt_auto_start);
+        assert_eq!(
+            applied,
+            Settings {
+                call_prompt_enabled: false,
+                ..Settings::default()
+            }
+        );
         assert_eq!(lab.status().saving, Saving::LabRun);
         lab.record(|settings| settings.sensitivity = Sensitivity::Balanced);
         lab.reset().unwrap();
@@ -821,8 +845,11 @@ mod tests {
     }
 
     #[test]
-    fn call_prompt_auto_start_defaults_false_and_reads_when_present() {
+    fn call_prompt_enabled_defaults_true_and_auto_start_defaults_false() {
+        assert!(Settings::default().call_prompt_enabled);
         assert!(!Settings::default().call_prompt_auto_start);
+        assert!(parse(br#"{"version":1}"#).call_prompt_enabled);
+        assert!(parse(br#"{"version":1,"callPrompt":{"enabled":"no"}}"#).call_prompt_enabled);
         assert!(!parse(br#"{"version":1,"callPrompt":{"enabled":true}}"#).call_prompt_auto_start);
         let parsed = parse(br#"{"version":1,"callPrompt":{"enabled":false,"autoStart":true}}"#);
         assert!(!parsed.call_prompt_enabled);
@@ -853,5 +880,18 @@ mod tests {
             parse(br#"{"version": 1, "afterSessionKeep": "sometimes", "sensitivity": "quiet"}"#);
         assert_eq!(invalid.after_session_keep, AfterSessionKeep::Auto);
         assert_eq!(invalid.sensitivity, Sensitivity::Quiet);
+    }
+
+    #[test]
+    fn auto_prior_context_defaults_true_and_parses_safely() {
+        assert!(Settings::default().auto_prior_context);
+        assert!(parse(br#"{"version": 1, "sensitivity": "quiet"}"#).auto_prior_context);
+        let disabled = Settings {
+            auto_prior_context: false,
+            ..Default::default()
+        };
+        assert!(!parse(&render(&disabled)).auto_prior_context);
+        let invalid = parse(br#"{"version": 1, "autoPriorContext": "yes"}"#);
+        assert!(invalid.auto_prior_context);
     }
 }

@@ -217,7 +217,7 @@ test('an ended session, its meeting notes offer and the export review have no au
     page.getByRole('heading', { name: 'Meetings', level: 1 }),
   ).toBeVisible();
   expect(await violations(page), 'meetings list').toEqual([]);
-  await page.getByRole('button', { name: /Fictional orchard sync/ }).click();
+  await page.getByRole('button', { name: /^Fictional orchard sync/ }).click();
   await expect(
     page.getByRole('heading', { name: 'Fictional orchard sync', level: 1 }),
   ).toBeVisible();
@@ -241,13 +241,14 @@ test('the companion with a cue and with the call-starting offer has no automated
     page.getByRole('region', { name: 'Suggested question' }),
   ).toBeVisible();
   expect(await violations(page), 'companion cue').toEqual([]);
+  await page.setViewportSize({ width: 320, height: 160 });
   await standIn(page, '/?window=cue');
   await page.evaluate(() =>
     window.liveTest.publish({
       callPrompt: { id: 7, application: 'Fictional Call', kind: 'meeting' },
     } as never),
   );
-  await expect(page.getByRole('status')).toContainText('Fictional Call');
+  await expect(page.getByRole('status')).toHaveText('Call in Fictional Call');
   expect(await violations(page), 'call-starting offer').toEqual([]);
 });
 

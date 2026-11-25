@@ -134,6 +134,8 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-kept-meetings",
         "allow-open-kept-meeting",
         "allow-rename-kept-meeting",
+        "allow-set-kept-meeting-archived",
+        "allow-set-auto-prior-context",
         "allow-delete-kept-meeting",
         "allow-delete-all-kept-meetings",
         "allow-kept-meeting-export-preview",

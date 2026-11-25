@@ -17,6 +17,7 @@ export interface KeptSummary {
   durationMs: number;
   sources: MeetingSources;
   hasMeetingNotes: boolean;
+  archived?: boolean;
 }
 
 export interface KeptLine {
@@ -49,6 +50,7 @@ export interface KeptMeeting {
   notes: string;
   cues: KeptCue[];
   meetingNotes?: string;
+  archived?: boolean;
 }
 
 export interface KeptListing {
@@ -61,6 +63,7 @@ export interface KeptListing {
 export interface HistoryStatus {
   availability: HistoryAvailability;
   afterSessionKeep: AfterSessionKeep;
+  autoPriorContext: boolean;
   /** The current session's number: Not this one applies to it alone. */
   session: number;
   /** The ended session's kept meeting, once the person kept it or it was
@@ -76,6 +79,7 @@ export function historyStatus(): Promise<HistoryStatus> {
     return Promise.resolve({
       availability: 'unavailable',
       afterSessionKeep: 'auto',
+      autoPriorContext: false,
       session: 0,
     });
   return invoke<HistoryStatus>('meeting_history_status');
@@ -84,6 +88,11 @@ export function historyStatus(): Promise<HistoryStatus> {
 export function setAfterSessionKeep(mode: AfterSessionKeep) {
   if (!desktop) return browserOnly();
   return invoke<void>('set_after_session_keep', { mode });
+}
+
+export function setAutoPriorContext(enabled: boolean) {
+  if (!desktop) return browserOnly();
+  return invoke<void>('set_auto_prior_context', { enabled });
 }
 
 export function keepMeeting(title: string, includeApplication: boolean) {
@@ -117,6 +126,11 @@ export function openKeptMeeting(id: string) {
 export function renameKeptMeeting(id: string, title: string) {
   if (!desktop) return browserOnly();
   return invoke<KeptSummary>('rename_kept_meeting', { id, title });
+}
+
+export function setKeptMeetingArchived(id: string, archived: boolean) {
+  if (!desktop) return browserOnly();
+  return invoke<KeptSummary>('set_kept_meeting_archived', { id, archived });
 }
 
 export function deleteKeptMeeting(id: string) {

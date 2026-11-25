@@ -204,6 +204,8 @@ export interface ContextItem {
   sourceDate: string;
   excerpt: string;
   revision: number;
+  /** True when TalkQTE pre-selected this kept meeting for the session. */
+  autoSelected?: boolean;
 }
 export interface NoteSummary {
   sourceId: string;
