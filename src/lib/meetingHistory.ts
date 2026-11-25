@@ -185,7 +185,7 @@ export function minutes(durationMs: number) {
 export const sourceNames: Record<MeetingSources, string> = {
   microphone: 'Microphone',
   application: 'Application',
-  both: 'Microphone and application',
+  both: 'Microphone and system audio',
 };
 
 export function failure(error: unknown, fallback: string) {

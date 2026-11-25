@@ -77,6 +77,19 @@ pub struct TapInput {
 }
 
 impl TapInput {
+    /// Pushes one already-downmixed mono sample directly into the lock-free
+    /// ring. Allocation-free and wait-free; drops and counts on overflow.
+    pub fn push_mono(&mut self, sample: f32) {
+        let clamped = if sample.is_finite() {
+            sample.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        if self.producer.push(clamped).is_err() {
+            self.overruns.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
     /// Downmixes interleaved samples to mono and queues them. Samples that do
     /// not fit are dropped and counted, never waited for. Pass a non-allocating
     /// iterator, such as a mapped slice from the capture callback.

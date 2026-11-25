@@ -267,15 +267,17 @@ export function Onboarding({
 
               <div className="ob-perm-card">
                 <div className="ob-card-head">
-                  <h2>Screen &amp; System Audio Recording</h2>
+                  <h2>System Audio Recording Only</h2>
                   <span className="ob-card-meta">
-                    Only if choosing application audio
+                    Asked on first session start
                   </span>
                 </div>
                 <p>
-                  Needed only if you choose to capture one application's audio
-                  (all of its windows) instead of your microphone. macOS asks
-                  when you first list applications to choose one.
+                  Needed on macOS 14.2 and later so TalkQTE can hear the other
+                  side of your call (all apps except TalkQTE) with no Screen
+                  Recording permission and no app picker. If you decline or run
+                  an earlier macOS, live sessions continue with your microphone
+                  only.
                 </p>
               </div>
             </>
@@ -313,8 +315,11 @@ export function Onboarding({
                     stops sending audio and lines.
                   </li>
                   <li>
-                    <strong>Stop</strong> ends the session, releases the
-                    microphone or application audio source, and stops sending.
+                    <strong>Stop</strong> ends the session, releases{' '}
+                    {other
+                      ? 'the microphone'
+                      : 'the microphone and system audio tap'}
+                    , and stops sending.
                   </li>
                 </ol>
               </div>

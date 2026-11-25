@@ -1,29 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { ProcessingSnapshot, SourceCapture } from '../src/lib/processing';
 import type {} from './fixtures/native-microphone';
 
-// Before a live session the notebook offers the microphone, one application,
-// or both. The fixture stands in for the native host; no application is
-// listed by the OS, no prompt is shown and nothing is captured, so these
-// checks establish the interface, not capture.
+// Simplified zero-picker live session start: there is no Listen to selector or
+// application picker in the notebook. On macOS, Start live session captures the
+// microphone (You) and global system audio (Them) automatically; on Windows
+// and Linux it captures the microphone only. The fixture stands in for the
+// native side; no device, stream or permission is involved.
 
-const off: SourceCapture = {
-  phase: 'off',
-  mayBeCapturing: false,
-  stalled: false,
-  canRetry: false,
-  application: null,
-  problem: null,
-  operation: null,
-  sourceSession: false,
-};
-
-const choices = [
-  { id: 'fictional-player', name: 'Fictional player' },
-  { id: 'fictional-call', name: 'Fictional Call' },
-];
-
-async function notebook(page: Page, source: SourceCapture | null = off) {
+async function notebook(page: Page, query = '/?live&keys=set') {
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
     const response = await route.fetch();
@@ -35,169 +19,45 @@ async function notebook(page: Page, source: SourceCapture | null = off) {
       ),
     });
   });
-  await page.goto('/?live&keys=set');
-  await page.evaluate(() => window.captureTest.host({}));
-  await page.evaluate(
-    (source) =>
-      window.captureTest.send(
-        (source
-          ? { capture: 'off', microphone: 'off', source }
-          : { capture: 'off' }) as Partial<ProcessingSnapshot>,
-      ),
-    source,
-  );
-  return page.getByRole('region', { name: 'Listen to' });
+  await page.goto(query);
 }
 
-const hostCalls = (page: Page) =>
-  page.evaluate(() =>
-    window.captureTest.applicationAudio
-      .map((call) => (call as { action: { kind: string } }).action)
-      .filter((action) => action.kind !== 'snapshot'),
-  );
 const liveStarts = (page: Page) =>
   page.evaluate(() => window.captureTest.liveStarts);
+const hostCalls = (page: Page) =>
+  page.evaluate(() => window.captureTest.applicationAudio);
 const start = (page: Page) =>
   page.getByRole('button', { name: 'Start live session', exact: true });
 
-test('a build that cannot hear an application starts from the microphone with no choice', async ({
+test('macOS has no app picker and Start live session discloses mic + system audio with headphone guidance', async ({
   page,
 }) => {
-  const chooser = await notebook(page, null);
-  await expect(start(page)).toBeEnabled();
-  await expect(chooser).toHaveCount(0);
-  await start(page).click();
-  // No application named: the microphone alone.
-  await expect.poll(() => liveStarts(page)).toEqual([{}]);
-  expect(await hostCalls(page)).toEqual([]);
-});
-
-test('the microphone is the default, and starting with it asks nothing of the host', async ({
-  page,
-}) => {
-  const chooser = await notebook(page);
+  await notebook(page, '/?live&keys=set');
+  await expect(page.getByRole('region', { name: 'Listen to' })).toHaveCount(0);
   await expect(
-    chooser.getByRole('radio', { name: /^Microphone Everyone/ }),
-  ).toBeChecked();
-  await expect(
-    chooser.getByRole('button', { name: 'List applications' }),
+    page.getByRole('button', { name: 'List applications' }),
   ).toHaveCount(0);
+  await expect(page.locator('.session-start-disclosure')).toHaveText(
+    'Starts immediately: sends your microphone and system audio to Deepgram and recent lines to Anthropic until you press Stop.',
+  );
+  await expect(page.getByRole('region', { name: 'Session' })).toContainText(
+    'Use headphones if you can',
+  );
+  await expect(start(page)).toBeEnabled();
   await start(page).click();
-  // No application named: the microphone alone.
   await expect.poll(() => liveStarts(page)).toEqual([{}]);
   expect(await hostCalls(page)).toEqual([]);
 });
 
-test('both sides: the notice comes first, then the chosen application joins the microphone session', async ({
+test('Windows and Linux disclose microphone-only start with no app picker', async ({
   page,
 }) => {
-  const chooser = await notebook(page);
-  await chooser
-    .getByRole('radio', { name: /^Microphone and one application/ })
-    .check();
-  // The scope, the macOS prompt, the one approval and headphones are said
-  // before anything is listed.
-  await expect(chooser).toContainText(
-    'Audio from all windows of this application may be included.',
+  await notebook(page, '/?platform=windows&live&keys=set');
+  await expect(page.getByRole('region', { name: 'Listen to' })).toHaveCount(0);
+  await expect(page.locator('.session-start-disclosure')).toHaveText(
+    'Starts immediately: sends your microphone to Deepgram and recent lines to Anthropic until you press Stop.',
   );
-  await expect(chooser).toContainText(
-    'macOS asks you to allow Screen & System Audio Recording for TalkQTE',
-  );
-  await expect(chooser).toContainText(
-    'that one start covers the microphone and the application',
-  );
-  await expect(chooser).toContainText('Use headphones if you can');
-  await expect(start(page)).toBeDisabled();
-  expect(await hostCalls(page)).toEqual([]);
-
-  await chooser.getByRole('button', { name: 'List applications' }).click();
-  await expect(
-    chooser.getByRole('button', { name: 'Cancel listing' }),
-  ).toBeVisible();
-  await page.evaluate(
-    (choices) => window.captureTest.hostChanged({ phase: 'off', choices }),
-    choices,
-  );
-  await chooser.getByRole('radio', { name: 'Fictional Call' }).check();
-  await expect(start(page)).toBeEnabled();
   await start(page).click();
-  await expect
-    .poll(() => liveStarts(page))
-    .toEqual([{ application: 'fictional-review-1' }]);
-  expect(await hostCalls(page)).toEqual([
-    { kind: 'list', acknowledged: true },
-    { kind: 'review', source: 'fictional-call' },
-  ]);
-});
-
-test('one application only starts a session of its own, without the microphone', async ({
-  page,
-}) => {
-  const chooser = await notebook(page);
-  await chooser.getByRole('radio', { name: /^One application only/ }).check();
-  await expect(chooser).not.toContainText('Use headphones');
-  await chooser.getByRole('button', { name: 'List applications' }).click();
-  await page.evaluate(
-    (choices) => window.captureTest.hostChanged({ phase: 'off', choices }),
-    choices,
-  );
-  await chooser.getByRole('radio', { name: 'Fictional player' }).check();
-  await start(page).click();
-  await expect
-    .poll(() => hostCalls(page))
-    .toEqual([
-      { kind: 'list', acknowledged: true },
-      { kind: 'review', source: 'fictional-player' },
-      { kind: 'startSession', review: 'fictional-review-1' },
-    ]);
-  expect(await liveStarts(page)).toEqual([]);
-});
-
-test('a refused listing says why, and listing can be cancelled', async ({
-  page,
-}) => {
-  const chooser = await notebook(page);
-  await chooser
-    .getByRole('radio', { name: /^Microphone and one application/ })
-    .check();
-  await chooser.getByRole('button', { name: 'List applications' }).click();
-  await page.evaluate(() =>
-    window.captureTest.hostChanged({
-      phase: 'off',
-      problem: 'permissionDenied',
-    }),
-  );
-  await expect(chooser.getByRole('alert')).toHaveText(
-    'macOS did not allow it. Grant Screen & System Audio Recording to TalkQTE in System Settings, then list applications again.',
-  );
-  await chooser.getByRole('button', { name: 'List applications' }).click();
-  await chooser.getByRole('button', { name: 'Cancel listing' }).click();
-  await expect(
-    chooser.getByRole('button', { name: 'List applications' }),
-  ).toBeVisible();
-  expect((await hostCalls(page)).slice(-2)).toEqual([
-    { kind: 'list', acknowledged: true },
-    { kind: 'cancelList' },
-  ]);
-  await expect(start(page)).toBeDisabled();
-});
-
-test('the chooser says when the development launch setting acknowledged the notice', async ({
-  page,
-}) => {
-  const chooser = await notebook(page);
-  await page.evaluate(() =>
-    window.captureTest.hostChanged({
-      bySetting: true,
-      problem: 'noMatchingApplication',
-    }),
-  );
-  await chooser.getByRole('radio', { name: /^One application only/ }).check();
-  await expect(chooser).toContainText(
-    'The TALKQTE_DEV_APPLICATION_SOURCE launch setting acknowledged this notice and asked for one start; it does not retry.',
-  );
-  await expect(chooser.getByRole('alert')).toHaveText(
-    'No single running application has the exact name TALKQTE_DEV_APPLICATION_SOURCE gives. Nothing was started.',
-  );
+  await expect.poll(() => liveStarts(page)).toEqual([{}]);
   expect(await hostCalls(page)).toEqual([]);
 });
