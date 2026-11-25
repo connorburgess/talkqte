@@ -756,20 +756,37 @@ svg {
 }
 .context-heading {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px 16px;
+  gap: 12px;
+}
+.context-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
 }
 .context-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 8px 10px;
+  align-items: center;
+}
+.context-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   align-items: center;
 }
 .context-heading .secondary-button,
-.context-actions .text-button {
+.context-actions .text-button,
+.context-secondary-actions .text-button {
   min-height: 44px;
+}
+.context-disclosure > .muted.small {
+  margin-top: 10px;
+  max-width: 66ch;
 }
 .context-path-form {
   display: grid;
