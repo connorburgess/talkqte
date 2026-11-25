@@ -608,6 +608,7 @@ svg {
 }
 .editor-footer {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-12);
   font-family: var(--font-mono);
@@ -617,6 +618,84 @@ svg {
   margin-top: var(--space-8);
   padding-bottom: var(--space-12);
   font-variant-numeric: tabular-nums;
+}
+.editor-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.focus-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.focus-input-row textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dictation-button {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.dictation-button:hover:not(:disabled) {
+  background: var(--band);
+}
+.dictation-button.is-listening,
+.dictation-button[aria-pressed='true'] {
+  border: 1.5px solid var(--accent-ink);
+  background: var(--cue-asked-surface);
+  color: var(--accent-ink);
+}
+.dictation-button.is-listening:hover:not(:disabled),
+.dictation-button[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--selection);
+}
+.dictation-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-4);
+  font-size: 13px;
+  color: var(--ink);
+}
+.dictation-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  flex-shrink: 0;
+}
+.dictation-button.is-listening + .dictation-status .dictation-dot,
+.dictation-status .dictation-dot {
+  animation: dictation-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dictation-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.dictation-error {
+  margin-top: var(--space-4);
+  font-size: 13px;
+  color: var(--danger);
+}
+.dictation-hint {
+  margin-top: var(--space-4);
 }
 .companion-heading {
   display: flex;
