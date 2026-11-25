@@ -19,9 +19,9 @@
 //! TLS with certificate validation, and never logged or returned. No provider
 //! text reaches a log or the notebook: failures are fixed codes.
 
-use crate::cue_evaluator::{
-    Cancellation, EvaluationLifecycle, Evaluator, Failure, Request, Settlement,
-};
+use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request};
+#[cfg(test)]
+use crate::cue_evaluator::{EvaluationLifecycle, Settlement};
 use crate::provider_keys::{KeyError, Provider, Secret};
 use serde_json::{json, Value};
 use std::{
@@ -842,8 +842,10 @@ pub(crate) fn read_bounded_stream_for_id(
 /// refusal or a reply at its output bound retires only that request. Unlike
 /// the lab run, Pause and Dismiss cancel the request in flight without
 /// ending cues for the session, and Resume continues.
+#[cfg(test)]
 struct InApp;
 
+#[cfg(test)]
 impl EvaluationLifecycle for InApp {
     fn terminal(&self) -> Option<Failure> {
         None
@@ -859,6 +861,7 @@ impl EvaluationLifecycle for InApp {
 
 /// What the review shows before anything is sent. Kept short: the
 /// review's whole policy, with the Deepgram sentence, is bounded.
+#[cfg(test)]
 fn data_policy(model: Model) -> String {
     format!(
         "Sends to the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account per token: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. At most {REQUEST_CAP} requests and an estimated ${:.2} per session (an estimate, not your bill; there is no daily cap). Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both. Model {}. It never sends Anthropic audio, the full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under your API account's terms (https://www.anthropic.com/legal/commercial-terms); lines already sent cannot be recalled. If it fails, no other service is used.",

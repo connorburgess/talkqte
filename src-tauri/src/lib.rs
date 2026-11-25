@@ -753,6 +753,7 @@ pub(crate) enum LiveUnavailable {
 }
 
 impl LiveUnavailable {
+    #[cfg(test)]
     fn message(self) -> &'static str {
         self.message_for(llm_provider::CueProvider::Anthropic)
     }
