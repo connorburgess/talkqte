@@ -556,6 +556,7 @@ impl Engine {
                     .state
                     .transcript
                     .iter()
+                    .rev()
                     .any(|line| matches_source(line, source))
             }) {
                 return Ok(None);
@@ -739,34 +740,59 @@ impl Engine {
         // fresh/history age boundary while the model answers does not.
         // Applying it still needs a cited
         // line that is fresh now.
-        let sent_at_ms = self
+        let (sent_at_ms, is_lab) = self
             .evaluation
             .as_ref()
-            .and_then(|state| state.pending.as_ref())
-            .map_or(self.state.elapsed_ms, |pending| pending.sent_at_ms);
-        let current = match self.evaluation_request_as_of(sent_at_ms) {
-            Ok(request) => request,
-            Err(error) => {
-                self.fail_evaluation(error);
-                return;
+            .and_then(|state| {
+                state
+                    .pending
+                    .as_ref()
+                    .map(|pending| (pending.sent_at_ms, state.lab.is_some()))
+            })
+            .unwrap_or((self.state.elapsed_ms, false));
+        let (current, result) = if is_lab {
+            let state = self.evaluation.as_mut().expect("evaluation checked");
+            let pending = state.pending.as_ref().expect("pending checked");
+            let permission_current = pending.permission_generation == state.permission.generation;
+            if !permission_current {
+                state.worker.cancel_pending();
             }
+            let Some(result) = state.worker.poll_submitted() else {
+                return;
+            };
+            let current = match self.evaluation_request_as_of(sent_at_ms) {
+                Ok(request) => request,
+                Err(error) => {
+                    self.fail_evaluation(error);
+                    return;
+                }
+            };
+            (current, result)
+        } else {
+            let current = match self.evaluation_request_as_of(sent_at_ms) {
+                Ok(request) => request,
+                Err(error) => {
+                    self.fail_evaluation(error);
+                    return;
+                }
+            };
+            let state = self.evaluation.as_mut().expect("evaluation checked");
+            let pending = state.pending.as_ref().expect("pending checked");
+            let permission_current = pending.permission_generation == state.permission.generation;
+            if !permission_current || current.is_none() {
+                state.worker.cancel_pending();
+            }
+            let Some(result) = state
+                .worker
+                .poll(current.as_ref().unwrap_or(&pending.request))
+            else {
+                return;
+            };
+            (current, result)
         };
         let state = self.evaluation.as_mut().expect("evaluation checked");
         let pending = state.pending.as_ref().expect("pending checked");
         let permission_current = pending.permission_generation == state.permission.generation;
-        if (!permission_current) || (current.is_none() && state.lab.is_none()) {
-            state.worker.cancel_pending();
-        }
-        let result = if state.lab.is_some() {
-            state.worker.poll_submitted()
-        } else {
-            state
-                .worker
-                .poll(current.as_ref().unwrap_or(&pending.request))
-        };
-        let Some(result) = result else {
-            return;
-        };
         let submitted = state.pending.take().expect("pending checked");
         // A reply that completed before the deadline but was read after it is
         // never applied; only its action is logged.

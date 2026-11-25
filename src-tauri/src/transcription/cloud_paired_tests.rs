@@ -50,10 +50,16 @@ fn reconnect_timing_child() {
     let first = Script::default();
     let pending = Script::default();
     let last = Script::default();
+    let extras: Vec<Script> = (2..super::MAX_RECONNECTS)
+        .map(|_| Script::default())
+        .collect();
     let (feed, _) = feed(&first, Arc::new(Mutex::new(true)));
     let lost = Arc::new(Mutex::new(Vec::new()));
     let notify = lost.clone();
-    let streams = [pending.clone(), last.clone()];
+    let mut streams = Vec::with_capacity(super::MAX_RECONNECTS as usize);
+    streams.push(pending.clone());
+    streams.push(last.clone());
+    streams.extend(extras.iter().cloned());
     let opens = Arc::new(Mutex::new(0usize));
     let count = opens.clone();
     let mut feed = Some(
@@ -110,8 +116,39 @@ fn reconnect_timing_child() {
                 });
                 result = feed.as_mut().unwrap().poll();
             }
-            "last-failed" => {
+            "exhaust-to-cap" => {
                 last.events
+                    .lock()
+                    .unwrap()
+                    .push(SttEvent::Failed(SttFailure::Network));
+                result = feed.as_mut().unwrap().poll();
+                if result.is_ok() {
+                    let last_idx = extras.len().saturating_sub(1);
+                    for (idx, script) in extras.iter().enumerate() {
+                        script.events.lock().unwrap().push(SttEvent::Connected {
+                            query: query.clone(),
+                        });
+                        result = feed.as_mut().unwrap().poll();
+                        if result.is_err() || idx == last_idx {
+                            break;
+                        }
+                        script
+                            .events
+                            .lock()
+                            .unwrap()
+                            .push(SttEvent::Failed(SttFailure::Network));
+                        result = feed.as_mut().unwrap().poll();
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            "last-failed" => {
+                extras
+                    .last()
+                    .unwrap_or(&last)
+                    .events
                     .lock()
                     .unwrap()
                     .push(SttEvent::Failed(SttFailure::Network));

@@ -27,14 +27,15 @@ export const DEEPGRAM_GRANT_URL = 'https://api.deepgram.com/v1/auth/grant';
 // app reads the token only when the stream opens, at approval.
 export const DEEPGRAM_GRANT_TTL_S = 900;
 // The app's two fixed streaming queries (transcription/deepgram.rs): English
-// (#344), and Multilingual (`language=multi`, with the 100 ms endpointing
-// Deepgram recommends for code-switching). One is recorded in evidence as the
-// request the app sends; the app logs no URL. A plan keeps English unless its
+// (#344, with smart_format and 600 ms endpointing), and Multilingual
+// (`language=multi`, with smart_format and the 100 ms endpointing Deepgram
+// recommends for code-switching). One is recorded in evidence as the request
+// the app sends; the app logs no URL. A plan keeps English unless its
 // `transcription.language` is `multi`.
 export const DEEPGRAM_APP_QUERY =
-  'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
+  'model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=600&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
 export const DEEPGRAM_APP_QUERY_MULTI =
-  'model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
+  'model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true';
 export const DEEPGRAM_APP_QUERIES = Object.freeze({
   en: DEEPGRAM_APP_QUERY,
   multi: DEEPGRAM_APP_QUERY_MULTI,

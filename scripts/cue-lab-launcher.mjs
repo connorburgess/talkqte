@@ -691,12 +691,12 @@ function launcher({
               } else if (event.state === 'reconnecting') {
                 // A failed stream being replaced (#357): only in a build the
                 // run allowed to reconnect, after the first connection, in
-                // the reviewed session, at most twice. A pending replacement may
-                // fail before Connected and spend the second attempt.
+                // the reviewed session, up to 10 times. A pending replacement may
+                // fail before Connected and spend a reconnect attempt.
                 if (
                   !keepToken ||
                   connectedQuery === null ||
-                  reconnects >= 2 ||
+                  reconnects >= 10 ||
                   event.session !== reviewedSession
                 ) {
                   onTiming({ event: 'dropped', count: 1 });
@@ -1118,9 +1118,9 @@ export function prepareLabFixtureLauncher({
       'cloud-early',
       'cloud-other-session',
       'cloud-reconnect',
-      'cloud-reconnect-thrice',
+      'cloud-reconnect-over-cap',
       'cloud-reconnect-pending',
-      'cloud-reconnect-pending-thrice',
+      'cloud-reconnect-pending-over-cap',
       'cloud-reconnect-before-first',
       'cloud-reconnect-other-session',
       'cloud-reconnect-changed-query',
