@@ -247,22 +247,21 @@ fn an_hour_with_both_sources_stays_bounded_and_counts_its_caps() {
     );
 
     // What the session grows stays within its bounds over the hour.
-    assert!(peak.transcript <= 400);
+    assert!(peak.transcript <= 50_000);
     assert_eq!(
-        peak.transcript, 400,
-        "an hour is longer than the shown lines"
+        peak.transcript, accepted,
+        "an hour keeps every line in the notebook"
     );
     assert!(peak.echo_recent <= 16);
-    assert!(peak.echoes <= 200);
+    assert!(peak.echoes <= 2_000);
     assert!(peak.shown_cues <= cues.min(1_000));
     assert!(peak.asked_lines <= 2 * cues + 2);
     assert!(peak.dismissed_sources <= cues);
     assert!(peak.last_shown <= 16, "one entry per question type");
-    // Every snapshot carries the shown lines only, so its size stays flat
-    // however long the meeting runs.
-    assert!(peak.snapshot_bytes < 128 * 1024, "{}", peak.snapshot_bytes);
-    // The whole meeting is kept for export and notes, not only the shown
-    // part: nothing of the start is lost in an hour.
+    // The snapshot stays bounded for a 1-hour session with >400 lines.
+    assert!(peak.snapshot_bytes < 512 * 1024, "{}", peak.snapshot_bytes);
+    // The whole meeting is kept for export and notes, not only the first 400
+    // lines: nothing of the start is lost in an hour.
     assert_eq!(peak.meeting, accepted);
     assert!(!peak.meeting_cut);
     assert!(accepted > 400);
@@ -276,18 +275,39 @@ fn an_hour_with_both_sources_stays_bounded_and_counts_its_caps() {
     let plan = e.meeting_notes_plan(false);
     assert!(plan.is_err(), "notes wait for the end of the meeting");
 
-    // The caps count as documented: two streams spend the 120 minutes in
-    // one hour, and the notebook says so from ten minutes of meeting left.
+    // Two streams spend 120 minutes of the 480-minute budget in one hour, so
+    // a 1-3 hour live meeting does not hit the transcription cap prematurely.
     assert_eq!(
-        cap_reached_ms,
-        Some(HOUR_MS),
-        "two streams, one 120-minute budget"
+        cap_reached_ms, None,
+        "one two-source hour stays well below the 480-minute budget"
     );
-    assert_eq!(warned.first(), Some(&Some(10)));
-    assert_eq!(warned.last(), Some(&Some(0)));
+    assert!(warned.is_empty(), "{warned:?}");
+    // Spending down to the last 10 minutes of the 480-minute budget still
+    // emits the low-cap warning countdown down to 0.
+    let remaining_audio_secs = budget.left().as_secs();
+    assert_eq!(remaining_audio_secs, (480 - 120) * 60);
+    let mut low_warned = Vec::new();
+    for step in 0..=(remaining_audio_secs) {
+        if step > 0 {
+            budget.reserve(frame);
+        }
+        e.cloud_transcription_left(session, budget.left());
+        if let Some(left) = e
+            .state
+            .transcription
+            .as_ref()
+            .and_then(|transcription| transcription.minutes_left)
+        {
+            if low_warned.last() != Some(&left) {
+                low_warned.push(left);
+            }
+        }
+    }
+    assert_eq!(low_warned.first(), Some(&10));
+    assert_eq!(low_warned.last(), Some(&0));
     assert!(
-        warned.windows(2).all(|pair| pair[0] > pair[1]),
-        "{warned:?}"
+        low_warned.windows(2).all(|pair| pair[0] > pair[1]),
+        "{low_warned:?}"
     );
     // Requests: one at a time, at least two seconds apart, never past the
     // cap; the request cap, not the spend estimate, is what ends cues.
@@ -310,7 +330,7 @@ fn a_meeting_past_what_is_kept_says_its_start_is_missing_and_writes_no_partial_n
     let mut e = Engine::live();
     e.start().unwrap();
     let session = e.session();
-    for n in 0..4_100u64 {
+    for n in 0..50_100u64 {
         e.advance(1_000);
         e.ingest(
             session,
@@ -324,15 +344,15 @@ fn a_meeting_past_what_is_kept_says_its_start_is_missing_and_writes_no_partial_n
         .unwrap();
     }
     let growth = e.growth();
-    assert_eq!(growth.transcript, 400);
-    assert_eq!(growth.meeting, 4_000);
+    assert_eq!(growth.transcript, 50_000);
+    assert_eq!(growth.meeting, 50_000);
     assert!(growth.meeting_cut);
     e.set_keep_meeting(true);
     let kept = e.markdown();
     assert!(kept.contains("The start of this meeting is not included"));
     assert!(!kept.contains("Fictional line number 99 about"));
     assert!(kept.contains("Fictional line number 100 about"));
-    assert!(kept.contains("Fictional line number 4099 about"));
+    assert!(kept.contains("Fictional line number 50099 about"));
     e.end();
     assert_eq!(
         e.meeting_notes_plan(false).err(),

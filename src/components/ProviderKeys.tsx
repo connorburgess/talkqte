@@ -42,13 +42,13 @@ const providers: {
   {
     id: 'deepgram',
     name: 'Deepgram',
-    role: 'Live transcription. Billed by Deepgram per minute (120 min session cap).',
+    role: 'Live transcription. Billed by Deepgram per minute (480 min session cap).',
     whereToGet: 'Deepgram Console (console.deepgram.com) → API Keys',
   },
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
-    role: 'Live transcription via Scribe v2 Realtime. Billed by ElevenLabs (120 min session cap).',
+    role: 'Live transcription via Scribe v2 Realtime. Billed by ElevenLabs (480 min session cap).',
     whereToGet: 'ElevenLabs (elevenlabs.io) → Developers → API Keys',
   },
   {

@@ -510,6 +510,10 @@ pub(crate) async fn list_kept_meetings_for_context(
 /// Under `"ask"`, shows `Meeting ended` in the dock. Lab runs and `"off"`
 /// never save or prompt.
 pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
+    on_live_session_ended_with(app, session, false);
+}
+
+pub(crate) fn on_live_session_ended_with(app: &tauri::AppHandle, session: u64, force_save: bool) {
     let Some(store) = app.try_state::<Store>() else {
         return;
     };
@@ -521,7 +525,7 @@ pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
         .map_or(AfterSessionKeep::Auto, |settings| {
             settings.saved().after_session_keep
         });
-    if mode == AfterSessionKeep::Off {
+    if !force_save && mode == AfterSessionKeep::Off {
         return;
     }
     let Some(keeping_state) = app.try_state::<Keeping>() else {
@@ -547,7 +551,7 @@ pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
         let Some(counts) = runtime.engine.end_prompt_counts() else {
             return;
         };
-        if mode == AfterSessionKeep::Ask {
+        if !force_save && mode == AfterSessionKeep::Ask {
             runtime.end_prompt = Some(EndPrompt {
                 session,
                 state: EndPromptState::Ask,

@@ -300,7 +300,7 @@ export function Onboarding({
                     <strong>Start live session</strong> opens the floating dock,
                     starts capture on {device}, and immediately enables{' '}
                     <strong>Deepgram or ElevenLabs</strong> (session audio for
-                    transcription, up to 120 minutes per session) and your
+                    transcription, up to 480 minutes per session) and your
                     chosen cue provider — <strong>Anthropic</strong>,{' '}
                     <strong>OpenAI</strong>, or <strong>Gemini</strong> (up to
                     six recent transcript lines, the cue on screen and earlier
