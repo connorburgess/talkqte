@@ -11,7 +11,9 @@ interface Settings {
 }
 
 /** Settings: offer to start or auto-start a session when a call begins.
- * Both are off until the person turns them on; saved in the settings file. */
+ * Offer in the dock is on by default on macOS (off in lab runs);
+ * Start automatically is off until the person turns it on; saved in the
+ * settings file. */
 export function CallPromptSetting() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
@@ -72,14 +74,15 @@ export function CallPromptSetting() {
       <div>
         <h2 id="call-prompt-setting">When a call starts</h2>
         <p>
-          While TalkQTE is open, it can notice when another app uses your
-          microphone for 3 seconds. It reads only whether the microphone is in
-          use and which app is in front, never audio or what is on screen, and
-          that stays on this Mac. Offer in the dock shows a 1-click Start
-          button; Start automatically begins listening right away (sending your
-          mic to Deepgram and recent lines to Anthropic until Stop, showing
-          Listening · Stop in the dock). Browser calls look like any other
-          browser mic use. App preferences save by identifier only.
+          While TalkQTE is open, it notices when another app uses your
+          microphone or camera (on by default; turn it off here or from the
+          offer). It reads only local mic/camera-active metadata and the app’s
+          bundle identifier, never audio, video, or what is on screen, and that
+          stays on this Mac. Offer in the dock shows a 1-click Start button
+          without starting capture; Start automatically (off by default) begins
+          listening right away (sending your mic to Deepgram and recent lines to
+          Anthropic until Stop, showing Listening · Stop in the dock). App
+          preferences save by bundle identifier only.
         </p>
         {settings && (
           <>

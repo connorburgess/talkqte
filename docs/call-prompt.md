@@ -6,8 +6,7 @@ from a real microphone or application.
 
 ## What it does
 
-When the person has turned it on (**Settings → When a call starts**), TalkQTE
-reads local metadata every 500 ms while it is open:
+On macOS, **Offer in the dock when a call seems to start** (**Settings → When a call starts**) is **on by default** (disabled in lab runs, and can be turned off in Settings, the menu bar, or from **Off** on the offer itself). **Start automatically when a call begins** remains **off by default**, so nothing is ever captured or sent until the person clicks **Start** or explicitly enables auto-start. While either is on, TalkQTE reads local metadata every 500 ms while it is open:
 
 - whether another process has a microphone running (using Core Audio's Process
   Object List on macOS 14.2+ to identify background call apps too, falling back
@@ -24,15 +23,16 @@ application or browser is identified (or 3 seconds for generic microphone-only
 use), with no TalkQTE live session starting or running and no microphone check
 on:
 
-- **Offer in the dock when a call seems to start** (off by default): the companion shows one small offer — `"A call seems to be starting in Zoom."` with **Start**, **Not for Zoom**, **Don't ask again** and **Not now** (a browser call notes that only mic audio is included). Clicking **Start** starts listening and processing in one click (or opens the notebook if keys are missing). It goes away by itself after 45 seconds or when the microphone stops, and appears once per spell of microphone use. After **Not now**, or an offer left to go away, the same application is not offered again for 20 minutes, so a call in which the microphone briefly stops (a mute, a device change) is asked about once. The companion never takes focus, and a companion the person hid stays hidden.
+- **Offer in the dock when a call seems to start** (on by default on macOS; off in lab runs): the companion shows a compact card — Calibrated Cue mark + `"Call in Zoom"` (or `"Start listening?"` for an unknown app) with **Start**, **Not now**, **Not for Zoom**, and **Off**. Clicking **Start** starts listening and processing in one click (or opens the notebook if keys are missing). It goes away by itself after 45 seconds or when the microphone stops, and appears once per spell of microphone use. After **Not now**, or an offer left to go away, the same application is not offered again for 20 minutes, so a call in which the microphone briefly stops (a mute, a device change) is asked about once. The companion never takes focus, and a companion the person hid stays hidden.
 - **Start automatically when a call begins** (off by default, disabled in lab runs): when a known meeting application or browser activates the microphone or camera preview for 1.5 seconds (and keys are configured and no session is running), TalkQTE automatically starts a live microphone session and shows **`Listening · Stop`** in the dock so the session is visible and can be stopped in one click.
 
-Not for *App* skips that application; Don't ask again turns the dock offer off.
+**Not for *App*** skips that application; **Off** turns the dock offer off.
 Both, and both settings themselves, are kept in the [settings file](../PRIVACY.md)
-and apply at the next launch. Not for *App* is kept as the application's
+and apply at the next launch. **Not for *App*** is kept as the application's
 bundle identifier only, and only for the known meeting applications and
-browsers below, which Settings names from a fixed list after a restart. Both
-settings are **off by default**.
+browsers below, which Settings names from a fixed list after a restart. The dock
+offer is **on by default** on macOS (off in lab runs), while **Start
+automatically** is **off by default**.
 
 ## Signals assessed
 
@@ -104,7 +104,7 @@ back from the menu bar too.
 (`native`); `call_prompt_commands.rs` holds the commands and the watcher
 thread. The companion may only answer an offer (`respond_to_call_prompt`);
 the settings commands are the notebook's (`tests/privacy_boundaries.rs`).
-Scripted tests cover: off by default and nothing offered while off; the
+Scripted tests cover: on by default for the dock offer (and off in lab runs), nothing offered while turned off; the
 1.5-second preview settle for known meeting apps and browsers vs 3-second
 generic settle; background meeting app holding the microphone while another app
 is frontmost; camera-preview trigger with muted microphone; self-PID and

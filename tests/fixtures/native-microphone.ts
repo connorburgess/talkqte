@@ -85,8 +85,6 @@ const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
-// The call-starting prompt's settings and the companion's answers.
-let callPrompt = { enabled: false, autoStart: false, notFor: [] as string[] };
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -105,6 +103,12 @@ const savedSettings = {
       }>;
     }
   ).standInSavedSettings,
+};
+// The call-starting prompt's settings and the companion's answers.
+let callPrompt = {
+  enabled: savedSettings.status.saving !== 'labRun',
+  autoStart: false,
+  notFor: [] as string[],
 };
 
 /** The menu bar item and the system's login item, as the stand-in plays
@@ -742,7 +746,11 @@ mockIPC(
       case 'reset_settings':
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
-        callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        callPrompt = {
+          enabled: savedSettings.status.saving !== 'labRun',
+          autoStart: false,
+          notFor: [],
+        };
         historyFixture.resetAfterSessionKeep();
         return;
       case 'respond_to_end_prompt': {
