@@ -113,7 +113,7 @@ impl Default for Settings {
             overlay_enabled: true,
             panels: Panels::default(),
             user_name: None,
-            call_prompt_enabled: false,
+            call_prompt_enabled: true,
             call_prompt_auto_start: false,
             call_prompt_not_for: Vec::new(),
             keep_running_in_menu_bar: false,
@@ -427,6 +427,13 @@ impl Store {
         let (saving, saved) = match path.as_deref().map(read) {
             Some(Contents::Newer) => (Saving::Newer, Settings::default()),
             Some(Contents::Settings(saved)) => (saving, saved),
+            None if lab_run => (
+                saving,
+                Settings {
+                    call_prompt_enabled: false,
+                    ..Settings::default()
+                },
+            ),
             None => (saving, Settings::default()),
         };
         let store = Self(Mutex::new(Inner {
@@ -561,7 +568,7 @@ mod tests {
                 notes_ratio: Some(0.6),
             },
             user_name: Some("Zoë O’Neil-Ray".into()),
-            call_prompt_enabled: true,
+            call_prompt_enabled: false,
             call_prompt_auto_start: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             keep_running_in_menu_bar: true,
@@ -584,7 +591,7 @@ mod tests {
     fn the_file_is_the_owners_alone_and_leaves_no_temporary_file() {
         let folder = folder();
         let (store, _) = Store::open(Some(folder.file()), false);
-        store.record(|settings| settings.call_prompt_enabled = true);
+        store.record(|settings| settings.call_prompt_enabled = false);
         store.record(|settings| settings.sensitivity = Sensitivity::Quiet);
         #[cfg(unix)]
         {
@@ -760,7 +767,15 @@ mod tests {
         let before = fs::read(folder.file()).unwrap();
 
         let (lab, applied) = Store::open(Some(folder.file()), true);
-        assert_eq!(applied, Settings::default());
+        assert!(!applied.call_prompt_enabled);
+        assert!(!applied.call_prompt_auto_start);
+        assert_eq!(
+            applied,
+            Settings {
+                call_prompt_enabled: false,
+                ..Settings::default()
+            }
+        );
         assert_eq!(lab.status().saving, Saving::LabRun);
         lab.record(|settings| settings.sensitivity = Sensitivity::Balanced);
         lab.reset().unwrap();
@@ -808,8 +823,11 @@ mod tests {
     }
 
     #[test]
-    fn call_prompt_auto_start_defaults_false_and_reads_when_present() {
+    fn call_prompt_enabled_defaults_true_and_auto_start_defaults_false() {
+        assert!(Settings::default().call_prompt_enabled);
         assert!(!Settings::default().call_prompt_auto_start);
+        assert!(parse(br#"{"version":1}"#).call_prompt_enabled);
+        assert!(parse(br#"{"version":1,"callPrompt":{"enabled":"no"}}"#).call_prompt_enabled);
         assert!(!parse(br#"{"version":1,"callPrompt":{"enabled":true}}"#).call_prompt_auto_start);
         let parsed = parse(br#"{"version":1,"callPrompt":{"enabled":false,"autoStart":true}}"#);
         assert!(!parsed.call_prompt_enabled);

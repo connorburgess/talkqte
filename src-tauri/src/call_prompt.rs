@@ -15,10 +15,10 @@
 //! `com.talkqte.*`) are ignored so TalkQTE never triggers on itself. When a call
 //! signal settles (1.5 s when a known meeting app or browser is identified, 3 s
 //! for generic microphone-only use), no TalkQTE session or microphone check
-//! runs, and the person has turned the prompt or auto-start on, TalkQTE either
-//! offers in the companion to start a session (1-click Start) or, if
-//! auto-start is opted in and a known meeting app or browser is active with
-//! keys configured, starts a live session immediately and shows
+//! runs, and the prompt (on by default) or auto-start (off by default) is
+//! enabled, TalkQTE either offers in the companion to start a session (1-click
+//! Start) or, if auto-start is opted in and a known meeting app or browser is
+//! active with keys configured, starts a live session immediately and shows
 //! `Listening · Stop` in the companion.
 //!
 //! Nothing is read while both prompt and auto-start are off. What is read is
@@ -345,17 +345,26 @@ pub struct Preselect {
 }
 
 /// The person's choices, as Settings shows them.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    /// Offer in the dock when a call seems to start. Off until the person
-    /// turns it on.
+    /// Offer in the dock when a call seems to start. On by default.
     pub enabled: bool,
     /// Start a live session automatically when a known meeting app or browser
-    /// uses the microphone for `SETTLE`. Off by default.
+    /// uses the microphone for `PREVIEW_SETTLE`. Off by default.
     pub auto_start: bool,
     /// Applications the person said not to ask about, by name.
     pub not_for: Vec<String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_start: false,
+            not_for: Vec::new(),
+        }
+    }
 }
 
 /// An automatic session start triggered for a known meeting app or browser.
@@ -1067,9 +1076,15 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_offered_while_the_prompt_is_off_which_it_is_by_default() {
+    fn prompt_is_on_by_default_and_nothing_is_offered_when_turned_off() {
         let mut watcher = Watcher::default();
+        assert!(watcher.enabled());
+        assert!(!watcher.auto_start());
+        assert!(watcher.watching());
+
+        assert!(watcher.set_enabled(false));
         assert!(!watcher.enabled());
+        assert!(!watcher.watching());
         let start = Instant::now();
         for second in 0..60 {
             watcher.observe(&in_use(zoom()), false, start + Duration::from_secs(second));
@@ -1230,8 +1245,10 @@ mod tests {
         for bundle in MEETING.iter().chain(BROWSERS) {
             assert!(known_name(bundle).is_some(), "{bundle}");
         }
-        watcher.restore(false, false, &[]);
+        watcher.restore(true, false, &[]);
         assert_eq!(watcher.settings(), &Settings::default());
+        watcher.restore(false, false, &[]);
+        assert!(!watcher.enabled());
     }
 
     #[test]
@@ -1592,7 +1609,10 @@ mod tests {
     #[test]
     fn auto_start_is_off_by_default_and_triggers_once_per_spell_when_enabled() {
         let mut watcher = Watcher::default();
+        assert!(watcher.enabled());
         assert!(!watcher.auto_start());
+        assert!(watcher.watching());
+        assert!(watcher.set_enabled(false));
         assert!(!watcher.watching());
         assert!(watcher.set_auto_start(true));
         assert!(watcher.watching());

@@ -36,9 +36,10 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
     if engine.set_user_name(settings.user_name.clone()).is_err() {
         let _ = engine.set_user_name(None);
     }
+    let lab = crate::settings::lab_run();
     runtime.call_prompt.restore(
-        settings.call_prompt_enabled,
-        settings.call_prompt_auto_start && !crate::settings::lab_run(),
+        settings.call_prompt_enabled && !lab,
+        settings.call_prompt_auto_start && !lab,
         &settings.call_prompt_not_for,
     );
 }
