@@ -979,6 +979,29 @@ impl Engine {
         self.changed();
     }
 
+    /// When a live session ends with no transcript lines and empty manual
+    /// notes, return to the idle Ready state so the notebook does not sit on
+    /// an empty "Live session ended" view. Preserves any transcription stop
+    /// reason so failures remain visible.
+    pub fn return_to_ready_if_empty(&mut self) {
+        if !self.state.live
+            || self.state.status != Status::Ended
+            || !self.state.transcript.is_empty()
+            || !self.state.notes.trim().is_empty()
+        {
+            return;
+        }
+        self.state.live = false;
+        self.state.status = Status::Ready;
+        self.state.elapsed_ms = 0;
+        self.state.duration_ms = 0;
+        self.state.title.clear();
+        self.state.description.clear();
+        self.state.auto_started = false;
+        self.state.sources = None;
+        self.changed();
+    }
+
     /// Quiet the live companion without implying that capture has stopped.
     /// Resume only permits newly spoken lines, never a transcription backlog.
     pub fn set_live_cues_paused(&mut self, paused: bool) -> Result<(), String> {
@@ -7371,6 +7394,44 @@ mod tests {
             Some(CONTEXT),
             "a new session starts with no note shown yet"
         );
+    }
+
+    #[test]
+    fn empty_ended_live_session_returns_to_ready_while_non_empty_stays_ended() {
+        let mut empty = Engine::live();
+        empty.start().unwrap();
+        empty.advance(12_000);
+        empty.update_notes("   \n".into()).unwrap();
+        empty.end();
+        empty.return_to_ready_if_empty();
+        assert!(!empty.state.live);
+        assert_eq!(empty.state.status, Status::Ready);
+        assert_eq!(empty.state.elapsed_ms, 0);
+
+        let mut with_notes = Engine::live();
+        with_notes.start().unwrap();
+        with_notes.advance(12_000);
+        with_notes
+            .update_notes("Fictional gate key note.".into())
+            .unwrap();
+        with_notes.end();
+        with_notes.return_to_ready_if_empty();
+        assert!(with_notes.state.live);
+        assert_eq!(with_notes.state.status, Status::Ended);
+
+        let mut with_line = Engine::live();
+        with_line.start().unwrap();
+        with_line.advance(5_000);
+        with_line
+            .ingest(
+                with_line.session(),
+                live("s1", 2_000, "Let us meet Thursday."),
+            )
+            .unwrap();
+        with_line.end();
+        with_line.return_to_ready_if_empty();
+        assert!(with_line.state.live);
+        assert_eq!(with_line.state.status, Status::Ended);
     }
 }
 

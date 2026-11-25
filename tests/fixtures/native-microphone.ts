@@ -303,6 +303,26 @@ if (new URLSearchParams(location.search).has('processor'))
       new URLSearchParams(location.search).has('audio'),
     ),
   };
+async function endLivePublish() {
+  const empty =
+    session.transcript.length === 0 && session.notes.trim().length === 0;
+  await publish(
+    empty
+      ? {
+          live: false,
+          status: 'ready',
+          elapsedMs: 0,
+          durationMs: 0,
+          title: '',
+          description: '',
+          autoStarted: false,
+          cuesPaused: false,
+          cue: null,
+          sources: undefined,
+        }
+      : { status: 'ended', cue: null, cuesPaused: false },
+  );
+}
 async function completeCaptureStop() {
   await send({
     status: 'off',
@@ -310,7 +330,7 @@ async function completeCaptureStop() {
     activity: 'quiet',
     message: null,
   });
-  await publish({ status: 'ended', cue: null, cuesPaused: false });
+  await endLivePublish();
   await sendProcessing({
     capture: 'off',
     phase: 'ended',
@@ -1090,7 +1110,7 @@ mockIPC(
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
-        await publish({ status: 'ended', cue: null, cuesPaused: false });
+        await endLivePublish();
         return;
       case 'set_live_cues_paused':
         if (rejectCuePause) {
@@ -1145,6 +1165,7 @@ mockIPC(
           });
         }
         return;
+      case 'update_notes':
       case 'save_notes':
         if (session && session.revision >= 1_000) {
           session = { ...session, notes: (args as { notes: string }).notes };
