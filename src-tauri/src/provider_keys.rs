@@ -253,6 +253,21 @@ impl SecretStore for Keychain {
         StoreKind::Keychain
     }
 
+    fn contains(&self, account: &str) -> Result<bool, StoreError> {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(SERVICE)
+            .account(account)
+            .load_attributes(true)
+            .search()
+        {
+            Ok(results) => Ok(!results.is_empty()),
+            Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
+            Err(_) => Err(StoreError::Failed),
+        }
+    }
+
     fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
         use security_framework::passwords::get_generic_password;
         match get_generic_password(SERVICE, account) {
@@ -267,6 +282,10 @@ impl SecretStore for Keychain {
     }
 
     fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
+        // Delete any existing item first so saving replaces stale ACLs (for
+        // example from an earlier unsigned build or `/usr/bin/security`) with
+        // a fresh item owned by this binary.
+        self.delete(account)?;
         security_framework::passwords::set_generic_password(
             SERVICE,
             account,
