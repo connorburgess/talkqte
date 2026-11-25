@@ -4,6 +4,8 @@ import { desktop } from './bridge';
 /** Whether kept meetings can be used in this launch. */
 export type HistoryAvailability = 'on' | 'labRun' | 'unavailable' | 'newer';
 
+export type AfterSessionKeep = 'auto' | 'ask' | 'off';
+
 export type MeetingSources = 'microphone' | 'application' | 'both';
 
 export interface KeptSummary {
@@ -58,11 +60,11 @@ export interface KeptListing {
 
 export interface HistoryStatus {
   availability: HistoryAvailability;
-  /** "Offer to keep each meeting". */
-  offer: boolean;
+  afterSessionKeep: AfterSessionKeep;
   /** The current session's number: Not this one applies to it alone. */
   session: number;
-  /** The ended session's kept meeting, once the person kept it. */
+  /** The ended session's kept meeting, once the person kept it or it was
+   * auto-saved. */
   kept?: { id: string; title: string; changed: boolean };
 }
 
@@ -73,15 +75,15 @@ export function historyStatus(): Promise<HistoryStatus> {
   if (!desktop)
     return Promise.resolve({
       availability: 'unavailable',
-      offer: true,
+      afterSessionKeep: 'auto',
       session: 0,
     });
   return invoke<HistoryStatus>('meeting_history_status');
 }
 
-export function setOfferToKeep(offer: boolean) {
+export function setAfterSessionKeep(mode: AfterSessionKeep) {
   if (!desktop) return browserOnly();
-  return invoke<void>('set_offer_to_keep', { offer });
+  return invoke<void>('set_after_session_keep', { mode });
 }
 
 export function keepMeeting(title: string, includeApplication: boolean) {

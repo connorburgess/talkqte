@@ -45,6 +45,19 @@ const MAX_BYTES: u64 = 64 * 1024;
 pub const SIDEBAR_WIDTH: (f64, f64) = (200.0, 400.0);
 pub const NOTES_RATIO: (f64, f64) = (0.15, 0.85);
 
+/// What TalkQTE does with a non-empty live session when it stops.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AfterSessionKeep {
+    /// Automatically save the meeting to local meeting history when it ends.
+    #[default]
+    Auto,
+    /// Ask in the floating companion and notebook whether to keep it.
+    Ask,
+    /// Leave ended sessions in memory only until quit or the next session.
+    Off,
+}
+
 /// Everything the file can hold, already validated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -65,6 +78,8 @@ pub struct Settings {
     /// Closing the notebook leaves TalkQTE in the menu bar instead of
     /// quitting. Off until the person turns it on.
     pub keep_running_in_menu_bar: bool,
+    /// What to do with a non-empty live session when it ends.
+    pub after_session_keep: AfterSessionKeep,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -89,6 +104,7 @@ impl Default for Settings {
             call_prompt_enabled: false,
             call_prompt_not_for: Vec::new(),
             keep_running_in_menu_bar: false,
+            after_session_keep: AfterSessionKeep::Auto,
         }
     }
 }
@@ -193,6 +209,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
             "keepRunningInMenuBar",
             defaults.keep_running_in_menu_bar,
         ),
+        after_session_keep: field(&object, "afterSessionKeep", defaults.after_session_keep),
     }
 }
 
@@ -213,6 +230,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
             "notFor": settings.call_prompt_not_for,
         },
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
+        "afterSessionKeep": settings.after_session_keep,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -503,6 +521,7 @@ mod tests {
             call_prompt_enabled: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             keep_running_in_menu_bar: true,
+            after_session_keep: AfterSessionKeep::Ask,
         }
     }
 
@@ -545,6 +564,7 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "afterSessionKeep",
                 "callPrompt",
                 "companionPosition",
                 "floatingWindow",
@@ -733,5 +753,27 @@ mod tests {
         store.record(|settings| settings.sensitivity = Sensitivity::Quiet);
         assert!(store.status().error.is_some());
         assert_eq!(store.saved().sensitivity, Sensitivity::Quiet);
+    }
+
+    #[test]
+    fn after_session_keep_defaults_to_auto_and_parses_all_modes_safely() {
+        assert_eq!(
+            Settings::default().after_session_keep,
+            AfterSessionKeep::Auto
+        );
+        for mode in [
+            AfterSessionKeep::Auto,
+            AfterSessionKeep::Ask,
+            AfterSessionKeep::Off,
+        ] {
+            let mut settings = Settings::default();
+            settings.after_session_keep = mode;
+            assert_eq!(parse(&render(&settings)).after_session_keep, mode);
+        }
+        // An unknown or invalid value falls back to Auto without dropping valid fields.
+        let invalid =
+            parse(br#"{"version": 1, "afterSessionKeep": "sometimes", "sensitivity": "quiet"}"#);
+        assert_eq!(invalid.after_session_keep, AfterSessionKeep::Auto);
+        assert_eq!(invalid.sensitivity, Sensitivity::Quiet);
     }
 }

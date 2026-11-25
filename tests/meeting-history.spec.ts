@@ -48,11 +48,46 @@ async function endedSession(page: Page, application?: string) {
 
 const offer = (page: Page) =>
   page.getByRole('region', { name: 'Keep this meeting?' });
+const keepSelect = (page: Page) =>
+  page
+    .getByRole('region', { name: 'Kept meetings' })
+    .getByRole('combobox', { name: 'After a live session ends' });
 
-test('nothing is kept unless the person chooses Keep for that meeting', async ({
+test('non-empty live sessions auto-save by default without keeping the application name', async ({
   page,
 }) => {
   await openNative(page);
+  await expect(offer(page)).toHaveCount(0);
+  await endedSession(page, 'Fictional Call');
+  await expect(
+    page.getByText(/Kept in your meetings as “Meeting, /),
+  ).toBeVisible();
+  const [meeting] = await page.evaluate(() => window.historyTest.meetings());
+  expect(meeting).toBeTruthy();
+  expect(meeting.title).toMatch(/^Meeting, /);
+  expect(meeting.application).toBeUndefined();
+  expect(meeting.sources).toBe('both');
+  expect(meeting.transcript[0]).toMatchObject({ label: 'you', text: LINE });
+  expect(meeting.notes).toBe('Ask about the orchard gate.');
+
+  // Notes written after stopping are added only when the person updates it.
+  await page.evaluate(() =>
+    window.liveTest.publish({ notes: 'Ask about the orchard gate. And keys.' }),
+  );
+  const update = page.getByRole('button', { name: 'Update kept meeting' });
+  await expect(update).toBeVisible();
+  await update.click();
+  await expect(update).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => window.historyTest.meetings()))[0].notes,
+  ).toBe('Ask about the orchard gate. And keys.');
+});
+
+test('under Ask mode, nothing is kept unless the person chooses Keep for that meeting', async ({
+  page,
+}) => {
+  await openNative(page);
+  await page.evaluate(() => window.historyTest.setAfterSessionKeep('ask'));
   await expect(offer(page)).toHaveCount(0);
   await endedSession(page);
   await expect(offer(page)).toBeVisible();
@@ -74,10 +109,11 @@ test('nothing is kept unless the person chooses Keep for that meeting', async ({
   await expect(offer(page)).toBeVisible();
 });
 
-test('keeping uses the title typed, leaves the application name out unless chosen, and can add later notes', async ({
+test('keeping in Ask mode uses the title typed, leaves the application name out unless chosen, and can add later notes', async ({
   page,
 }) => {
   await openNative(page);
+  await page.evaluate(() => window.historyTest.setAfterSessionKeep('ask'));
   await endedSession(page, 'Fictional Call');
   const title = offer(page).getByRole('textbox', { name: 'Title' });
   await title.fill('Orchard review');
@@ -112,10 +148,11 @@ test('keeping uses the title typed, leaves the application name out unless chose
   ).toBe('Ask about the orchard gate. And keys.');
 });
 
-test('the application name is kept only when the person ticks it', async ({
+test('the application name is kept only when the person ticks it in Ask mode', async ({
   page,
 }) => {
   await openNative(page);
+  await page.evaluate(() => window.historyTest.setAfterSessionKeep('ask'));
   await endedSession(page, 'Fictional Call');
   await offer(page)
     .getByRole('checkbox', {
@@ -132,6 +169,7 @@ test('a failed keep says nothing was saved and can be tried again', async ({
   page,
 }) => {
   await openNative(page);
+  await page.evaluate(() => window.historyTest.setAfterSessionKeep('ask'));
   await endedSession(page);
   await page.evaluate(() =>
     window.historyTest.failNext(
@@ -146,7 +184,7 @@ test('a failed keep says nothing was saved and can be tried again', async ({
   await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
 });
 
-test('turning the offer off in Settings stops the offer; Delete all asks first', async ({
+test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all asks first', async ({
   page,
 }) => {
   await openNative(page);
@@ -168,12 +206,11 @@ test('turning the offer off in Settings stops the offer; Delete all asks first',
     '~/Library/Application Support/com.talkqte.desktop/meetings',
   );
   await expect(section).toContainText('1 meeting is kept.');
-  const toggle = section.getByRole('checkbox', {
-    name: 'Offer to keep each meeting',
-  });
-  await expect(toggle).toBeChecked();
-  await toggle.uncheck();
-  await expect(toggle).not.toBeChecked();
+  await expect(keepSelect(page)).toHaveValue('auto');
+  await keepSelect(page).selectOption('ask');
+  await expect(keepSelect(page)).toHaveValue('ask');
+  await keepSelect(page).selectOption('off');
+  await expect(keepSelect(page)).toHaveValue('off');
 
   await section.getByRole('button', { name: 'Delete all meetings…' }).click();
   const confirm = section.getByRole('group', {
@@ -195,6 +232,7 @@ test('turning the offer off in Settings stops the offer; Delete all asks first',
   await endedSession(page);
   await expect(page.getByText(/Mic|Live session ended/).first()).toBeVisible();
   await expect(offer(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
 });
 
 test('a lab run neither offers nor lists kept meetings', async ({ page }) => {

@@ -2,9 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -36,7 +34,7 @@
     "allow-meeting-notes-result",
     "allow-keep-meeting-notes",
     "allow-meeting-history-status",
-    "allow-set-offer-to-keep",
+    "allow-set-after-session-keep",
     "allow-keep-meeting-in-history",
     "allow-update-kept-session-meeting",
     "allow-kept-meetings",

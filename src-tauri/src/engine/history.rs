@@ -5,6 +5,44 @@
 
 use super::{Engine, Segment, Status, THEM, YOU};
 use crate::meeting_history::{Content, Cue, Label, Line, Sources};
+use serde::{Deserialize, Serialize};
+
+/// What the floating companion's end-of-call card is showing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndPromptState {
+    /// "ask" mode: waiting for Keep meeting, Write notes, or Dismiss.
+    Ask,
+    /// "auto" mode: already saved automatically on session end.
+    Saved,
+    /// "ask" mode after the person clicked Keep meeting: brief confirmation.
+    Kept,
+}
+
+/// Metadata shown in the floating companion when a non-empty live session
+/// ends. Contains counts and state only; never transcript text, notes,
+/// meeting titles, IDs, or application names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndPrompt {
+    pub session: u64,
+    pub state: EndPromptState,
+    pub transcript_lines: usize,
+    pub has_notes: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// An action from the floating companion's end-of-call card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndPromptAction {
+    Keep,
+    WriteNotes,
+    Open,
+    Delete,
+    Dismiss,
+}
 
 /// Milliseconds since 1970 (UTC), by this Mac's clock.
 pub(super) fn now_ms() -> u64 {
@@ -17,12 +55,13 @@ pub(super) fn now_ms() -> u64 {
 
 impl Engine {
     /// The live session that just ended, ready to keep; `None` while it
-    /// runs, outside live sessions and when nothing was transcribed. The
-    /// application's name only with `include_application`.
+    /// runs, outside live sessions and when nothing was transcribed and no
+    /// manual notes were written. The application's name only with
+    /// `include_application`.
     pub fn keepable_meeting(&self, include_application: bool) -> Option<Content> {
         if !self.state.live
             || self.state.status != Status::Ended
-            || self.state.transcript.is_empty()
+            || (self.state.transcript.is_empty() && self.state.notes.trim().is_empty())
         {
             return None;
         }
@@ -95,6 +134,17 @@ impl Engine {
     pub fn history_session(&self) -> u64 {
         self.generation
     }
+
+    /// The transcript line count and whether manual notes exist for an ended
+    /// live session with content to keep; `None` when empty or not ended.
+    pub fn end_prompt_counts(&self) -> Option<(usize, bool)> {
+        if !self.state.live || self.state.status != Status::Ended {
+            return None;
+        }
+        let transcript_lines = self.state.transcript.len();
+        let has_notes = !self.state.notes.trim().is_empty();
+        (transcript_lines > 0 || has_notes).then_some((transcript_lines, has_notes))
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_offered_before_the_session_ends_or_without_a_transcript() {
+    fn nothing_is_offered_before_the_session_ends_or_when_completely_empty() {
         let mut e = Engine::live();
         e.start().unwrap();
         e.state.transcript.push(Segment {
@@ -134,8 +184,14 @@ mod tests {
             text: "The blue tin.".into(),
         });
         assert!(e.keepable_meeting(false).is_none(), "still running");
-        let empty = ended(None, &[]);
+        assert!(e.end_prompt_counts().is_none(), "still running");
+        let mut empty = ended(None, &[]);
+        // Manual notes alone can still be kept.
+        assert!(empty.keepable_meeting(false).is_some());
+        assert_eq!(empty.end_prompt_counts(), Some((0, true)));
+        empty.state.notes = "   ".into();
         assert!(empty.keepable_meeting(false).is_none());
+        assert_eq!(empty.end_prompt_counts(), None);
     }
 
     #[test]

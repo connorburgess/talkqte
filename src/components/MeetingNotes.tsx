@@ -35,7 +35,13 @@ function message(error: unknown, fallback: string) {
  * Nothing is sent until they confirm a plan that says what goes where and
  * roughly what it costs. The checked notes are editable and join the export
  * only if the person keeps them. */
-export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
+export function MeetingNotes({
+  snapshot,
+  openPlanTrigger = 0,
+}: {
+  snapshot: Snapshot;
+  openPlanTrigger?: number;
+}) {
   const id = useId();
   const phase = snapshot.meetingNotes ?? 'none';
   const ended =
@@ -48,10 +54,12 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState<MeetingNotesResult | null>(null);
   const [text, setText] = useState('');
+  const sectionRef = useRef<HTMLElement>(null);
   const confirmHeading = useRef<HTMLHeadingElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const writeButton = useRef<HTMLButtonElement>(null);
   const session = useRef(phase);
+  const handledTrigger = useRef(0);
   // Move focus to the checked notes once they are on screen.
   const focusResult = useRef(false);
 
@@ -90,6 +98,21 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
   useEffect(() => {
     if (planOpen) confirmHeading.current?.focus();
   }, [planOpen]);
+
+  // Triggered when the person clicks Write notes from the floating dock.
+  useEffect(() => {
+    if (!openPlanTrigger || openPlanTrigger <= handledTrigger.current) return;
+    if (!ended) return;
+    handledTrigger.current = openPlanTrigger;
+    sectionRef.current?.scrollIntoView({ block: 'center' });
+    if (phase === 'none' && !plan) {
+      void openPlan(false);
+    } else if (phase === 'none' && plan) {
+      confirmHeading.current?.focus();
+    } else if (phase === 'draft') {
+      resultHeading.current?.focus();
+    }
+  }, [openPlanTrigger, ended, phase, plan]);
 
   // The person's notes changed while they are set to be sent: show the
   // plan for what would now be sent.
@@ -185,7 +208,11 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
                 : null;
 
   return (
-    <section className="meeting-notes" aria-labelledby={`${id}-title`}>
+    <section
+      ref={sectionRef}
+      className="meeting-notes"
+      aria-labelledby={`${id}-title`}
+    >
       <div className="meeting-notes-head">
         <h2 id={`${id}-title`}>Meeting notes</h2>
         {chip && (
