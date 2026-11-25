@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { ProcessingSnapshot, SourceCapture } from '../src/lib/processing';
 import { standIn } from './fixtures/stand-in';
 
 // The call-starting offer. The stand-in plays the native side: no
@@ -95,72 +94,14 @@ test('a browser is named simply, an unknown app asks Start listening?, and large
   expect(fitsLarge).toBe(true);
 });
 
-test('Start opens the notebook with the microphone and the offered app chosen once listed', async ({
+test('the notebook has no app picker when a live session starts from the dock', async ({
   page,
 }) => {
   await standIn(page, '/?live');
-  await page.evaluate(() => window.captureTest.host({}));
-  const off: SourceCapture = {
-    phase: 'off',
-    mayBeCapturing: false,
-    stalled: false,
-    canRetry: false,
-    application: null,
-    problem: null,
-    operation: null,
-    sourceSession: false,
-  };
-  await page.evaluate(
-    (source) =>
-      window.captureTest.send({
-        capture: 'off',
-        microphone: 'off',
-        source,
-      } as Partial<ProcessingSnapshot>),
-    off,
-  );
-  const chooser = page.getByRole('region', { name: 'Listen to' });
-  await expect(chooser).toBeVisible();
-  await page.evaluate(() =>
-    window.captureTest.callPromptStart({
-      name: 'Fictional Call',
-      bundleId: 'com.example.fictional-call',
-    }),
-  );
+  await expect(page.getByRole('region', { name: 'Listen to' })).toHaveCount(0);
   await expect(
-    chooser.getByRole('radio', { name: /^Microphone and one application/ }),
-  ).toBeChecked();
-  await expect(chooser).toContainText('For the call in Fictional Call');
-  // Nothing was listed for it: the person lists, as always.
-  const listed = () =>
-    page.evaluate(() =>
-      window.captureTest.applicationAudio
-        .map((call) => (call as { action: { kind: string } }).action.kind)
-        .filter((kind) => kind !== 'snapshot'),
-    );
-  expect(await listed()).toEqual([]);
-  await chooser.getByRole('button', { name: 'List applications' }).click();
-  await page.evaluate(() =>
-    window.captureTest.hostChanged({
-      phase: 'off',
-      choices: [
-        // The same name from another app: matched by bundle id, not name.
-        {
-          id: 'fictional-impostor',
-          name: 'Fictional Call',
-          bundleId: 'com.example.other',
-        },
-        {
-          id: 'fictional-call',
-          name: 'Fictional Call',
-          bundleId: 'com.example.fictional-call',
-        },
-      ],
-    }),
-  );
-  const radios = chooser.getByRole('radio', { name: 'Fictional Call' });
-  await expect(radios.nth(1)).toBeChecked();
-  await expect(radios.nth(0)).not.toBeChecked();
+    page.getByRole('button', { name: 'List applications' }),
+  ).toHaveCount(0);
   expect(await page.evaluate(() => window.captureTest.liveStarts)).toEqual([]);
 });
 

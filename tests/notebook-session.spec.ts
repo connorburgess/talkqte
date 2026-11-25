@@ -413,7 +413,7 @@ test('a live launch says where audio goes in Settings, offers no speech model, a
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.locator('#live-transcription').locator('..');
   await expect(settings).toContainText(
-    'TalkQTE does not transcribe on this device. Pressing Start live session sends audio (from your mic or a chosen Mac app) to Deepgram and recent lines to Anthropic with your keys until you stop or turn off processing.',
+    'TalkQTE does not transcribe on this device. Pressing Start live session sends audio (from your mic and, on macOS 14.2+, system audio) to Deepgram and recent lines to Anthropic with your keys until you stop or turn off processing.',
   );
   await expect(settings.getByRole('status')).toHaveText(
     'Ready. Pressing Start live session sends audio to Deepgram and recent lines to Anthropic until you stop.',
