@@ -601,6 +601,10 @@ pub struct CueSnapshot {
     /// person has turned that prompt on. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_prompt: Option<crate::call_prompt::Prompt>,
+    /// A previously active call went inactive while a live session is running:
+    /// asks the person whether to stop & save or keep recording. Metadata only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_end_prompt: Option<crate::call_prompt::CallEndPrompt>,
     /// An ended non-empty live session prompt: counts and keep status only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_prompt: Option<EndPrompt>,
@@ -819,6 +823,7 @@ impl Engine {
             sensitivity: self.state.sensitivity,
             source_session: false,
             call_prompt: None,
+            call_end_prompt: None,
             end_prompt: None,
             model: match self.evaluation_status() {
                 Some(EvaluationStatus::Unavailable(_)) if self.state.live => {

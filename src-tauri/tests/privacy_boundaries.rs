@@ -181,6 +181,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-stop-microphone",
         "allow-stop-live-session",
         "allow-respond-to-call-prompt",
+        "allow-respond-to-call-end-prompt",
         "allow-respond-to-end-prompt",
     ]);
     assert!(
@@ -361,6 +362,40 @@ fn the_companion_end_prompt_carries_counts_only_never_transcript_notes_titles_or
         assert!(
             !serialized.contains(private),
             "the companion end_prompt received {private}"
+        );
+    }
+}
+
+#[test]
+fn the_companion_call_end_prompt_carries_id_only_never_transcript_notes_titles_or_app_names() {
+    use talkqte_lib::call_prompt::CallEndPrompt;
+    let mut engine = Engine::live();
+    engine.set_user_name(Some("Marisol".into())).unwrap();
+    engine
+        .set_focus(vec!["Agree the seating chart for the potluck".into()])
+        .unwrap();
+    engine
+        .update_notes("Fictional private manual notes about the orchard keys.".into())
+        .unwrap();
+    engine.start().unwrap();
+    engine.advance(2_000);
+    let session = engine.session();
+    engine
+        .ingest(
+            session,
+            line("l1", 1_000, "The greenhouse keys are in the blue tin."),
+        )
+        .unwrap();
+
+    let mut snapshot = engine.cue_snapshot();
+    snapshot.call_end_prompt = Some(CallEndPrompt { id: 42 });
+    let sent = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(keys(&sent["callEndPrompt"]), set(&["id"]));
+    let serialized = sent.to_string();
+    for private in ["blue tin", "orchard keys", "Marisol", "seating chart"] {
+        assert!(
+            !serialized.contains(private),
+            "the companion call_end_prompt received {private}"
         );
     }
 }

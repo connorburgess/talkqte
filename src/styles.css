@@ -1541,6 +1541,18 @@ svg {
 .call-prompt .call-prompt-actions .secondary-button {
   flex: 1 1 0;
 }
+.call-prompt.is-large .call-prompt-actions .primary-button,
+.call-prompt.is-large .call-prompt-actions .secondary-button,
+.call-end-prompt .call-prompt-actions .primary-button,
+.call-end-prompt .call-prompt-actions .secondary-button {
+  white-space: nowrap;
+}
+.call-end-prompt {
+  padding: 10px 12px;
+}
+.call-end-prompt .call-prompt-actions {
+  flex-wrap: wrap;
+}
 .call-prompt-subtle-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,6 +1,6 @@
 //! "A call seems to be starting": a quiet offer to start a live session, or
 //! opt-in automatic start when a known call application or browser uses the
-//! microphone.
+//! microphone, plus macOS meeting-end detection while a live session is running.
 //!
 //! Signals read on macOS without extra permissions:
 //! - whether another process has a microphone running (Core Audio Process Object
@@ -17,16 +17,24 @@
 //! for generic microphone-only use), no TalkQTE session or microphone check
 //! runs, and the prompt (on by default) or auto-start (off by default) is
 //! enabled, TalkQTE either offers in the companion to start a session (1-click
-//! Start) or, if auto-start is opted in and a known meeting app or browser is
-//! active with keys configured, starts a live session immediately and shows
-//! `Listening · Stop` in the companion.
+//! Start) or, if auto-start is opted in and a known meeting app or browser
+//! actively holds a call microphone (never on a camera-only preview/green-room
+//! screen) with keys configured, starts a live session immediately and shows
+//! `Listening · Stop` in the companion. Camera-preview detection only ever
+//! shows the floating offer card.
 //!
-//! Nothing is read while both prompt and auto-start are off. What is read is
-//! only local metadata: whether the microphone or camera is in use and which
-//! app is using it or in front — never audio, video frames, or screen content,
-//! and it stays on this Mac. The settings and the applications not to ask about
-//! are kept in the settings file (`settings.rs`), the latter as bundle
-//! identifiers only.
+//! While a live session is running on macOS, TalkQTE tracks when a known call
+//! application or browser was active (mic or camera). When both camera and
+//! non-TalkQTE active mic processes subsequently go inactive for
+//! `CALL_END_GRACE`, TalkQTE surfaces a compact "Call ended" dock prompt with
+//! "Stop & save" and "Keep recording" actions.
+//!
+//! Nothing is read while both prompt and auto-start are off and no live session
+//! is running. What is read is only local metadata: whether the microphone or
+//! camera is in use and which app is using it or in front — never audio, video
+//! frames, or screen content, and it stays on this Mac. The settings and the
+//! applications not to ask about are kept in the settings file
+//! (`settings.rs`), the latter as bundle identifiers only.
 
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -45,6 +53,10 @@ pub const POLL: Duration = Duration::from_millis(500);
 /// application is not offered again for this long, so one call that briefly
 /// releases the microphone (muting, a device change) is asked about once.
 pub const QUIET_FOR: Duration = Duration::from_secs(20 * 60);
+/// How long both camera and non-TalkQTE active mic processes must stay
+/// inactive after a known call app/browser was active before surfacing the
+/// "Call ended" dock prompt, avoiding false triggers on brief mute/unmute.
+pub const CALL_END_GRACE: Duration = Duration::from_secs(18);
 
 /// An application identified by macOS metadata (frontmost or active-mic
 /// process). Metadata only.
@@ -261,10 +273,18 @@ fn classify_mic_processes(processes: &[ProcessAudioState], self_pid: u32) -> Cla
     }
 }
 
+fn other_mic_active(signals: &Signals) -> bool {
+    signals.microphone_in_use
+        || signals
+            .active_mic_apps
+            .iter()
+            .any(|app| !is_self_bundle(&app.bundle_id))
+}
+
 fn resolve_candidate(signals: &Signals) -> Option<(Frontmost, Kind)> {
     // 1. When the microphone is in use, prefer a known meeting app or browser
     // actively holding audio input (even if it is running in the background).
-    if signals.microphone_in_use {
+    if other_mic_active(signals) {
         let frontmost_id = signals
             .frontmost
             .as_ref()
@@ -375,11 +395,39 @@ pub struct AutoStart {
     pub kind: Kind,
 }
 
+/// Compact companion prompt shown while a live session is running after a
+/// previously active call's camera and non-TalkQTE microphone processes go
+/// inactive for `CALL_END_GRACE`. Metadata only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallEndPrompt {
+    /// Identifies this prompt, so a late answer to an earlier one is ignored.
+    pub id: u64,
+}
+
+/// An answer from the companion to a `CallEndPrompt`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CallEndAnswer {
+    /// Stop the live session and keep/save it if non-empty.
+    StopAndSave,
+    /// Dismiss the prompt and keep recording.
+    KeepRecording,
+}
+
+/// Result of answering a `CallEndPrompt`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CallEndOutcome {
+    pub changed: bool,
+    pub stop_and_save: bool,
+}
+
 /// Result of one observation of the signals.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Observation {
     pub prompt_changed: bool,
     pub auto_start: Option<AutoStart>,
+    pub call_end_changed: bool,
 }
 
 /// An answer from the companion.
@@ -397,22 +445,123 @@ pub enum Answer {
 }
 
 #[derive(Default)]
+struct LiveCallTracker {
+    session: Option<u64>,
+    known_call_seen: bool,
+    needs_settle_to_arm: bool,
+    arming_since: Option<Instant>,
+    inactive_since: Option<Instant>,
+    prompt: Option<CallEndPrompt>,
+    next_id: u64,
+}
+
+impl LiveCallTracker {
+    fn clear(&mut self) -> bool {
+        self.session = None;
+        self.known_call_seen = false;
+        self.needs_settle_to_arm = false;
+        self.arming_since = None;
+        self.inactive_since = None;
+        self.prompt.take().is_some()
+    }
+
+    fn observe(&mut self, session_id: u64, signals: &Signals, now: Instant) -> bool {
+        let mut changed = false;
+        if self.session != Some(session_id) {
+            changed |= self.clear();
+            self.session = Some(session_id);
+        }
+        let other_mic = other_mic_active(signals);
+        let media_active = signals.camera_in_use || other_mic;
+        let known_call_now = media_active && resolve_candidate(signals).is_some();
+
+        if !self.known_call_seen {
+            if known_call_now {
+                if self.needs_settle_to_arm {
+                    let since = *self.arming_since.get_or_insert(now);
+                    if now.saturating_duration_since(since) >= PREVIEW_SETTLE {
+                        self.known_call_seen = true;
+                        self.needs_settle_to_arm = false;
+                        self.arming_since = None;
+                    }
+                } else {
+                    self.known_call_seen = true;
+                    self.arming_since = None;
+                }
+            } else {
+                self.arming_since = None;
+            }
+            return changed;
+        }
+
+        if media_active {
+            self.inactive_since = None;
+            if self.prompt.take().is_some() {
+                changed = true;
+            }
+            return changed;
+        }
+
+        let since = *self.inactive_since.get_or_insert(now);
+        if self.prompt.is_none() && now.saturating_duration_since(since) >= CALL_END_GRACE {
+            self.next_id += 1;
+            self.prompt = Some(CallEndPrompt { id: self.next_id });
+            changed = true;
+        }
+        changed
+    }
+
+    fn answer(&mut self, id: u64, answer: CallEndAnswer) -> CallEndOutcome {
+        let Some(_) = self.prompt.take_if(|prompt| prompt.id == id) else {
+            return CallEndOutcome::default();
+        };
+        match answer {
+            CallEndAnswer::StopAndSave => {
+                self.clear();
+                CallEndOutcome {
+                    changed: true,
+                    stop_and_save: true,
+                }
+            }
+            CallEndAnswer::KeepRecording => {
+                self.known_call_seen = false;
+                self.needs_settle_to_arm = true;
+                self.arming_since = None;
+                self.inactive_since = None;
+                CallEndOutcome {
+                    changed: true,
+                    stop_and_save: false,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct Watcher {
     settings: Settings,
     /// Bundle identifiers behind `settings.not_for`.
     not_for_ids: Vec<String>,
-    /// When the current spell of call activity began.
+    /// When the current spell of call activity (mic or known-app camera
+    /// preview) began.
     in_use_since: Option<Instant>,
+    /// When a non-TalkQTE call microphone became active during this spell.
+    /// Camera-only previews keep this `None` and never trigger `auto_start`.
+    mic_in_use_since: Option<Instant>,
     /// Known meeting app or browser identified during the current spell,
     /// retained across brief frontmost switches during preview settle.
     pending_candidate: Option<(Frontmost, Kind)>,
-    /// This spell already had its offer, or TalkQTE itself was listening.
+    /// This spell already triggered/consumed its mic decision (or TalkQTE
+    /// itself was listening), preventing repeat auto-starts or offers.
     spent: bool,
+    /// This spell already showed or skipped its floating offer card.
+    offer_spent: bool,
     prompt: Option<(Prompt, Instant, Option<String>)>,
     next_id: u64,
     /// Until when each application (by bundle identifier; `None` for an
     /// unknown one) is not offered again.
     quiet: Vec<(Option<String>, Instant)>,
+    live_tracker: LiveCallTracker,
 }
 
 impl Watcher {
@@ -437,8 +586,10 @@ impl Watcher {
 
     fn reset_spell(&mut self) {
         self.in_use_since = None;
+        self.mic_in_use_since = None;
         self.pending_candidate = None;
         self.spent = false;
+        self.offer_spent = false;
     }
 
     /// Turn the prompt on or off. Off clears any offer and what was seen
@@ -497,6 +648,18 @@ impl Watcher {
         self.prompt.as_ref().map(|(prompt, _, _)| prompt)
     }
 
+    pub fn call_end_prompt(&self) -> Option<&CallEndPrompt> {
+        self.live_tracker.prompt.as_ref()
+    }
+
+    pub fn clear_live(&mut self) -> bool {
+        self.live_tracker.clear()
+    }
+
+    pub fn answer_call_end(&mut self, id: u64, answer: CallEndAnswer) -> CallEndOutcome {
+        self.live_tracker.answer(id, answer)
+    }
+
     fn clear(&mut self) -> bool {
         self.prompt.take().is_some()
     }
@@ -512,7 +675,7 @@ impl Watcher {
     /// One read of the signals, also returning an automatic start when
     /// `auto_start` is enabled, `can_auto_start` is true (keys are configured
     /// and not a lab run), and a known meeting app or browser has used the
-    /// microphone for `SETTLE`.
+    /// microphone for `PREVIEW_SETTLE` (never on camera-only preview screens).
     pub fn observe_with(
         &mut self,
         signals: &Signals,
@@ -520,85 +683,141 @@ impl Watcher {
         can_auto_start: bool,
         now: Instant,
     ) -> Observation {
+        self.observe_session(signals, None, busy, can_auto_start, now)
+    }
+
+    /// One read of the signals, handling both pre-call offer/auto-start (when
+    /// idle) and meeting-end detection (when `live_session` is `Some(session)`).
+    pub fn observe_session(
+        &mut self,
+        signals: &Signals,
+        live_session: Option<u64>,
+        busy: bool,
+        can_auto_start: bool,
+        now: Instant,
+    ) -> Observation {
+        let call_end_changed = match live_session {
+            Some(session_id) => self.live_tracker.observe(session_id, signals, now),
+            None => self.live_tracker.clear(),
+        };
+        let effective_busy = busy || live_session.is_some();
         if !self.watching() {
             return Observation {
                 prompt_changed: self.clear(),
                 auto_start: None,
+                call_end_changed,
             };
         }
         let current_candidate = resolve_candidate(signals);
-        let call_active = signals.microphone_in_use
+        let other_mic = other_mic_active(signals);
+        let call_active = other_mic
             || (signals.camera_in_use
                 && (current_candidate.is_some()
                     || self.pending_candidate.is_some()
                     || self.prompt.is_some()));
-        if busy {
+        if effective_busy {
             if self.in_use_since.is_some() || call_active {
                 self.spent = true;
+                self.offer_spent = true;
             }
+            self.mic_in_use_since = None;
             return Observation {
                 prompt_changed: self.clear(),
                 auto_start: None,
+                call_end_changed,
             };
         }
         if !call_active {
-            self.in_use_since = None;
-            self.pending_candidate = None;
-            self.spent = false;
+            self.reset_spell();
             return Observation {
                 prompt_changed: self.clear(),
                 auto_start: None,
+                call_end_changed,
             };
         }
         if let Some(ref candidate) = current_candidate {
             self.pending_candidate = Some(candidate.clone());
         }
         let since = *self.in_use_since.get_or_insert(now);
+        let mic_since = if other_mic {
+            Some(*self.mic_in_use_since.get_or_insert(now))
+        } else {
+            self.mic_in_use_since = None;
+            None
+        };
         if let Some((_, shown, bundle)) = &self.prompt {
             if now.saturating_duration_since(*shown) >= SHOWN_FOR {
                 // Left to go away: as Not now, for the rest of this call.
                 let bundle = bundle.clone();
                 self.quiet_for(bundle, now);
+                self.spent = true;
                 return Observation {
                     prompt_changed: self.clear(),
                     auto_start: None,
+                    call_end_changed,
                 };
             }
-            return Observation::default();
         }
         self.quiet.retain(|(_, until)| *until > now);
         let candidate = current_candidate.or_else(|| self.pending_candidate.clone());
+        let bundle = candidate.as_ref().map(|(app, _)| app.bundle_id.clone());
+        let suppressed = bundle
+            .as_ref()
+            .is_some_and(|bundle| self.not_for_ids.contains(bundle))
+            || self.quiet.iter().any(|(quiet, _)| *quiet == bundle);
+
+        // Auto-start requires an active call microphone (never camera-preview
+        // only when no active call mic is running yet).
+        if !self.spent && self.settings.auto_start && can_auto_start && !suppressed {
+            if let Some(mic_since) = mic_since {
+                if now.saturating_duration_since(mic_since) >= PREVIEW_SETTLE {
+                    if let Some((app, app_kind)) = candidate.as_ref() {
+                        self.spent = true;
+                        self.offer_spent = true;
+                        return Observation {
+                            prompt_changed: self.clear(),
+                            auto_start: Some(AutoStart {
+                                bundle_id: app.bundle_id.clone(),
+                                application: app.name.clone(),
+                                kind: *app_kind,
+                            }),
+                            call_end_changed,
+                        };
+                    }
+                }
+            }
+        }
+
+        if self.prompt.is_some() {
+            return Observation {
+                prompt_changed: false,
+                auto_start: None,
+                call_end_changed,
+            };
+        }
+
         let settle = if candidate.is_some() {
             PREVIEW_SETTLE
         } else {
             SETTLE
         };
-        if self.spent || now.saturating_duration_since(since) < settle {
-            return Observation::default();
+        if self.offer_spent || now.saturating_duration_since(since) < settle {
+            return Observation {
+                prompt_changed: false,
+                auto_start: None,
+                call_end_changed,
+            };
         }
-        self.spent = true;
-        let bundle = candidate.as_ref().map(|(app, _)| app.bundle_id.clone());
-        if bundle
-            .as_ref()
-            .is_some_and(|bundle| self.not_for_ids.contains(bundle))
-            || self.quiet.iter().any(|(quiet, _)| *quiet == bundle)
-        {
-            return Observation::default();
+        self.offer_spent = true;
+        if other_mic {
+            self.spent = true;
         }
-        if self.settings.auto_start && can_auto_start {
-            if let Some((app, app_kind)) = candidate {
-                return Observation {
-                    prompt_changed: self.clear(),
-                    auto_start: Some(AutoStart {
-                        bundle_id: app.bundle_id.clone(),
-                        application: app.name.clone(),
-                        kind: app_kind,
-                    }),
-                };
-            }
-        }
-        if !self.settings.enabled {
-            return Observation::default();
+        if suppressed || !self.settings.enabled {
+            return Observation {
+                prompt_changed: false,
+                auto_start: None,
+                call_end_changed,
+            };
         }
         self.next_id += 1;
         let prompt = Prompt {
@@ -610,6 +829,7 @@ impl Watcher {
         Observation {
             prompt_changed: true,
             auto_start: None,
+            call_end_changed,
         }
     }
 
@@ -625,6 +845,8 @@ impl Watcher {
     /// answer changes nothing.
     pub fn answer(&mut self, id: u64, answer: Answer, now: Instant) -> Option<Option<Preselect>> {
         let (prompt, _, bundle) = self.prompt.take_if(|(prompt, _, _)| prompt.id == id)?;
+        self.spent = true;
+        self.offer_spent = true;
         match answer {
             Answer::Start => {
                 return Some(match (prompt.kind, prompt.application, bundle) {
@@ -1745,5 +1967,387 @@ mod tests {
             )
             .auto_start
             .is_none());
+    }
+
+    #[test]
+    fn camera_preview_never_auto_starts_and_only_shows_offer_card() {
+        let chrome = Frontmost {
+            bundle_id: "com.google.Chrome".into(),
+            name: "Google Chrome".into(),
+        };
+        let preview_signals = Signals {
+            microphone_in_use: false,
+            camera_in_use: true,
+            active_mic_apps: Vec::new(),
+            frontmost: Some(chrome.clone()),
+        };
+
+        // Even with auto_start=true and can_auto_start=true, camera preview
+        // only shows the floating offer card and never triggers auto_start.
+        let mut watcher = Watcher::default();
+        watcher.restore(true, true, &[]);
+        let start = Instant::now();
+        assert_eq!(
+            watcher.observe_with(&preview_signals, false, true, start),
+            Observation::default()
+        );
+        let at_settle = watcher.observe_with(&preview_signals, false, true, start + PREVIEW_SETTLE);
+        assert!(at_settle.prompt_changed);
+        assert!(at_settle.auto_start.is_none());
+        assert_eq!(
+            watcher.prompt().and_then(|p| p.application.as_deref()),
+            Some("Google Chrome")
+        );
+
+        // Staying on the green-room screen past settle still never auto-starts.
+        for second in 2..=30 {
+            let obs = watcher.observe_with(
+                &preview_signals,
+                false,
+                true,
+                start + Duration::from_secs(second),
+            );
+            assert!(obs.auto_start.is_none());
+        }
+
+        // Joining the call unmuted (active call mic) settles and triggers auto_start,
+        // withdrawing the offer card.
+        let joined = Signals {
+            microphone_in_use: true,
+            camera_in_use: true,
+            active_mic_apps: vec![chrome.clone()],
+            frontmost: Some(chrome.clone()),
+        };
+        let t_join = start + Duration::from_secs(31);
+        assert!(watcher
+            .observe_with(&joined, false, true, t_join)
+            .auto_start
+            .is_none());
+        let started = watcher.observe_with(&joined, false, true, t_join + PREVIEW_SETTLE);
+        assert!(started.auto_start.is_some());
+        assert!(started.prompt_changed);
+        assert_eq!(watcher.prompt(), None);
+
+        // If the user dismissed the preview offer, joining later in the same spell
+        // does not auto-start.
+        let mut dismissed_watcher = Watcher::default();
+        dismissed_watcher.restore(true, true, &[]);
+        let t2 = start + Duration::from_secs(100);
+        dismissed_watcher.observe_with(&preview_signals, false, true, t2);
+        dismissed_watcher.observe_with(&preview_signals, false, true, t2 + PREVIEW_SETTLE);
+        let offer_id = dismissed_watcher.prompt().unwrap().id;
+        dismissed_watcher.answer(offer_id, Answer::Dismiss, t2 + PREVIEW_SETTLE);
+        dismissed_watcher.observe_with(&joined, false, true, t2 + Duration::from_secs(5));
+        assert!(dismissed_watcher
+            .observe_with(
+                &joined,
+                false,
+                true,
+                t2 + Duration::from_secs(5) + PREVIEW_SETTLE
+            )
+            .auto_start
+            .is_none());
+
+        // With offer disabled and auto_start=true, camera preview shows nothing
+        // and does not auto-start, yet joining with an active mic auto-starts.
+        let mut auto_only = Watcher::default();
+        auto_only.restore(false, true, &[]);
+        auto_only.observe_with(&preview_signals, false, true, t2);
+        assert_eq!(
+            auto_only.observe_with(&preview_signals, false, true, t2 + Duration::from_secs(10)),
+            Observation::default()
+        );
+        assert_eq!(auto_only.prompt(), None);
+        auto_only.observe_with(&joined, false, true, t2 + Duration::from_secs(11));
+        assert!(auto_only
+            .observe_with(
+                &joined,
+                false,
+                true,
+                t2 + Duration::from_secs(11) + PREVIEW_SETTLE
+            )
+            .auto_start
+            .is_some());
+    }
+
+    #[test]
+    fn call_end_detection_requires_known_call_and_debounces_brief_mute() {
+        let mut watcher = Watcher::default();
+        // Works even when both start-offer and auto-start are off.
+        watcher.restore(false, false, &[]);
+        let start = Instant::now();
+        let idle = Signals::default();
+
+        // Unknown / solo live session with no known call active never surfaces Call ended.
+        for second in 0..=60 {
+            let obs = watcher.observe_session(
+                &idle,
+                Some(1),
+                true,
+                false,
+                start + Duration::from_secs(second),
+            );
+            assert!(!obs.call_end_changed);
+            assert_eq!(watcher.call_end_prompt(), None);
+        }
+
+        // Known Zoom call becomes active during live session 1.
+        let zoom_active = Signals {
+            microphone_in_use: true,
+            camera_in_use: true,
+            active_mic_apps: vec![zoom().unwrap()],
+            frontmost: Some(Frontmost {
+                bundle_id: "com.example.notes".into(),
+                name: "Fictional Notes".into(),
+            }),
+        };
+        let t_call = start + Duration::from_secs(70);
+        let obs = watcher.observe_session(&zoom_active, Some(1), true, false, t_call);
+        assert!(!obs.call_end_changed);
+
+        // Brief mute + camera off shorter than CALL_END_GRACE resets cleanly on unmute.
+        let t_mute = t_call + Duration::from_secs(5);
+        assert!(
+            !watcher
+                .observe_session(&idle, Some(1), true, false, t_mute)
+                .call_end_changed
+        );
+        assert!(
+            !watcher
+                .observe_session(
+                    &idle,
+                    Some(1),
+                    true,
+                    false,
+                    t_mute + CALL_END_GRACE - Duration::from_secs(1)
+                )
+                .call_end_changed
+        );
+        assert!(
+            !watcher
+                .observe_session(
+                    &zoom_active,
+                    Some(1),
+                    true,
+                    false,
+                    t_mute + Duration::from_secs(19)
+                )
+                .call_end_changed
+        );
+        assert_eq!(watcher.call_end_prompt(), None);
+
+        // Full inactivity for CALL_END_GRACE surfaces CallEndPrompt.
+        let t_hangup = t_mute + Duration::from_secs(30);
+        assert!(
+            !watcher
+                .observe_session(&idle, Some(1), true, false, t_hangup)
+                .call_end_changed
+        );
+        assert!(
+            !watcher
+                .observe_session(
+                    &idle,
+                    Some(1),
+                    true,
+                    false,
+                    t_hangup + CALL_END_GRACE - Duration::from_millis(500)
+                )
+                .call_end_changed
+        );
+        let triggered =
+            watcher.observe_session(&idle, Some(1), true, false, t_hangup + CALL_END_GRACE);
+        assert!(triggered.call_end_changed);
+        assert!(watcher.call_end_prompt().is_some());
+
+        // Subsequent polls while still showing do not emit redundant changes.
+        assert!(
+            !watcher
+                .observe_session(
+                    &idle,
+                    Some(1),
+                    true,
+                    false,
+                    t_hangup + CALL_END_GRACE + Duration::from_secs(10)
+                )
+                .call_end_changed
+        );
+    }
+
+    #[test]
+    fn call_end_detection_excludes_talkqte_mic_and_waits_for_camera_and_mic_inactive() {
+        let mut watcher = on();
+        let start = Instant::now();
+        let chrome = Frontmost {
+            bundle_id: "com.google.Chrome".into(),
+            name: "Google Chrome".into(),
+        };
+
+        // Known browser active via camera only (muted mic) arms call-end detection.
+        let cam_only = Signals {
+            microphone_in_use: false,
+            camera_in_use: true,
+            active_mic_apps: Vec::new(),
+            frontmost: Some(chrome.clone()),
+        };
+        watcher.observe_session(&cam_only, Some(2), true, true, start);
+
+        // Camera still active (even while another app is frontmost) keeps call active.
+        let cam_other_app = Signals {
+            microphone_in_use: false,
+            camera_in_use: true,
+            active_mic_apps: Vec::new(),
+            frontmost: Some(Frontmost {
+                bundle_id: "com.example.editor".into(),
+                name: "Fictional Editor".into(),
+            }),
+        };
+        watcher.observe_session(
+            &cam_other_app,
+            Some(2),
+            true,
+            true,
+            start + Duration::from_secs(30),
+        );
+        assert_eq!(watcher.call_end_prompt(), None);
+
+        // Camera turns off while TalkQTE's own process holds the mic:
+        // classify_mic_processes excludes TalkQTE, so non-TalkQTE mic is inactive.
+        let self_pid = 7777;
+        let classified = classify_mic_processes(
+            &[ProcessAudioState {
+                pid: Some(self_pid),
+                bundle_id: Some("app.talkqte.desktop".into()),
+                name: Some("TalkQTE".into()),
+                running_input: true,
+            }],
+            self_pid,
+        );
+        assert_eq!(classified.other_mic_in_use, Some(false));
+        let only_talkqte = Signals {
+            microphone_in_use: false,
+            camera_in_use: false,
+            active_mic_apps: classified.active_mic_apps,
+            frontmost: Some(chrome),
+        };
+        let t_off = start + Duration::from_secs(35);
+        watcher.observe_session(&only_talkqte, Some(2), true, true, t_off);
+        assert_eq!(watcher.call_end_prompt(), None);
+        let ended =
+            watcher.observe_session(&only_talkqte, Some(2), true, true, t_off + CALL_END_GRACE);
+        assert!(ended.call_end_changed);
+        assert!(watcher.call_end_prompt().is_some());
+    }
+
+    #[test]
+    fn call_end_prompt_withdraws_on_resume_and_handles_answers_and_session_end() {
+        let mut watcher = on();
+        let start = Instant::now();
+        let idle = Signals::default();
+        let slack_call = Signals {
+            microphone_in_use: true,
+            camera_in_use: false,
+            active_mic_apps: vec![Frontmost {
+                bundle_id: "com.tinyspeck.slackmacgap".into(),
+                name: "Slack".into(),
+            }],
+            frontmost: None,
+        };
+
+        watcher.observe_session(&slack_call, Some(3), true, true, start);
+        let t_end = start + Duration::from_secs(5);
+        watcher.observe_session(&idle, Some(3), true, true, t_end);
+        assert!(
+            watcher
+                .observe_session(&idle, Some(3), true, true, t_end + CALL_END_GRACE)
+                .call_end_changed
+        );
+        let first_id = watcher.call_end_prompt().unwrap().id;
+
+        // If the call resumes while Call ended is visible, the prompt withdraws.
+        let t_resume = t_end + CALL_END_GRACE + Duration::from_secs(2);
+        let resumed = watcher.observe_session(&slack_call, Some(3), true, true, t_resume);
+        assert!(resumed.call_end_changed);
+        assert_eq!(watcher.call_end_prompt(), None);
+
+        // Stale answer to the withdrawn prompt is ignored.
+        assert_eq!(
+            watcher.answer_call_end(first_id, CallEndAnswer::StopAndSave),
+            CallEndOutcome::default()
+        );
+
+        // Call ends again -> surfaces a new prompt ID.
+        let t_end2 = t_resume + Duration::from_secs(4);
+        watcher.observe_session(&idle, Some(3), true, true, t_end2);
+        watcher.observe_session(&idle, Some(3), true, true, t_end2 + CALL_END_GRACE);
+        let second_id = watcher.call_end_prompt().unwrap().id;
+        assert!(second_id > first_id);
+
+        // Keep recording clears the prompt and stays quiet while still inactive
+        // or across a brief (< PREVIEW_SETTLE) blip.
+        assert_eq!(
+            watcher.answer_call_end(second_id, CallEndAnswer::KeepRecording),
+            CallEndOutcome {
+                changed: true,
+                stop_and_save: false,
+            }
+        );
+        assert_eq!(watcher.call_end_prompt(), None);
+        let t_keep = t_end2 + CALL_END_GRACE + Duration::from_secs(1);
+        watcher.observe_session(&idle, Some(3), true, true, t_keep + CALL_END_GRACE * 2);
+        assert_eq!(watcher.call_end_prompt(), None);
+        // Sub-settle blip does not re-arm.
+        watcher.observe_session(
+            &slack_call,
+            Some(3),
+            true,
+            true,
+            t_keep + Duration::from_secs(40),
+        );
+        watcher.observe_session(&idle, Some(3), true, true, t_keep + Duration::from_secs(41));
+        watcher.observe_session(
+            &idle,
+            Some(3),
+            true,
+            true,
+            t_keep + Duration::from_secs(41) + CALL_END_GRACE,
+        );
+        assert_eq!(watcher.call_end_prompt(), None);
+
+        // A real second call (>= PREVIEW_SETTLE) re-arms and prompts on end.
+        let t_call2 = t_keep + Duration::from_secs(70);
+        watcher.observe_session(&slack_call, Some(3), true, true, t_call2);
+        watcher.observe_session(&slack_call, Some(3), true, true, t_call2 + PREVIEW_SETTLE);
+        let t_end3 = t_call2 + Duration::from_secs(10);
+        watcher.observe_session(&idle, Some(3), true, true, t_end3);
+        watcher.observe_session(&idle, Some(3), true, true, t_end3 + CALL_END_GRACE);
+        let third_id = watcher.call_end_prompt().unwrap().id;
+        assert!(third_id > second_id);
+
+        // Stop & save clears the prompt and requests stop_and_save.
+        assert_eq!(
+            watcher.answer_call_end(third_id, CallEndAnswer::StopAndSave),
+            CallEndOutcome {
+                changed: true,
+                stop_and_save: true,
+            }
+        );
+        assert_eq!(watcher.call_end_prompt(), None);
+
+        // Ending the live session externally clears any visible call-end prompt.
+        let t_s4 = t_end3 + Duration::from_secs(60);
+        watcher.observe_session(&slack_call, Some(4), true, true, t_s4);
+        watcher.observe_session(&idle, Some(4), true, true, t_s4 + Duration::from_secs(1));
+        watcher.observe_session(
+            &idle,
+            Some(4),
+            true,
+            true,
+            t_s4 + Duration::from_secs(1) + CALL_END_GRACE,
+        );
+        assert!(watcher.call_end_prompt().is_some());
+        let stopped =
+            watcher.observe_session(&idle, None, false, true, t_s4 + Duration::from_secs(30));
+        assert!(stopped.call_end_changed);
+        assert_eq!(watcher.call_end_prompt(), None);
     }
 }
