@@ -37,7 +37,7 @@ test.beforeEach(async ({ page }) => {
   await standIn(page, '/?window=cue');
   await expect(
     page.getByText(
-      'Start a live session or the microphone check in your notebook.',
+      'Start a live session in your notebook, or check your microphone in Settings.',
     ),
   ).toBeVisible();
   await expect(page.getByRole('button')).toHaveCount(0);
