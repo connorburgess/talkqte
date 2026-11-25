@@ -267,6 +267,7 @@ test('the microphone panel claims no system audio only when no source may be cap
   page,
 }) => {
   const { microphone } = await notebook(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const plain =
     'Shows whether your microphone picks up sound. Nothing is recorded or transcribed, and no system audio is used.';
   await expect(microphone).toContainText(plain);
@@ -278,7 +279,7 @@ test('the microphone panel claims no system audio only when no source may be cap
     } satisfies Partial<ProcessingSnapshot>);
     await expect(microphone, state).not.toContainText('system audio');
     await expect(microphone, state).toContainText(
-      'Shows whether your microphone picks up sound. Nothing from the microphone is recorded or transcribed. Audio from a selected application may still be captured; see Cue processing below.',
+      'Shows whether your microphone picks up sound. Nothing from the microphone is recorded or transcribed. Audio from a selected application may still be captured; see Cue processing above.',
     );
   }
   await page.evaluate((value) => window.captureTest.send(value), {

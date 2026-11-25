@@ -75,6 +75,7 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
   await stop(page).click();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(stop(page)).toHaveCount(0);
 });
 
 test('hosted review names exact selected sources, stays optional, and preserves review across Settings', async ({
@@ -157,7 +158,8 @@ test('pause and disable keep capture on; Stop stays independent of a pending per
     .click();
   await expect(stop(page)).toBeEnabled();
   await stop(page).click();
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
+  await expect(stop(page)).toHaveCount(0);
   await page.evaluate(() =>
     window.permissionTest.release('set_processing_paused'),
   );
@@ -269,7 +271,8 @@ test('Stop during pending approval cannot enable processing after capture ends',
     .getByRole('button', { name: 'Enable for this session' })
     .click();
   await stop(page).click();
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
+  await expect(stop(page)).toHaveCount(0);
   await page.evaluate(() =>
     window.permissionTest.release('approve_processing_scope'),
   );

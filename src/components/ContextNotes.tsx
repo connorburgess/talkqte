@@ -306,61 +306,30 @@ export function ContextNotes({
               processing review and approval.
             </span>
           </div>
-          <div className="context-actions">
-            {items.length > 0 && (
+          <div className="context-controls">
+            <div className="context-actions">
               <button
-                className="text-button"
-                disabled={busy || working}
-                onClick={(event) => {
-                  returnAddAfterRemove.current = focusBeforeRemoval(
-                    event.currentTarget,
-                  );
-                  void run(async () => {
-                    const removed = await bridge.removeAllContext();
-                    onNotice(
-                      removed === 1
-                        ? '1 imported note removed.'
-                        : `${removed} imported notes removed.`,
-                    );
-                  });
-                }}
-              >
-                Remove all
-              </button>
-            )}
-            <button
-              ref={addButton}
-              className="secondary-button"
-              disabled={busy || working}
-              onClick={pick}
-            >
-              <FileText size={15} />
-              Add notes from a file
-            </button>
-            <button
-              className="text-button"
-              disabled={busy || working}
-              onClick={() => {
-                setFilePath('');
-                setFilePathOpen(true);
-              }}
-            >
-              Use a local file path
-            </button>
-            {bridge.desktop && (
-              <button
-                ref={historyButton}
+                ref={addButton}
                 className="secondary-button"
                 disabled={busy || working}
-                onClick={chooseHistory}
+                onClick={pick}
               >
-                <History size={15} />
-                Choose kept meetings
+                <FileText size={15} />
+                Add notes from a file
               </button>
-            )}
-            {bridge.desktop &&
-              (granola.connected ? (
-                <>
+              {bridge.desktop && (
+                <button
+                  ref={historyButton}
+                  className="secondary-button"
+                  disabled={busy || working}
+                  onClick={chooseHistory}
+                >
+                  <History size={15} />
+                  Choose kept meetings
+                </button>
+              )}
+              {bridge.desktop &&
+                (granola.connected ? (
                   <button
                     className="secondary-button"
                     disabled={busy || working}
@@ -372,29 +341,65 @@ export function ContextNotes({
                       ? 'Loading Granola notes…'
                       : 'Choose Granola notes'}
                   </button>
+                ) : !signingIn ? (
                   <button
-                    className="text-button"
-                    disabled={busy || (working && !listing)}
-                    onClick={disconnectGranola}
+                    ref={connectButton}
+                    className="secondary-button"
+                    disabled={busy || working}
+                    onClick={connectGranola}
                   >
-                    Disconnect Granola
+                    <Link2 size={15} />
+                    Connect Granola
                   </button>
-                </>
-              ) : signingIn ? (
+                ) : null)}
+            </div>
+            <div className="context-secondary-actions">
+              <button
+                className="text-button"
+                disabled={busy || working}
+                onClick={() => {
+                  setFilePath('');
+                  setFilePathOpen(true);
+                }}
+              >
+                Use a local file path
+              </button>
+              {bridge.desktop && granola.connected && (
+                <button
+                  className="text-button"
+                  disabled={busy || (working && !listing)}
+                  onClick={disconnectGranola}
+                >
+                  Disconnect Granola
+                </button>
+              )}
+              {bridge.desktop && !granola.connected && signingIn && (
                 <button className="text-button" onClick={cancelSignIn}>
                   Cancel sign-in
                 </button>
-              ) : (
+              )}
+              {items.length > 0 && (
                 <button
-                  ref={connectButton}
-                  className="secondary-button"
+                  className="text-button"
                   disabled={busy || working}
-                  onClick={connectGranola}
+                  onClick={(event) => {
+                    returnAddAfterRemove.current = focusBeforeRemoval(
+                      event.currentTarget,
+                    );
+                    void run(async () => {
+                      const removed = await bridge.removeAllContext();
+                      onNotice(
+                        removed === 1
+                          ? '1 imported note removed.'
+                          : `${removed} imported notes removed.`,
+                      );
+                    });
+                  }}
                 >
-                  <Link2 size={15} />
-                  Connect Granola
+                  Remove all
                 </button>
-              ))}
+              )}
+            </div>
           </div>
         </div>
         {filePathOpen && (
