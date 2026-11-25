@@ -1,9 +1,10 @@
 //! In-memory voice dictation for the notebook's Notes and Focus fields.
 //!
 //! Captures microphone audio in memory (never written to disk), resamples to
-//! 16 kHz mono via `audio_tap`, streams to Deepgram (`mip_opt_out=true`) with
-//! the person's stored Keychain key (or development token file when selected),
-//! and emits finalized text back to the main notebook window only.
+//! 16 kHz mono via `audio_tap`, streams to the selected transcription provider
+//! (Deepgram with `mip_opt_out=true`, or ElevenLabs Scribe v2 Realtime) with
+//! the person's stored Keychain key (or Deepgram development token file when
+//! selected), and emits finalized text back to the main notebook window only.
 //!
 //! Never runs concurrently with a live session or the standalone microphone
 //! monitor, and enforces a 2-minute safety cap per dictation.
@@ -13,10 +14,10 @@ use crate::{
     microphone::{self, CaptureStream, Failure, Meter},
     transcription::{
         cloud::{
-            self, Budget, Language, ReadinessFailure, Source, StreamingTranscriber, SttEvent,
-            SttFailure,
+            self, Budget, Language, Provider as SttProvider, ReadinessFailure, Source,
+            StreamingTranscriber, SttEvent, SttFailure,
         },
-        deepgram,
+        deepgram, elevenlabs,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -143,6 +144,7 @@ struct RunnerHandle {
 struct State {
     snapshot: Snapshot,
     generation: u64,
+    provider: SttProvider,
     capture: Option<ActiveCapture>,
     runner: Option<RunnerHandle>,
     cleanup_pending: bool,
@@ -222,7 +224,16 @@ impl Controller {
         })
     }
 
+    #[cfg(test)]
     fn begin_start(&self, target: Target) -> Result<(u64, Snapshot), String> {
+        self.begin_start_for(target, SttProvider::Deepgram)
+    }
+
+    fn begin_start_for(
+        &self,
+        target: Target,
+        provider: SttProvider,
+    ) -> Result<(u64, Snapshot), String> {
         let mut state = self
             .state
             .lock()
@@ -239,6 +250,7 @@ impl Controller {
             return Err("Dictation is already running. Stop it first.".into());
         }
         state.generation += 1;
+        state.provider = provider;
         state.update(
             Status::Starting,
             Some(target),
@@ -346,10 +358,11 @@ impl Controller {
                 }
                 state.cleanup_pending = true;
                 state.generation += 1;
+                let provider = state.provider;
                 state.update(
                     Status::Error,
                     Some(target),
-                    Some(stt_failure_message(failure)),
+                    Some(stt_failure_message(provider, failure)),
                 );
                 self.sync_active(&state);
                 return Some(StopCleanup {
@@ -497,7 +510,12 @@ impl Controller {
                         );
                     }
                     FinishOutcome::Failed(failure) => {
-                        state.update(Status::Error, target, Some(stt_failure_message(failure)));
+                        let provider = state.provider;
+                        state.update(
+                            Status::Error,
+                            target,
+                            Some(stt_failure_message(provider, failure)),
+                        );
                     }
                 }
                 Some(state.snapshot.clone())
@@ -534,7 +552,12 @@ impl Controller {
             state.runner.take();
             state.generation += 1;
             state.cleanup_pending = retired.is_some();
-            state.update(Status::Error, target, Some(stt_failure_message(failure)));
+            let provider = state.provider;
+            state.update(
+                Status::Error,
+                target,
+                Some(stt_failure_message(provider, failure)),
+            );
             self.sync_active(&state);
             (state.snapshot.clone(), retired)
         };
@@ -561,7 +584,12 @@ impl Controller {
             state.generation += 1;
             match outcome {
                 FinishOutcome::Failed(failure) if failure != SttFailure::CapReached => {
-                    state.update(Status::Error, target, Some(stt_failure_message(failure)));
+                    let provider = state.provider;
+                    state.update(
+                        Status::Error,
+                        target,
+                        Some(stt_failure_message(provider, failure)),
+                    );
                 }
                 _ => {
                     state.update(
@@ -811,22 +839,39 @@ fn spawn_cleanup(controller: Controller, sink: Arc<dyn Sink>, cleanup: StopClean
     });
 }
 
-fn readiness_error(failure: ReadinessFailure) -> &'static str {
-    match failure {
-        ReadinessFailure::NoKey => "Add your Deepgram API key in Settings to dictate.",
-        ReadinessFailure::KeyRejected => {
+fn readiness_error(provider: SttProvider, failure: ReadinessFailure) -> &'static str {
+    match (provider, failure) {
+        (SttProvider::Deepgram, ReadinessFailure::NoKey) => {
+            "Add your Deepgram API key in Settings to dictate."
+        }
+        (SttProvider::ElevenLabs, ReadinessFailure::NoKey) => {
+            "Add your ElevenLabs API key in Settings to dictate."
+        }
+        (SttProvider::Deepgram, ReadinessFailure::KeyRejected) => {
             "Deepgram rejected your API key. Replace it in Settings to dictate."
         }
-        ReadinessFailure::KeyUnreadable if cfg!(windows) => {
+        (SttProvider::ElevenLabs, ReadinessFailure::KeyRejected) => {
+            "ElevenLabs rejected your API key. Replace it in Settings to dictate."
+        }
+        (SttProvider::Deepgram, ReadinessFailure::KeyUnreadable) if cfg!(windows) => {
             "Your Deepgram key could not be read from Windows Credential Manager. Check it in Settings."
         }
-        ReadinessFailure::KeyUnreadable if cfg!(target_os = "linux") => {
+        (SttProvider::ElevenLabs, ReadinessFailure::KeyUnreadable) if cfg!(windows) => {
+            "Your ElevenLabs key could not be read from Windows Credential Manager. Check it in Settings."
+        }
+        (SttProvider::Deepgram, ReadinessFailure::KeyUnreadable) if cfg!(target_os = "linux") => {
             "Your Deepgram key could not be read from the keyring. Check it in Settings."
         }
-        ReadinessFailure::KeyUnreadable => {
+        (SttProvider::ElevenLabs, ReadinessFailure::KeyUnreadable) if cfg!(target_os = "linux") => {
+            "Your ElevenLabs key could not be read from the keyring. Check it in Settings."
+        }
+        (SttProvider::Deepgram, ReadinessFailure::KeyUnreadable) => {
             "Your Deepgram key could not be read from the Keychain. Check it in Settings."
         }
-        ReadinessFailure::Settings | ReadinessFailure::TokenMetadata => {
+        (SttProvider::ElevenLabs, ReadinessFailure::KeyUnreadable) => {
+            "Your ElevenLabs key could not be read from the Keychain. Check it in Settings."
+        }
+        (_, ReadinessFailure::Settings | ReadinessFailure::TokenMetadata) => {
             "The cloud transcription settings are not usable."
         }
     }
@@ -844,45 +889,87 @@ fn capture_failure_message(failure: Failure) -> &'static str {
     }
 }
 
-fn stt_failure_message(failure: SttFailure) -> &'static str {
-    match failure {
-        SttFailure::Auth => "Deepgram refused your API key. Replace it in Settings to dictate.",
-        SttFailure::KeyUnavailable if cfg!(windows) => {
+fn stt_failure_message(provider: SttProvider, failure: SttFailure) -> &'static str {
+    match (provider, failure) {
+        (SttProvider::Deepgram, SttFailure::Auth) => {
+            "Deepgram refused your API key. Replace it in Settings to dictate."
+        }
+        (SttProvider::ElevenLabs, SttFailure::Auth) => {
+            "ElevenLabs refused your API key. Replace it in Settings to dictate."
+        }
+        (SttProvider::Deepgram, SttFailure::KeyUnavailable) if cfg!(windows) => {
             "Your Deepgram key could not be read from Windows Credential Manager. Check it in Settings."
         }
-        SttFailure::KeyUnavailable if cfg!(target_os = "linux") => {
+        (SttProvider::ElevenLabs, SttFailure::KeyUnavailable) if cfg!(windows) => {
+            "Your ElevenLabs key could not be read from Windows Credential Manager. Check it in Settings."
+        }
+        (SttProvider::Deepgram, SttFailure::KeyUnavailable) if cfg!(target_os = "linux") => {
             "Your Deepgram key could not be read from the keyring. Check it in Settings."
         }
-        SttFailure::KeyUnavailable => {
+        (SttProvider::ElevenLabs, SttFailure::KeyUnavailable) if cfg!(target_os = "linux") => {
+            "Your ElevenLabs key could not be read from the keyring. Check it in Settings."
+        }
+        (SttProvider::Deepgram, SttFailure::KeyUnavailable) => {
             "Your Deepgram key could not be read from the Keychain. Check it in Settings."
         }
-        SttFailure::Quota => {
+        (SttProvider::ElevenLabs, SttFailure::KeyUnavailable) => {
+            "Your ElevenLabs key could not be read from the Keychain. Check it in Settings."
+        }
+        (SttProvider::Deepgram, SttFailure::Quota) => {
             "Your Deepgram account cannot pay for more audio. Check credit in your Deepgram account."
         }
-        SttFailure::RateLimited => {
+        (SttProvider::ElevenLabs, SttFailure::Quota) => {
+            "Your ElevenLabs account cannot pay for more audio. Check quota in your ElevenLabs account."
+        }
+        (SttProvider::Deepgram, SttFailure::RateLimited) => {
             "Deepgram is limiting requests. Wait a minute and try again."
         }
-        SttFailure::CapReached => "Dictation stopped at the 2-minute limit.",
-        SttFailure::Network => {
+        (SttProvider::ElevenLabs, SttFailure::RateLimited) => {
+            "ElevenLabs is limiting requests. Wait a minute and try again."
+        }
+        (_, SttFailure::CapReached) => "Dictation stopped at the 2-minute limit.",
+        (SttProvider::Deepgram, SttFailure::Network) => {
             "The connection to Deepgram failed or was lost. Check your internet connection and try again."
         }
-        SttFailure::Unavailable => "Deepgram is having a problem on its side. Try again in a moment.",
-        SttFailure::Protocol | SttFailure::Closed => {
+        (SttProvider::ElevenLabs, SttFailure::Network) => {
+            "The connection to ElevenLabs failed or was lost. Check your internet connection and try again."
+        }
+        (SttProvider::Deepgram, SttFailure::Unavailable) => {
+            "Deepgram is having a problem on its side. Try again in a moment."
+        }
+        (SttProvider::ElevenLabs, SttFailure::Unavailable) => {
+            "ElevenLabs is having a problem on its side. Try again in a moment."
+        }
+        (SttProvider::Deepgram, SttFailure::Protocol | SttFailure::Closed) => {
             "Dictation stopped because Deepgram closed the connection. Try again."
         }
-        SttFailure::Settings => "The cloud transcription settings are not usable.",
-        SttFailure::Stalled => "The connection to Deepgram stopped responding. Try again.",
-        SttFailure::Withdrawn | SttFailure::LabEnded => "Dictation stopped.",
+        (SttProvider::ElevenLabs, SttFailure::Protocol | SttFailure::Closed) => {
+            "Dictation stopped because ElevenLabs closed the connection. Try again."
+        }
+        (_, SttFailure::Settings) => "The cloud transcription settings are not usable.",
+        (SttProvider::Deepgram, SttFailure::Stalled) => {
+            "The connection to Deepgram stopped responding. Try again."
+        }
+        (SttProvider::ElevenLabs, SttFailure::Stalled) => {
+            "The connection to ElevenLabs stopped responding. Try again."
+        }
+        (_, SttFailure::Withdrawn | SttFailure::LabEnded) => "Dictation stopped.",
     }
 }
 
-fn default_opener(language: Language) -> Result<TranscriberOpener, String> {
-    let source = cloud::source().map_err(|failure| readiness_error(failure).to_string())?;
+fn default_opener(language: Language) -> Result<(SttProvider, TranscriberOpener), String> {
+    let provider = cloud::active_provider();
+    let source =
+        cloud::source().map_err(|failure| readiness_error(provider, failure).to_string())?;
     Ok(match source {
-        Source::Dev(settings) => deepgram::opener(settings),
-        Source::OwnKey => {
+        Source::Dev(settings) => (SttProvider::Deepgram, deepgram::opener(settings)),
+        Source::OwnKey(SttProvider::Deepgram) => {
             let (opener, _) = deepgram::key_streams(Budget::new(MAX_DURATION), language);
-            opener
+            (SttProvider::Deepgram, opener)
+        }
+        Source::OwnKey(SttProvider::ElevenLabs) => {
+            let (opener, _) = elevenlabs::key_streams(Budget::new(MAX_DURATION), language);
+            (SttProvider::ElevenLabs, opener)
         }
     })
 }
@@ -928,11 +1015,11 @@ pub async fn start_note_dictation<R: tauri::Runtime>(
     }
     check_may_start(&app)?;
     let language = cloud::language();
-    let opener = default_opener(language)?;
+    let (provider, opener) = default_opener(language)?;
     let controller = state.inner().clone();
     let preparer = controller.clone();
     let (generation, snapshot) =
-        tauri::async_runtime::spawn_blocking(move || preparer.begin_start(target))
+        tauri::async_runtime::spawn_blocking(move || preparer.begin_start_for(target, provider))
             .await
             .map_err(|_| "Could not start dictation.")??;
     let sink: Arc<dyn Sink> = Arc::new(TauriSink(app.clone()));
@@ -1441,9 +1528,26 @@ mod tests {
 
     #[test]
     fn readiness_errors_and_capture_stall_report_plain_messages() {
-        assert!(readiness_error(ReadinessFailure::NoKey).contains("Deepgram API key"));
-        assert!(readiness_error(ReadinessFailure::KeyRejected).contains("Deepgram rejected"));
-        assert!(readiness_error(ReadinessFailure::Settings).contains("not usable"));
+        assert!(
+            readiness_error(SttProvider::Deepgram, ReadinessFailure::NoKey)
+                .contains("Deepgram API key")
+        );
+        assert!(
+            readiness_error(SttProvider::ElevenLabs, ReadinessFailure::NoKey)
+                .contains("ElevenLabs API key")
+        );
+        assert!(
+            readiness_error(SttProvider::Deepgram, ReadinessFailure::KeyRejected)
+                .contains("Deepgram rejected")
+        );
+        assert!(
+            readiness_error(SttProvider::ElevenLabs, ReadinessFailure::KeyRejected)
+                .contains("ElevenLabs rejected")
+        );
+        assert!(
+            readiness_error(SttProvider::Deepgram, ReadinessFailure::Settings)
+                .contains("not usable")
+        );
 
         let controller = Controller::default();
         let sink = Arc::new(FakeSink::default());

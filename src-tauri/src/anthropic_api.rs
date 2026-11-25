@@ -20,8 +20,6 @@
 //! text reaches a log or the notebook: failures are fixed codes.
 
 use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request};
-#[cfg(test)]
-use crate::cue_evaluator::{EvaluationLifecycle, Settlement};
 use crate::provider_keys::{KeyError, Provider, Secret};
 use serde_json::{json, Value};
 use std::{
@@ -837,34 +835,17 @@ pub(crate) fn read_bounded_stream_for_id(
     (outcome, usage, complete)
 }
 
-/// The lab's settlement rules without a broker: new speech coalesces, a
-/// reply to a transcript that has only grown applies, and a deadline, a
-/// refusal or a reply at its output bound retires only that request. Unlike
-/// the lab run, Pause and Dismiss cancel the request in flight without
-/// ending cues for the session, and Resume continues.
-#[cfg(test)]
-struct InApp;
-
-#[cfg(test)]
-impl EvaluationLifecycle for InApp {
-    fn terminal(&self) -> Option<Failure> {
-        None
-    }
-    fn cancel(&self) {}
-    fn settle(&self, _: &Request, _: Settlement) -> Result<(), Failure> {
-        Ok(())
-    }
-    fn ends_run_on_control(&self) -> bool {
-        false
-    }
-}
-
 /// What the review shows before anything is sent. Kept short: the
-/// review's whole policy, with the Deepgram sentence, is bounded.
+/// review's whole policy, with the transcription sentence, is bounded.
 #[cfg(test)]
 fn data_policy(model: Model) -> String {
+    data_policy_for(model, "Deepgram")
+}
+
+#[cfg(test)]
+fn data_policy_for(model: Model, audio_provider: &str) -> String {
     format!(
-        "Sends to the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account per token: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. At most {REQUEST_CAP} requests and an estimated ${:.2} per session (an estimate, not your bill; there is no daily cap). Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both. Model {}. It never sends Anthropic audio, the full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under your API account's terms (https://www.anthropic.com/legal/commercial-terms); lines already sent cannot be recalled. If it fails, no other service is used.",
+        "Sends to the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account per token: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. At most {REQUEST_CAP} requests and an estimated ${:.2} per session (an estimate, not your bill; there is no daily cap). Pause cues stops these requests but not the audio to {audio_provider}; Off and Stop end both. Model {}. It never sends Anthropic audio, the full transcript, your notes, imported notes or focus lines. Anthropic handles what is sent under your API account's terms (https://www.anthropic.com/legal/commercial-terms); lines already sent cannot be recalled. If it fails, no other service is used.",
         SPEND_CAP_MICRO_USD as f64 / 1_000_000.0,
         model.id
     )
@@ -927,10 +908,32 @@ fn registered<T: Transport>(
     model: Model,
     transcription: Option<String>,
 ) -> crate::engine::Engine {
+    registered_with(
+        adapter,
+        model,
+        transcription,
+        Some(
+            crate::transcription::cloud::Provider::Deepgram
+                .destination()
+                .into(),
+        ),
+        "Deepgram",
+    )
+}
+
+#[cfg(test)]
+fn registered_with<T: Transport>(
+    adapter: AnthropicApi<T>,
+    model: Model,
+    transcription: Option<String>,
+    audio_destination: Option<String>,
+    audio_provider: &str,
+) -> crate::engine::Engine {
     use crate::engine::{ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure};
+    let base_policy = data_policy_for(model, audio_provider);
     let policy = match &transcription {
-        Some(transcription) => format!("{} {transcription}", data_policy(model)),
-        None => data_policy(model),
+        Some(transcription) => format!("{base_policy} {transcription}"),
+        None => base_policy,
     };
     let config = ProcessorConfiguration::new(
         PROCESSOR_ID.into(),
@@ -946,16 +949,14 @@ fn registered<T: Transport>(
     .expect("the fixed configuration is valid")
     .with_effort(EFFORT.into())
     .without_notes();
-    let config = match transcription {
-        Some(_) => config.with_audio_destination(
-            "Deepgram (US), for transcription of the session's audio".into(),
-        ),
-        None => config,
+    let config = match (transcription, audio_destination) {
+        (Some(_), Some(destination)) => config.with_audio_destination(destination),
+        _ => config,
     };
     let worker = crate::cue_evaluator::Worker::start(adapter, DEADLINE)
         .expect("the deadline is within the worker's ceiling");
     let mut engine = crate::engine::Engine::live_with_evaluator(worker, config)
-        .with_lab_lifecycle(Arc::new(InApp))
+        .with_lab_lifecycle(Arc::new(crate::llm_provider::InApp))
         .with_min_gap_ms(MIN_GAP_MS);
     engine.set_model_call_limit(REQUEST_CAP);
     engine

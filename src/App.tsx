@@ -57,7 +57,13 @@ import {
   type DictationTarget,
 } from './lib/dictation';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { keysStatus, watchKeys, type KeysStatus } from './lib/providerKeys';
+import {
+  keysStatus,
+  transcriptionProvider,
+  watchKeys,
+  type KeysStatus,
+  type TranscriptionProvider,
+} from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
@@ -912,6 +918,8 @@ function Notebook() {
   const [setupDismissed, setSetupDismissed] = useState(false);
   const [keysAvailable, setKeysAvailable] = useState(false);
   const [initialKeys, setInitialKeys] = useState<KeysStatus | null>(null);
+  const [sttProvider, setSttProvider] =
+    useState<TranscriptionProvider>('deepgram');
   const [onboardingMode, setOnboardingMode] = useState<
     'idle' | 'auto' | 'manual' | 'skipped' | 'finished'
   >('idle');
@@ -1028,13 +1036,14 @@ function Notebook() {
       return;
     if (onboardingChecked.current) return;
     onboardingChecked.current = true;
-    // Auto-open once per launch only when both keys are notSet (an unreadable
+    // Auto-open once per launch only when all keys are notSet (an unreadable
     // key is not missing), live transcription is unavailable for that reason
     // (a development or lab launch with its own credentials stays on the
     // notebook) and no session is active.
     if (
       !liveStatus.available &&
       initialKeys.deepgram.state === 'notSet' &&
+      (!initialKeys.elevenlabs || initialKeys.elevenlabs.state === 'notSet') &&
       initialKeys.anthropic.state === 'notSet' &&
       (!initialKeys.openai || initialKeys.openai.state === 'notSet') &&
       (!initialKeys.gemini || initialKeys.gemini.state === 'notSet') &&
@@ -1175,7 +1184,7 @@ function Notebook() {
       confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
-  const refreshLiveStatus = () => {
+  const refreshLiveStatus = useCallback(() => {
     bridge
       .liveStatus()
       .then((status) => {
@@ -1187,7 +1196,13 @@ function Notebook() {
           reason: 'Live transcription status is unavailable.',
         });
       });
-  };
+    if (bridge.desktop) {
+      transcriptionProvider().then(
+        (provider) => setSttProvider(provider),
+        () => {},
+      );
+    }
+  }, []);
   useEffect(() => {
     let current = true;
     setLiveStatus(null);
@@ -1204,17 +1219,25 @@ function Notebook() {
           });
       });
     let stopKeys: (() => void) | undefined;
-    watchKeys(() => {
-      if (current) refreshLiveStatus();
-    }).then(
-      (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
-      () => {},
-    );
+    if (bridge.desktop) {
+      transcriptionProvider().then(
+        (provider) => {
+          if (current) setSttProvider(provider);
+        },
+        () => {},
+      );
+      watchKeys(() => {
+        if (current) refreshLiveStatus();
+      }).then(
+        (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
+        () => {},
+      );
+    }
     return () => {
       current = false;
       stopKeys?.();
     };
-  }, [settingsEpoch]);
+  }, [refreshLiveStatus, settingsEpoch]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -1306,26 +1329,29 @@ function Notebook() {
         visibleHint: false,
       };
     }
-    const dgState = initialKeys?.deepgram.state;
-    if (dgState === 'rejected') {
+    const sttLabel = sttProvider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
+    const sttKeyState =
+      sttProvider === 'elevenlabs'
+        ? initialKeys?.elevenlabs?.state
+        : initialKeys?.deepgram.state;
+    if (sttKeyState === 'rejected') {
       return {
-        reason:
-          'Deepgram rejected your API key. Replace it in Settings to dictate.',
+        reason: `${sttLabel} rejected your API key. Replace it in Settings to dictate.`,
         visibleHint: true,
       };
     }
-    if (dgState === 'unreadable') {
+    if (sttKeyState === 'unreadable') {
       return {
-        reason: 'Your Deepgram key could not be read. Check it in Settings.',
+        reason: `Your ${sttLabel} key could not be read. Check it in Settings.`,
         visibleHint: true,
       };
     }
     if (
-      (dgState === 'notSet' || (!initialKeys && keysAvailable)) &&
+      (sttKeyState === 'notSet' || (!initialKeys && keysAvailable)) &&
       !liveStatus?.transcription
     ) {
       return {
-        reason: 'Add your Deepgram API key in Settings to dictate.',
+        reason: `Add your ${sttLabel} API key in Settings to dictate.`,
         visibleHint: true,
       };
     }
@@ -1761,6 +1787,9 @@ function Notebook() {
             }
           >
             <ProcessingControl
+              transcriptionProvider={
+                state?.transcription?.provider ?? liveStatus?.transcription
+              }
               status={{
                 snapshot: capture.state,
                 failed: capture.statusError,
@@ -2842,11 +2871,13 @@ function Notebook() {
                   Start live session in the notebook to get questions from what
                   your microphone hears and, on a Mac, from one application you
                   choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: the session’s audio is sent to
-                  Deepgram with your key once you enable cue processing for that
-                  session. Audio is not recorded by TalkQTE. The transcript
-                  stays in memory until you start another session or close the
-                  app, unless you choose to keep the meeting and export it.
+                  transcribe on this device: the session’s audio is sent to{' '}
+                  {liveStatus?.transcription ??
+                    'your chosen provider (Deepgram or ElevenLabs)'}{' '}
+                  with your key once you enable cue processing for that session.
+                  Audio is not recorded by TalkQTE. The transcript stays in
+                  memory until you start another session or close the app,
+                  unless you choose to keep the meeting and export it.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus

@@ -481,3 +481,50 @@ test('a continued cloud session discloses reconnect loss until the session stops
   );
   await expect(session(page)).not.toContainText('reconnected');
 });
+
+test('ElevenLabs transcription names ElevenLabs in active, stop, and failure messages', async ({
+  page,
+}) => {
+  await standIn(page, '/?live');
+  await startLive(page);
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+  await publish({
+    transcription: { provider: 'ElevenLabs' },
+  });
+  await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
+    'Your microphone is sent to ElevenLabs for transcription once you enable cue processing for this session; until then nothing is transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'ElevenLabs', reconnects: 1, lostMs: 1_500 },
+  });
+  await expect(session(page)).toContainText(
+    'Transcription by ElevenLabs reconnected once after a connection problem. About 2 s of speech was not transcribed.',
+  );
+  await publish({
+    transcription: { provider: 'ElevenLabs', droppedAudio: true },
+  });
+  await expect(session(page)).toContainText(
+    'Some audio was not sent to ElevenLabs because the connection fell behind; lines from it are missing.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: {
+      provider: 'ElevenLabs',
+      stopped: 'key_unavailable',
+    },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by ElevenLabs stopped: your ElevenLabs key could not be read from the Keychain, or it was removed. Check it in Settings. The live session ended; nothing fell back to another transcription service.',
+  );
+  await publish({
+    status: 'ended',
+    transcription: {
+      provider: 'ElevenLabs',
+      stopped: 'quota',
+    },
+  });
+  await expect(session(page).getByRole('alert')).toHaveText(
+    'Transcription by ElevenLabs stopped: the account cannot pay for more audio. Add credit in your ElevenLabs account. The live session ended; nothing fell back to another transcription service.',
+  );
+});

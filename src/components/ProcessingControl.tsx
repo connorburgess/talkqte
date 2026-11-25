@@ -173,12 +173,14 @@ function conversationLabel(scope: ProcessingScope) {
  * Standalone mounting is retained for the fictional control-contract tests. */
 export function ProcessingControl({
   status,
+  transcriptionProvider,
 }: {
   status?: {
     snapshot: ProcessingSnapshot | null;
     failed: boolean;
     refresh: () => Promise<ProcessingSnapshot>;
   };
+  transcriptionProvider?: string;
 }) {
   const [snapshot, setSnapshot] = useState<ProcessingSnapshot | null>(null);
   const current = useRef<ProcessingSnapshot | null>(null);
@@ -691,8 +693,14 @@ export function ProcessingControl({
       {approved && isOwnKeyProcessor(snapshot?.processor?.id) && (
         <p className="processing-muted" id="own-key-pause-help">
           Pause cues stops cue requests only: the session&apos;s audio still
-          goes to Deepgram and is billed to your account. Disable processing or
-          Stop ends that.
+          goes to{' '}
+          {transcriptionProvider ??
+            (snapshot?.processor?.audioDestination?.startsWith('ElevenLabs')
+              ? 'ElevenLabs'
+              : snapshot?.processor?.audioDestination?.startsWith('Deepgram')
+                ? 'Deepgram'
+                : 'the transcription service')}{' '}
+          and is billed to your account. Disable processing or Stop ends that.
         </p>
       )}
       {approved && (
