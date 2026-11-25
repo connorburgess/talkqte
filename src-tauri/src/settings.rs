@@ -88,6 +88,10 @@ pub struct Settings {
     pub keep_running_in_menu_bar: bool,
     /// What to do with a non-empty live session when it ends.
     pub after_session_keep: AfterSessionKeep,
+    /// Pre-select up to 3 relevant recent kept meetings as prior context
+    /// (notes only, never transcripts or archived meetings). On by default;
+    /// never enabled, read, or written in lab runs.
+    pub auto_prior_context: bool,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -118,6 +122,7 @@ impl Default for Settings {
             call_prompt_not_for: Vec::new(),
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
+            auto_prior_context: true,
         }
     }
 }
@@ -244,6 +249,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
             defaults.keep_running_in_menu_bar,
         ),
         after_session_keep: field(&object, "afterSessionKeep", defaults.after_session_keep),
+        auto_prior_context: field(&object, "autoPriorContext", defaults.auto_prior_context),
     }
 }
 
@@ -270,6 +276,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
         },
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
+        "autoPriorContext": settings.auto_prior_context,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -573,6 +580,7 @@ mod tests {
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
+            auto_prior_context: false,
         }
     }
 
@@ -616,6 +624,7 @@ mod tests {
             keys,
             [
                 "afterSessionKeep",
+                "autoPriorContext",
                 "callPrompt",
                 "companionPosition",
                 "cueModelOverride",
@@ -858,5 +867,18 @@ mod tests {
             parse(br#"{"version": 1, "afterSessionKeep": "sometimes", "sensitivity": "quiet"}"#);
         assert_eq!(invalid.after_session_keep, AfterSessionKeep::Auto);
         assert_eq!(invalid.sensitivity, Sensitivity::Quiet);
+    }
+
+    #[test]
+    fn auto_prior_context_defaults_true_and_parses_safely() {
+        assert!(Settings::default().auto_prior_context);
+        assert!(parse(br#"{"version": 1, "sensitivity": "quiet"}"#).auto_prior_context);
+        let disabled = Settings {
+            auto_prior_context: false,
+            ..Default::default()
+        };
+        assert!(!parse(&render(&disabled)).auto_prior_context);
+        let invalid = parse(br#"{"version": 1, "autoPriorContext": "yes"}"#);
+        assert!(invalid.auto_prior_context);
     }
 }

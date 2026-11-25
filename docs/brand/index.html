@@ -6774,6 +6774,57 @@
                 </div>
                 <div class="panel-note-row" style="margin-top: 10px">
                   <div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                      "
+                    >
+                      <strong style="font-size: 13px"
+                        >Orchard gate supplier</strong
+                      >
+                      <span
+                        class="mono-label"
+                        style="
+                          padding: 2px 6px;
+                          background: var(--g-asked-bg, #fdf6e9);
+                          border: 1px solid var(--g-accent-ink, #875500);
+                          border-radius: 2px;
+                          color: var(--g-accent-ink, #875500);
+                        "
+                        >AUTO</span
+                      >
+                    </div>
+                    <span
+                      class="mono-label"
+                      style="
+                        display: block;
+                        color: var(--g-muted);
+                        margin-top: 2px;
+                      "
+                      >2026-11-02 · AUTO-SELECTED FROM KEPT MEETINGS</span
+                    >
+                    <p class="panel-muted" style="margin-top: 4px">
+                      Check south latch bolts before supplier delivery.
+                    </p>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      color: var(--g-muted);
+                      font-size: 12px;
+                    "
+                  >
+                    <span style="text-decoration: underline">Archive</span
+                    ><span>×</span>
+                  </div>
+                </div>
+                <div class="panel-note-row" style="margin-top: 10px">
+                  <div>
                     <strong style="font-size: 13px"
                       >Garden launch · watering plan</strong
                     >
@@ -9615,15 +9666,18 @@ Date: 2026-11-23 · Length: 06:42
                 non-empty live session stop: <code>Meeting saved</code> /
                 <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
-                list, search, empty/unreadable/lab-run/newer states, read-only
-                meeting detail with notes/meeting notes/cues/transcript, inline
-                rename, inline delete confirmation, and export review dialog),
-                and <code>MeetingHistorySettings.tsx</code> (Settings → Kept
+                list, search, Archive/Unarchive with
+                <code>Show archived</code> filter,
+                empty/unreadable/lab-run/newer states, read-only meeting detail
+                with notes/meeting notes/cues/transcript, inline rename, inline
+                delete confirmation, and export review dialog), and
+                <code>MeetingHistorySettings.tsx</code> (Settings → Kept
                 meetings: the <code>After a live session ends</code> choice
                 (<code>auto</code> default, <code>ask</code>, <code>off</code>),
-                where the files are, Delete all with its inline confirmation,
-                and the lab-run, unavailable and newer-version states). Styles:
-                <code>meeting-history.css</code>.
+                <code>Auto-select relevant past meetings as prior context</code>
+                toggle, where the files are, Delete all with its inline
+                confirmation, and the lab-run, unavailable and newer-version
+                states). Styles: <code>meeting-history.css</code>.
               </p>
             </div>
           </div>
