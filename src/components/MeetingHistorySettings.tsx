@@ -4,15 +4,17 @@ import {
   failure,
   historyStatus,
   keptMeetings,
-  setOfferToKeep,
+  setAfterSessionKeep,
+  type AfterSessionKeep,
   type HistoryStatus,
 } from '../lib/meetingHistory';
 import './meeting-history.css';
 
 const where = '~/Library/Application Support/com.talkqte.desktop/meetings';
 
-/** Settings → Kept meetings: whether to offer keeping each meeting, where
- * kept meetings are, and Delete all meetings with an inline confirmation. */
+/** Settings → Kept meetings: whether ended meetings are kept automatically,
+ * asked about, or left unsaved; where kept meetings live; and Delete all
+ * meetings with an inline confirmation. */
 export function MeetingHistorySettings({
   onDeleted,
 }: {
@@ -66,17 +68,20 @@ export function MeetingHistorySettings({
         )}
         {!off && (
           <>
-            <label className="history-check">
-              <input
-                type="checkbox"
-                checked={status.offer}
+            <div className="setting-control">
+              <label htmlFor={`${id}-after-keep`}>
+                After a live session ends
+              </label>
+              <select
+                id={`${id}-after-keep`}
+                value={status.afterSessionKeep}
                 disabled={busy}
                 aria-describedby={`${id}-offer`}
                 onChange={(event) => {
-                  const offer = event.target.checked;
+                  const mode = event.target.value as AfterSessionKeep;
                   setBusy(true);
                   setError('');
-                  setOfferToKeep(offer)
+                  setAfterSessionKeep(mode)
                     .then(refresh)
                     .catch((problem) =>
                       setError(
@@ -85,13 +90,18 @@ export function MeetingHistorySettings({
                     )
                     .finally(() => setBusy(false));
                 }}
-              />
-              Offer to keep each meeting
-            </label>
+              >
+                <option value="auto">Auto-save to Meetings (default)</option>
+                <option value="ask">Ask each time</option>
+                <option value="off">Don’t keep automatically or ask</option>
+              </select>
+            </div>
             <p className="history-help" id={`${id}-offer`}>
-              After a live session ends, ask whether to keep it. Nothing is kept
-              unless you choose Keep for that meeting. This choice lasts until
-              you quit.
+              By default, non-empty live sessions save automatically to your
+              Meetings list when they stop (without storing any application
+              name). Choose Ask each time to confirm in the dock or notebook
+              first, or Don’t keep to leave ended sessions in memory until you
+              quit or start another.
             </p>
             <p className="history-help">
               A kept meeting holds its title, date, length, the sources used,

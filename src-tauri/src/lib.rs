@@ -160,6 +160,12 @@ struct Runtime {
     dev_join_declared: bool,
     /// The call-starting prompt: off unless the person turns it on.
     call_prompt: call_prompt::Watcher,
+    /// End-of-call prompt for the floating companion when a non-empty live
+    /// session ends.
+    end_prompt: Option<engine::EndPrompt>,
+    /// A source-only live session ended during `sync`, waiting to notify
+    /// `meeting_history_commands::on_live_session_ended` outside the lock.
+    ended_source_session: Option<u64>,
     processing_reviews: processing_reviews::Reviews,
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
@@ -199,6 +205,8 @@ impl Default for Runtime {
             dev_join_application: None,
             dev_join_declared: false,
             call_prompt: call_prompt::Watcher::default(),
+            end_prompt: None,
+            ended_source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
@@ -326,6 +334,12 @@ fn publish(app: &tauri::AppHandle, runtime: &mut Runtime) {
     let _ = emitted;
     timing_log::observe_published(&runtime.engine);
     publish_processing(app, runtime);
+    if let Some(session) = runtime.ended_source_session.take() {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            meeting_history_commands::on_live_session_ended(&handle, session);
+        });
+    }
 }
 
 fn capture_state(snapshot: Option<microphone::Snapshot>) -> engine::CaptureState {
@@ -1495,11 +1509,15 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
         }
     }
     let state = app.state::<AppState>();
+    let mut ended = false;
     let finished = change(app, &state, |e| {
-        e.finish_live_stop(live.session);
+        ended = e.finish_live_stop(live.session);
         Ok(())
     })
     .is_ok();
+    if finished && ended {
+        meeting_history_commands::on_live_session_ended(app, live.session);
+    }
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -1924,7 +1942,7 @@ pub fn run() {
             meeting_notes_commands::meeting_notes_model,
             meeting_notes_commands::set_meeting_notes_model,
             meeting_history_commands::meeting_history_status,
-            meeting_history_commands::set_offer_to_keep,
+            meeting_history_commands::set_after_session_keep,
             meeting_history_commands::keep_meeting_in_history,
             meeting_history_commands::update_kept_session_meeting,
             meeting_history_commands::kept_meetings,
@@ -1935,6 +1953,7 @@ pub fn run() {
             meeting_history_commands::kept_meeting_export_preview,
             meeting_history_commands::export_kept_meeting,
             meeting_history_commands::list_kept_meetings_for_context,
+            meeting_history_commands::respond_to_end_prompt,
             live_status,
             provider_key_commands::provider_keys_status,
             provider_key_commands::set_provider_key,
@@ -2068,7 +2087,7 @@ pub fn run() {
                             .engine
                             .cloud_transcription_left(session, budget.left());
                     }
-                    let cue = runtime.engine.cue_snapshot();
+                    let cue = runtime.cue_snapshot();
                     publish_processing(&handle, &mut runtime);
                     let menu = menu_bar::state_of(&runtime);
                     drop(runtime);

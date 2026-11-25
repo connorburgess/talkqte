@@ -10,7 +10,8 @@ pub use evaluation::{
     ProcessingSnapshot, ProcessingTracker, ProcessorConfiguration, ProcessorDisclosure,
     ProcessorSummary, Scope, SourceCapture, SourcePhase, SourceProblem, StartupState, StopTarget,
 };
-pub use sources::{SessionSources, SourcesStatus, THEM, YOU};
+pub use history::{EndPrompt, EndPromptAction, EndPromptState};
+pub use sources::{Declared, SessionSources, SourcesStatus, THEM, YOU};
 
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
@@ -594,6 +595,9 @@ pub struct CueSnapshot {
     /// person has turned that prompt on. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_prompt: Option<crate::call_prompt::Prompt>,
+    /// An ended non-empty live session prompt: counts and keep status only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_prompt: Option<EndPrompt>,
     /// Whether conversation lines may leave the device for a model, and
     /// whether a request is being sent. Absent without a model connection.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -804,6 +808,7 @@ impl Engine {
             sensitivity: self.state.sensitivity,
             source_session: false,
             call_prompt: None,
+            end_prompt: None,
             model: match self.evaluation_status() {
                 Some(EvaluationStatus::Unavailable(_)) if self.state.live => {
                     Some(ModelLink::Stopped)

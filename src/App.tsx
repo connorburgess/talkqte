@@ -44,6 +44,7 @@ import { KeepInHistory } from './components/KeepInHistory';
 import { MeetingHistory } from './components/MeetingHistory';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
+import type { HistoryStatus } from './lib/meetingHistory';
 import {
   PanelDivider,
   boundWidth,
@@ -57,6 +58,7 @@ import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
+import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
@@ -449,6 +451,20 @@ function FloatingQuestion() {
               />
             )}
           </>
+        ) : state?.endPrompt && state.overlayEnabled ? (
+          <EndPrompt
+            prompt={state.endPrompt}
+            busy={busy}
+            large={state.questionSize === 'large'}
+            onAction={(action) =>
+              void run(() =>
+                bridge.command('respond_to_end_prompt', {
+                  session: state.endPrompt!.session,
+                  action,
+                }),
+              )
+            }
+          />
         ) : state?.callPrompt && state.overlayEnabled ? (
           <CallPrompt
             offer={state.callPrompt}
@@ -659,25 +675,52 @@ function Notebook() {
     'notebook',
   );
   const [historyRevision, setHistoryRevision] = useState(0);
+  const [sessionHistory, setSessionHistory] = useState<HistoryStatus | null>(
+    null,
+  );
+  const [notesPlanTrigger, setNotesPlanTrigger] = useState(0);
+  const [openMeetingRequest, setOpenMeetingRequest] = useState<{
+    id: string;
+    seq: number;
+  } | null>(null);
   // The menu bar's Start session…: the notebook with its ordinary start in
   // reach. Nothing is chosen, listed or started.
   const [startRequested, setStartRequested] = useState(0);
   useEffect(() => {
     if (!bridge.desktop) return;
     let disposed = false;
-    let stop: (() => void) | undefined;
-    void listen('menu-bar:start-session', () => {
+    const stops: (() => void)[] = [];
+    const sub = <T,>(event: string, handler: (payload: T) => void) => {
+      void listen<T>(event, ({ payload }) => handler(payload))
+        .then((unlisten) => {
+          if (disposed) unlisten();
+          else stops.push(unlisten);
+        })
+        .catch(() => {});
+    };
+    sub('menu-bar:start-session', () => {
       setView('notebook');
       setStartRequested((count) => count + 1);
-    })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stop = unlisten;
-      })
-      .catch(() => {});
+    });
+    sub('meeting-history:changed', () => {
+      setHistoryRevision((count) => count + 1);
+    });
+    sub('end-prompt:write-notes', () => {
+      setView('notebook');
+      setNotesPlanTrigger((count) => count + 1);
+    });
+    sub<{ id?: string }>('end-prompt:open-meeting', (payload) => {
+      if (!payload?.id) return;
+      setHistoryRevision((count) => count + 1);
+      setOpenMeetingRequest((prev) => ({
+        id: payload.id!,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+      setView('meetings');
+    });
     return () => {
       disposed = true;
-      stop?.();
+      for (const stop of stops) stop();
     };
   }, []);
   useEffect(() => {
@@ -1617,7 +1660,9 @@ function Notebook() {
                               : sourceApp
                                 ? `Audio from ${sourceApp} · not saved by TalkQTE`
                                 : 'Your microphone · not saved by TalkQTE'
-                            : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
+                            : sessionHistory?.kept
+                              ? 'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.'
+                              : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
                             : capture.state?.source?.mayBeCapturing
@@ -1760,10 +1805,12 @@ function Notebook() {
                 />
               )}
 
-            <MeetingNotes snapshot={state} />
+            <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
             <KeepInHistory
               snapshot={state}
+              historyRevision={historyRevision}
               onKept={() => setHistoryRevision((r) => r + 1)}
+              onStatus={setSessionHistory}
             />
 
             <div
@@ -2219,9 +2266,11 @@ function Notebook() {
               <ShieldCheck size={15} />
               <p>
                 {live || preparing || finishing
-                  ? 'This live session stays in memory while it runs. Nothing is kept unless you choose to keep it after it ends.'
+                  ? 'This live session stays in memory while it runs; non-empty live sessions save locally to your Meetings list when they end unless you change that in Settings.'
                   : state.live
-                    ? 'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.'
+                    ? sessionHistory?.kept
+                      ? 'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.'
+                      : 'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.'
                     : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
               </p>
             </footer>
@@ -2230,7 +2279,10 @@ function Notebook() {
 
         {view === 'meetings' && (
           <div className="secondary-page history-page">
-            <MeetingHistory refreshKey={historyRevision} />
+            <MeetingHistory
+              refreshKey={historyRevision}
+              openRequest={openMeetingRequest}
+            />
           </div>
         )}
 
@@ -2496,6 +2548,7 @@ function Notebook() {
               </div>
             </section>
             <MeetingHistorySettings
+              key={`history-${settingsEpoch}`}
               onDeleted={() => setHistoryRevision((r) => r + 1)}
             />
             <SavedSettings

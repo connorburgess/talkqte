@@ -10,22 +10,26 @@ import {
 import type { Snapshot } from '../lib/types';
 import './meeting-history.css';
 
-/** After a live session with a transcript has ended, and only when
- * "Offer to keep each meeting" is on: the person may keep this meeting in
- * TalkQTE. Nothing is stored unless they choose Keep. Once kept, later
- * notes or meeting notes can be added to it. */
+/** After a non-empty live session has ended: shows the kept meeting status
+ * (when auto-saved or manually kept), or offers to keep it when
+ * `afterSessionKeep` is `"ask"`. Once kept, later notes or meeting notes can
+ * be added to it. */
 export function KeepInHistory({
   snapshot,
+  historyRevision = 0,
   onKept,
+  onStatus,
 }: {
   snapshot: Snapshot;
+  historyRevision?: number;
   onKept?: () => void;
+  onStatus?: (status: HistoryStatus | null) => void;
 }) {
   const id = useId();
   const ended =
     snapshot.live &&
     snapshot.status === 'ended' &&
-    snapshot.transcript.length > 0;
+    (snapshot.transcript.length > 0 || snapshot.notes.trim().length > 0);
   const application = snapshot.sources?.application ?? null;
   const [status, setStatus] = useState<HistoryStatus | null>(null);
   const [title, setTitle] = useState('');
@@ -47,17 +51,29 @@ export function KeepInHistory({
   }, [session]);
 
   // Whether the session was kept, and whether it changed since, follows
-  // every change to the session.
+  // every change to the session or kept meetings.
   useEffect(() => {
-    if (!ended) return;
+    if (!ended) {
+      setStatus(null);
+      onStatus?.(null);
+      return;
+    }
     let live = true;
     historyStatus()
-      .then((value) => live && setStatus(value))
-      .catch(() => live && setStatus(null));
+      .then((value) => {
+        if (!live) return;
+        setStatus(value);
+        onStatus?.(value);
+      })
+      .catch(() => {
+        if (!live) return;
+        setStatus(null);
+        onStatus?.(null);
+      });
     return () => {
       live = false;
     };
-  }, [ended, snapshot.revision]);
+  }, [ended, snapshot.revision, historyRevision]);
 
   useEffect(() => {
     if (focusKept.current && keptHeading.current) {
@@ -68,14 +84,20 @@ export function KeepInHistory({
 
   if (!ended || !status || status.availability !== 'on') return null;
   const kept = status.kept;
-  if (!kept && (!status.offer || declined === status.session)) return null;
+  if (
+    !kept &&
+    (status.afterSessionKeep === 'off' || declined === status.session)
+  )
+    return null;
 
   const act = async (work: () => Promise<unknown>, fallback: string) => {
     setBusy(true);
     setError('');
     try {
       await work();
-      setStatus(await historyStatus());
+      const next = await historyStatus();
+      setStatus(next);
+      onStatus?.(next);
       onKept?.();
     } catch (problem) {
       setError(failure(problem, fallback));

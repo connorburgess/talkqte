@@ -120,7 +120,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         // Kept meetings: keeping, listing, opening, renaming and deleting
         // them is the notebook's alone.
         "allow-meeting-history-status",
-        "allow-set-offer-to-keep",
+        "allow-set-after-session-keep",
         "allow-keep-meeting-in-history",
         "allow-update-kept-session-meeting",
         "allow-kept-meetings",
@@ -151,6 +151,11 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     // conversation, note or position. `respond_to_call_prompt` answers a
     // call-starting offer: Start only brings the notebook forward with the
     // offer's sources chosen; nothing is started, listed or captured.
+    // `respond_to_end_prompt` handles only the end-of-call dock card (keep
+    // with default date/time title and no application name, delete only the
+    // session's just-kept meeting, open notebook to write notes or view the
+    // meeting, or dismiss); the companion can never read history, transcripts,
+    // notes, titles, or meeting IDs.
     let companion = set(&[
         "core:event:allow-listen",
         "core:event:allow-unlisten",
@@ -165,6 +170,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-stop-microphone",
         "allow-stop-live-session",
         "allow-respond-to-call-prompt",
+        "allow-respond-to-end-prompt",
     ]);
     assert!(
         cue.is_subset(&companion),
@@ -289,6 +295,62 @@ fn the_companion_receives_the_cue_and_display_state_but_no_notebook_content() {
     let notebook = serde_json::to_string(&engine.state).unwrap();
     for held in ["blue tin", "seed budget", "Marisol", "seating chart"] {
         assert!(notebook.contains(held), "the notebook lost {held}");
+    }
+}
+
+#[test]
+fn the_companion_end_prompt_carries_counts_only_never_transcript_notes_titles_or_app_names() {
+    use talkqte_lib::engine::{Declared, EndPrompt, EndPromptState, SessionSources};
+    let mut engine = Engine::live();
+    engine.set_user_name(Some("Marisol".into())).unwrap();
+    engine
+        .set_focus(vec!["Agree the seating chart for the potluck".into()])
+        .unwrap();
+    engine
+        .update_notes("Fictional private manual notes about the orchard keys.".into())
+        .unwrap();
+    engine.start().unwrap();
+    engine.set_sources(SessionSources::both(Declared {
+        name: "Fictional Call App",
+        selection: "fictional-call",
+        bundle_id: Some("us.zoom.xos"),
+    }));
+    engine.advance(2_000);
+    let session = engine.session();
+    engine
+        .ingest(
+            session,
+            line("l1", 1_000, "The greenhouse keys are in the blue tin."),
+        )
+        .unwrap();
+    engine.end();
+
+    let mut snapshot = engine.cue_snapshot();
+    snapshot.end_prompt = Some(EndPrompt {
+        session: engine.history_session(),
+        state: EndPromptState::Saved,
+        transcript_lines: 1,
+        has_notes: true,
+        error: None,
+    });
+    let sent = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(
+        keys(&sent["endPrompt"]),
+        set(&["session", "state", "transcriptLines", "hasNotes"])
+    );
+    let serialized = sent.to_string();
+    for private in [
+        "blue tin",
+        "orchard keys",
+        "Marisol",
+        "seating chart",
+        "Fictional Call App",
+        "us.zoom.xos",
+    ] {
+        assert!(
+            !serialized.contains(private),
+            "the companion end_prompt received {private}"
+        );
     }
 }
 

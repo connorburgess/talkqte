@@ -5663,6 +5663,42 @@
               >). Settings opt-in lives in
               <code>src/components/CallPromptSetting.tsx</code> (Panel 15).
             </div>
+            <div class="dock-prompt-spec">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >6 · End-of-Call Dock Card (Auto-save &amp; Ask)</span
+                >
+                <code>EndPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">Meeting saved</div>
+                  <p class="dock-prompt-copy">
+                    12 lines · notes · Saved to your Meetings list.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary">Write notes</span>
+                    <span class="dock-prompt-btn">Open</span>
+                    <span class="dock-prompt-btn">Delete</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/EndPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> when an ended non-empty live
+              session attaches <code>endPrompt</code>. Under default
+              <code>auto</code> mode: <code>Meeting saved</code> with
+              <code>Write notes</code> (when
+              <code>transcriptLines &gt; 0</code>), <code>Open</code>,
+              <code>Delete</code>, and <code>Dismiss</code>. Under
+              <code>ask</code> mode: <code>Meeting ended</code> with
+              <code>Keep meeting</code>, <code>Write notes</code>, and
+              <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
+              runs and <code>off</code> attach no prompt.
+            </div>
           </div>
         </div>
       </section>
@@ -9357,22 +9393,28 @@ Date: 2026-11-23 · Length: 06:42
               </p>
               <p class="up-boundary" id="upcoming-kept-meetings">
                 <strong>Meetings &amp; kept meetings</strong>
-                (<code>KeepInHistory.tsx</code>,
+                (<code>KeepInHistory.tsx</code>, <code>EndPrompt.tsx</code>,
                 <code>MeetingHistory.tsx</code>,
                 <code>MeetingHistorySettings.tsx</code>): built plainly with
                 shared tokens and no one-sided borders; tiles for every state
                 are still to be added here. Component boundaries:
-                <code>KeepInHistory.tsx</code> (after a live session ends: the
-                offer with title and the optional application name; kept; kept
-                with an Update; a failed keep),
+                <code>KeepInHistory.tsx</code> (after a non-empty live session
+                ends: kept confirmation or Update kept meeting under default
+                <code>auto</code>, or keep offer under <code>ask</code>; a
+                failed keep),
+                <code>EndPrompt.tsx</code> (floating dock card on non-empty live
+                session stop: <code>Meeting saved</code> /
+                <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
                 list, search, empty/unreadable/lab-run/newer states, read-only
                 meeting detail with notes/meeting notes/cues/transcript, inline
                 rename, inline delete confirmation, and export review dialog),
                 and <code>MeetingHistorySettings.tsx</code> (Settings → Kept
-                meetings: the offer setting, where the files are, Delete all
-                with its inline confirmation, and the lab-run, unavailable and
-                newer-version states). Styles: <code>meeting-history.css</code>.
+                meetings: the <code>After a live session ends</code> choice
+                (<code>auto</code> default, <code>ask</code>, <code>off</code>),
+                where the files are, Delete all with its inline confirmation,
+                and the lab-run, unavailable and newer-version states). Styles:
+                <code>meeting-history.css</code>.
               </p>
             </div>
           </div>

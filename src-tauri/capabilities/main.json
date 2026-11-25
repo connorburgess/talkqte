@@ -34,7 +34,7 @@
     "allow-meeting-notes-result",
     "allow-keep-meeting-notes",
     "allow-meeting-history-status",
-    "allow-set-offer-to-keep",
+    "allow-set-after-session-keep",
     "allow-keep-meeting-in-history",
     "allow-update-kept-session-meeting",
     "allow-kept-meetings",

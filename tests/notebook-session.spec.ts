@@ -161,7 +161,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
   await expect(session(page)).toContainText(
-    'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.',
+    'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.',
   );
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
@@ -186,7 +186,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(review).not.toContainText('first draft');
   await page.keyboard.press('Escape');
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.',
+    'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.',
   );
   // A new session can be started.
   await expect(

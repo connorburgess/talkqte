@@ -1,13 +1,19 @@
-//! The notebook's commands for kept meetings. The companion window has none
-//! of them. File work runs off the main thread.
+//! The notebook's commands for kept meetings, plus the companion's narrow
+//! `respond_to_end_prompt` action for the end-of-call dock card. The
+//! companion can never list, search, read, rename or export kept meetings.
+//! File work runs off the main thread.
 
 use crate::{
-    meeting_history::{Availability, Content, Error, Listing, Meeting, Store, Summary},
+    engine::{EndPrompt, EndPromptAction, EndPromptState},
+    meeting_history::{
+        default_title, Availability, Content, Error, Listing, Meeting, Store, Summary,
+    },
+    settings::{AfterSessionKeep, Store as SettingsStore},
     AppState,
 };
 use serde::Serialize;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     (window.label() == "main")
@@ -20,13 +26,11 @@ fn message(error: Error) -> String {
 }
 
 /// The meeting the current session was kept as, so later notes or meeting
-/// notes can be added to it, and whether to offer keeping at all.
+/// notes can be added to it.
 pub(crate) struct Keeping(Mutex<KeepingState>);
 
+#[derive(Default)]
 struct KeepingState {
-    /// "Offer to keep each meeting". On by default: offering stores nothing.
-    /// For this launch only until the settings file holds it.
-    offer: bool,
     kept: Option<Kept>,
     /// The Markdown previewed from the Meetings view, held so the save
     /// dialog writes exactly what the person reviewed.
@@ -43,11 +47,7 @@ struct Kept {
 
 impl Default for Keeping {
     fn default() -> Self {
-        Self(Mutex::new(KeepingState {
-            offer: true,
-            kept: None,
-            export: None,
-        }))
+        Self(Mutex::new(KeepingState::default()))
     }
 }
 
@@ -65,11 +65,12 @@ pub(crate) struct SessionKept {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Status {
     availability: Availability,
-    offer: bool,
+    after_session_keep: AfterSessionKeep,
     /// The current session's number, so a choice in the notebook (Not this
     /// one) applies to that session only.
     session: u64,
-    /// The ended session's kept meeting, if the person kept it.
+    /// The ended session's kept meeting, if the person kept it or it was
+    /// auto-saved.
     #[serde(skip_serializing_if = "Option::is_none")]
     kept: Option<SessionKept>,
 }
@@ -93,6 +94,7 @@ async fn blocking<T: Send + 'static>(
 #[tauri::command]
 pub(crate) fn meeting_history_status(
     window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
     store: tauri::State<Store>,
     keeping: tauri::State<Keeping>,
@@ -104,6 +106,11 @@ pub(crate) fn meeting_history_status(
         .lock()
         .map_err(|_| "Kept meetings are unavailable.")?;
     let session = runtime.engine.history_session();
+    let after_session_keep = app
+        .try_state::<SettingsStore>()
+        .map_or(AfterSessionKeep::Auto, |settings| {
+            settings.saved().after_session_keep
+        });
     let kept = keeping
         .kept
         .as_ref()
@@ -118,24 +125,20 @@ pub(crate) fn meeting_history_status(
         });
     Ok(Status {
         availability: store.availability(),
-        offer: keeping.offer,
+        after_session_keep,
         session,
         kept,
     })
 }
 
 #[tauri::command]
-pub(crate) fn set_offer_to_keep(
+pub(crate) fn set_after_session_keep(
     window: tauri::WebviewWindow,
-    keeping: tauri::State<Keeping>,
-    offer: bool,
+    store: tauri::State<SettingsStore>,
+    mode: AfterSessionKeep,
 ) -> Result<(), String> {
     main_only(&window)?;
-    keeping
-        .0
-        .lock()
-        .map_err(|_| "Kept meetings are unavailable.")?
-        .offer = offer;
+    store.record(|settings| settings.after_session_keep = mode);
     Ok(())
 }
 
@@ -186,6 +189,17 @@ pub(crate) async fn keep_meeting_in_history(
             content,
         });
     }
+    if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        if runtime
+            .end_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.session == session)
+        {
+            runtime.end_prompt = None;
+            crate::publish(&app, &mut runtime);
+        }
+    }
+    crate::companion::refresh(&app);
     Ok(summary)
 }
 
@@ -290,6 +304,18 @@ pub(crate) async fn delete_kept_meeting(
         }
         keeping.export = None;
     }
+    if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        let session = runtime.engine.history_session();
+        if runtime
+            .end_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.session == session)
+        {
+            runtime.end_prompt = None;
+            crate::publish(&app, &mut runtime);
+        }
+    }
+    crate::companion::refresh(&app);
     Ok(())
 }
 
@@ -306,6 +332,13 @@ pub(crate) async fn delete_all_kept_meetings(
         keeping.kept = None;
         keeping.export = None;
     }
+    if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        if runtime.end_prompt.is_some() {
+            runtime.end_prompt = None;
+            crate::publish(&app, &mut runtime);
+        }
+    }
+    crate::companion::refresh(&app);
     Ok(count)
 }
 
@@ -391,4 +424,335 @@ pub(crate) async fn list_kept_meetings_for_context(
         skipped,
         asks_for_dates: false,
     })
+}
+
+/// Called from a blocking thread when a live session finishes stopping.
+/// Under `"auto"`, saves the non-empty meeting to local history (without
+/// keeping any application name) and shows `Meeting saved` in the dock.
+/// Under `"ask"`, shows `Meeting ended` in the dock. Lab runs and `"off"`
+/// never save or prompt.
+pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
+    let Some(store) = app.try_state::<Store>() else {
+        return;
+    };
+    if store.availability() != Availability::On {
+        return;
+    }
+    let mode = app
+        .try_state::<SettingsStore>()
+        .map_or(AfterSessionKeep::Auto, |settings| {
+            settings.saved().after_session_keep
+        });
+    if mode == AfterSessionKeep::Off {
+        return;
+    }
+    let Some(keeping_state) = app.try_state::<Keeping>() else {
+        return;
+    };
+    let (counts, content) = {
+        let state = app.state::<AppState>();
+        let Ok(mut runtime) = state.0.lock() else {
+            return;
+        };
+        if runtime.engine.history_session() != session
+            || runtime.engine.state.status != crate::engine::Status::Ended
+        {
+            return;
+        }
+        let already_kept = keeping_state
+            .0
+            .lock()
+            .is_ok_and(|keeping| keeping.kept.as_ref().is_some_and(|k| k.session == session));
+        if already_kept {
+            return;
+        }
+        let Some(counts) = runtime.engine.end_prompt_counts() else {
+            return;
+        };
+        if mode == AfterSessionKeep::Ask {
+            runtime.end_prompt = Some(EndPrompt {
+                session,
+                state: EndPromptState::Ask,
+                transcript_lines: counts.0,
+                has_notes: counts.1,
+                error: None,
+            });
+            crate::publish(app, &mut runtime);
+            drop(runtime);
+            crate::companion::refresh(app);
+            return;
+        }
+        let Some(content) = runtime.engine.keepable_meeting(false) else {
+            return;
+        };
+        (counts, content)
+    };
+
+    let title = default_title(content.started_at_ms);
+    let result = store.keep(&title, content.clone());
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if runtime.engine.history_session() != session
+        || runtime.engine.state.status != crate::engine::Status::Ended
+    {
+        return;
+    }
+    match result {
+        Ok(summary) => {
+            if let Ok(mut keeping) = keeping_state.0.lock() {
+                keeping.kept = Some(Kept {
+                    session,
+                    id: summary.id,
+                    title: summary.title,
+                    include_application: false,
+                    content,
+                });
+            }
+            runtime.end_prompt = Some(EndPrompt {
+                session,
+                state: EndPromptState::Saved,
+                transcript_lines: counts.0,
+                has_notes: counts.1,
+                error: None,
+            });
+            crate::publish(app, &mut runtime);
+            drop(runtime);
+            let _ = app.emit_to("main", "meeting-history:changed", ());
+            crate::companion::refresh(app);
+        }
+        Err(error) => {
+            runtime.end_prompt = Some(EndPrompt {
+                session,
+                state: EndPromptState::Ask,
+                transcript_lines: counts.0,
+                has_notes: counts.1,
+                error: Some(error.message().into()),
+            });
+            crate::publish(app, &mut runtime);
+            drop(runtime);
+            crate::companion::refresh(app);
+        }
+    }
+}
+
+/// Companion action for the end-of-call card (`respond_to_end_prompt`).
+/// Keeps only with a default date/time title and no application name, deletes
+/// only the meeting kept for `session`, or opens the notebook to write notes
+/// or view the kept meeting.
+#[tauri::command]
+pub(crate) async fn respond_to_end_prompt(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    session: u64,
+    action: EndPromptAction,
+) -> Result<(), String> {
+    let prompt = {
+        let runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+        if runtime.engine.history_session() != session {
+            return Ok(());
+        }
+        let Some(prompt) = runtime.end_prompt.clone().filter(|p| p.session == session) else {
+            return Ok(());
+        };
+        prompt
+    };
+
+    match action {
+        EndPromptAction::Dismiss => {
+            if let Ok(mut runtime) = state.0.lock() {
+                if runtime
+                    .end_prompt
+                    .as_ref()
+                    .is_some_and(|p| p.session == session)
+                {
+                    runtime.end_prompt = None;
+                    crate::publish(&app, &mut runtime);
+                }
+            }
+            crate::companion::refresh(&app);
+            Ok(())
+        }
+        EndPromptAction::WriteNotes => {
+            if prompt.transcript_lines == 0 {
+                return Ok(());
+            }
+            if let Ok(mut runtime) = state.0.lock() {
+                if runtime
+                    .end_prompt
+                    .as_ref()
+                    .is_some_and(|p| p.session == session)
+                {
+                    runtime.end_prompt = None;
+                    crate::publish(&app, &mut runtime);
+                }
+            }
+            crate::companion::refresh(&app);
+            crate::menu_bar::show_notebook(&app);
+            let _ = app.emit_to("main", "end-prompt:write-notes", ());
+            Ok(())
+        }
+        EndPromptAction::Open => {
+            let kept_id = app.state::<Keeping>().0.lock().ok().and_then(|keeping| {
+                keeping
+                    .kept
+                    .as_ref()
+                    .filter(|k| k.session == session)
+                    .map(|k| k.id.clone())
+            });
+            if let Ok(mut runtime) = state.0.lock() {
+                if runtime
+                    .end_prompt
+                    .as_ref()
+                    .is_some_and(|p| p.session == session)
+                {
+                    runtime.end_prompt = None;
+                    crate::publish(&app, &mut runtime);
+                }
+            }
+            crate::companion::refresh(&app);
+            if let Some(id) = kept_id {
+                crate::menu_bar::show_notebook(&app);
+                let _ = app.emit_to("main", "end-prompt:open-meeting", id);
+            }
+            Ok(())
+        }
+        EndPromptAction::Keep => {
+            if prompt.state != EndPromptState::Ask {
+                return Ok(());
+            }
+            let content = {
+                let runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+                if runtime.engine.history_session() != session {
+                    return Ok(());
+                }
+                runtime
+                    .engine
+                    .keepable_meeting(false)
+                    .ok_or("Only an ended session with transcript or notes can be kept.")?
+            };
+            let already_kept =
+                app.state::<Keeping>().0.lock().is_ok_and(|keeping| {
+                    keeping.kept.as_ref().is_some_and(|k| k.session == session)
+                });
+            if already_kept {
+                return Ok(());
+            }
+            let title = default_title(content.started_at_ms);
+            let stored = content.clone();
+            let result = blocking(&app, move |store| store.keep(&title, stored)).await?;
+            match result {
+                Ok(summary) => {
+                    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+                        keeping.kept = Some(Kept {
+                            session,
+                            id: summary.id,
+                            title: summary.title,
+                            include_application: false,
+                            content,
+                        });
+                    }
+                    if let Ok(mut runtime) = state.0.lock() {
+                        if runtime
+                            .end_prompt
+                            .as_ref()
+                            .is_some_and(|p| p.session == session)
+                        {
+                            runtime.end_prompt = Some(EndPrompt {
+                                session,
+                                state: EndPromptState::Kept,
+                                transcript_lines: prompt.transcript_lines,
+                                has_notes: prompt.has_notes,
+                                error: None,
+                            });
+                            crate::publish(&app, &mut runtime);
+                        }
+                    }
+                    let _ = app.emit_to("main", "meeting-history:changed", ());
+                    crate::companion::refresh(&app);
+                    let handle = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(2_500));
+                        let cleared = handle.state::<AppState>().0.lock().is_ok_and(|mut rt| {
+                            if rt.end_prompt.as_ref().is_some_and(|p| {
+                                p.session == session && p.state == EndPromptState::Kept
+                            }) {
+                                rt.end_prompt = None;
+                                crate::publish(&handle, &mut rt);
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                        if cleared {
+                            crate::companion::refresh(&handle);
+                        }
+                    });
+                    Ok(())
+                }
+                Err(error) => {
+                    let msg = error.message().to_string();
+                    if let Ok(mut runtime) = state.0.lock() {
+                        if let Some(p) =
+                            runtime.end_prompt.as_mut().filter(|p| p.session == session)
+                        {
+                            p.error = Some(msg.clone());
+                            crate::publish(&app, &mut runtime);
+                        }
+                    }
+                    Err(msg)
+                }
+            }
+        }
+        EndPromptAction::Delete => {
+            let kept_id = app.state::<Keeping>().0.lock().ok().and_then(|keeping| {
+                keeping
+                    .kept
+                    .as_ref()
+                    .filter(|k| k.session == session)
+                    .map(|k| k.id.clone())
+            });
+            let Some(id) = kept_id else {
+                return Ok(());
+            };
+            let target = id.clone();
+            let result = blocking(&app, move |store| store.delete(&target)).await?;
+            match result {
+                Ok(()) => {
+                    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+                        if keeping.kept.as_ref().is_some_and(|k| k.id == id) {
+                            keeping.kept = None;
+                        }
+                        keeping.export = None;
+                    }
+                    if let Ok(mut runtime) = state.0.lock() {
+                        if runtime
+                            .end_prompt
+                            .as_ref()
+                            .is_some_and(|p| p.session == session)
+                        {
+                            runtime.end_prompt = None;
+                            crate::publish(&app, &mut runtime);
+                        }
+                    }
+                    let _ = app.emit_to("main", "meeting-history:changed", ());
+                    crate::companion::refresh(&app);
+                    Ok(())
+                }
+                Err(error) => {
+                    let msg = error.message().to_string();
+                    if let Ok(mut runtime) = state.0.lock() {
+                        if let Some(p) =
+                            runtime.end_prompt.as_mut().filter(|p| p.session == session)
+                        {
+                            p.error = Some(msg.clone());
+                            crate::publish(&app, &mut runtime);
+                        }
+                    }
+                    Err(msg)
+                }
+            }
+        }
+    }
 }
