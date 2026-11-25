@@ -159,7 +159,7 @@ struct Runtime {
     /// The join setting declared its application once; it never does again.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     dev_join_declared: bool,
-    /// The call-starting prompt: off unless the person turns it on.
+    /// The call-starting prompt: on by default (off in lab runs).
     call_prompt: call_prompt::Watcher,
     /// End-of-call prompt for the floating companion when a non-empty live
     /// session ends.

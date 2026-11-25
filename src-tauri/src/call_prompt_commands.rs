@@ -39,8 +39,8 @@ pub(crate) fn set_call_prompt(
     auto_start: Option<bool>,
 ) -> Result<Settings, String> {
     main_only(&window)?;
-    if auto_start == Some(true) && crate::settings::lab_run() {
-        return Err("Lab runs do not enable automatic session start.".into());
+    if crate::settings::lab_run() && (enabled == Some(true) || auto_start == Some(true)) {
+        return Err("Lab runs do not enable the call-starting offer or automatic start.".into());
     }
     let settings = {
         let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
@@ -112,6 +112,9 @@ pub(crate) fn respond_to_call_prompt(
 /// nothing at all while both are off. The reads happen without the runtime lock.
 #[cfg(target_os = "macos")]
 pub(crate) fn install(app: &tauri::AppHandle) {
+    if crate::settings::lab_run() {
+        return;
+    }
     let app = app.clone();
     let _ = std::thread::Builder::new()
         .name("talkqte-call-prompt".into())
