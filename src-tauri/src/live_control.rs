@@ -219,6 +219,7 @@ impl Runtime {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn install_live_start(&mut self, ticket: &StartTicket) -> Result<u64, String> {
         self.install_live_start_with(ticket, false)
     }
@@ -265,11 +266,12 @@ impl Runtime {
         self.export = None;
         self.processing_reviews.clear();
         self.engine = engine;
-        // One-click live session start: reuse the single-use review/approval
-        // machinery immediately so transcription and cue processing start with
-        // capture, keeping all safety bounds and revocation intact. Lab runs
-        // keep their explicit manual review sequence.
-        if !crate::settings::lab_run() && !self.engine.is_lab_evaluator() {
+        // One-click live session start for own-key provider builds (Anthropic,
+        // OpenAI, Gemini): reuse the single-use review/approval machinery
+        // immediately so transcription and cue processing start with capture,
+        // keeping all safety bounds and revocation intact. Lab and development
+        // CLI backends keep their explicit review or launch-setting behavior.
+        if !crate::settings::lab_run() && self.engine.is_own_key() {
             if let Ok(id) = self.processing_reviews.prepare(
                 &self.engine,
                 engine::ConversationScope::NewSpeechOnly,
