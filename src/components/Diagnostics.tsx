@@ -4,6 +4,7 @@ import { diagnosticsReport, type DiagnosticsInput } from '../lib/diagnostics';
 import {
   cueUsage,
   keysStatus,
+  providerPreferences,
   transcriptionLanguage,
 } from '../lib/providerKeys';
 
@@ -12,7 +13,10 @@ import {
 export function Diagnostics({
   current,
 }: {
-  current: () => Omit<DiagnosticsInput, 'keys' | 'usage' | 'language'>;
+  current: () => Omit<
+    DiagnosticsInput,
+    'keys' | 'usage' | 'language' | 'preferences'
+  >;
 }) {
   const [report, setReport] = useState<string | null>(null);
   const [said, setSaid] = useState('');
@@ -20,12 +24,15 @@ export function Diagnostics({
 
   const show = async () => {
     setSaid('');
-    const [keys, usage, language] = await Promise.all([
+    const [keys, usage, language, preferences] = await Promise.all([
       keysStatus().catch(() => null),
       cueUsage().catch(() => null),
       transcriptionLanguage().catch(() => null),
+      providerPreferences().catch(() => null),
     ]);
-    setReport(diagnosticsReport({ ...current(), keys, usage, language }));
+    setReport(
+      diagnosticsReport({ ...current(), keys, usage, language, preferences }),
+    );
     setTimeout(() => preview.current?.focus(), 0);
   };
 

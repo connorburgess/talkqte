@@ -82,20 +82,50 @@ function isLabApi(id: string | undefined): boolean {
 const apiLaunchApproval =
   'Cues are off: launch-time approval (TALKQTE_DEV_MODEL_CONNECTION=on) is not accepted for the API lab backend. Relaunch without it, then approve in the session review.';
 
+function isOwnKeyProcessor(id: string | undefined): boolean {
+  return id === 'anthropic-api' || id === 'openai-api' || id === 'gemini-api';
+}
+
+function ownKeyAccountName(provider: string): {
+  name: string;
+  console: string;
+} {
+  if (provider.startsWith('OpenAI')) {
+    return { name: 'OpenAI', console: 'OpenAI Platform' };
+  }
+  if (provider.startsWith('Gemini')) {
+    return { name: 'Gemini', console: 'Google AI Studio' };
+  }
+  return { name: 'Anthropic', console: 'Anthropic Console' };
+}
+
 export function processingIssueText(
   issue: keyof typeof issueText,
   provider = 'Claude',
   lab = false,
   api = false,
 ): string {
-  if (!lab && issue === 'keyUnavailable') {
-    const os = knownPlatform()?.os;
-    if (os === 'windows')
-      return 'Cues stopped: your Anthropic key could not be read from Windows Credential Manager, or it was removed. Check it in Settings, then start a new session.';
-    if (os === 'linux')
-      return 'Cues stopped: your Anthropic key could not be read from the keyring, or it was removed. Check it in Settings, then start a new session.';
+  if (!lab) {
+    const account = ownKeyAccountName(provider);
+    if (issue === 'keyRejected') {
+      return `Cues stopped: ${account.name} did not accept your API key. Replace it in Settings, then start a new session.`;
+    }
+    if (issue === 'keyRateLimited') {
+      return `Cues stopped: ${account.name} is limiting requests for your API key. Nothing more will be sent and it will not retry; wait a minute, then turn the model connection on again.`;
+    }
+    if (issue === 'billing') {
+      return `Cues stopped: your ${account.name} account has no credit left for API requests. Nothing more will be sent; add credit in ${account.console}, then turn the model connection on again.`;
+    }
+    if (issue === 'keyUnavailable') {
+      const os = knownPlatform()?.os;
+      if (os === 'windows')
+        return `Cues stopped: your ${account.name} key could not be read from Windows Credential Manager, or it was removed. Check it in Settings, then start a new session.`;
+      if (os === 'linux')
+        return `Cues stopped: your ${account.name} key could not be read from the keyring, or it was removed. Check it in Settings, then start a new session.`;
+      return `Cues stopped: your ${account.name} key could not be read from the Keychain, or it was removed. Check it in Settings, then start a new session.`;
+    }
+    return issueText[issue];
   }
-  if (!lab) return issueText[issue];
   if (api && issue === 'devSettings') return apiLaunchApproval;
   if (
     issue === 'labStopped' ||
@@ -549,7 +579,11 @@ export function ProcessingControl({
             ? 'Sending recent lines to Claude…'
             : snapshot.processor?.name === 'Codex'
               ? 'Sending recent lines to Codex…'
-              : 'Sending recent lines to the model…'}
+              : snapshot.processor?.name.startsWith('OpenAI')
+                ? 'Sending recent lines to OpenAI…'
+                : snapshot.processor?.name.startsWith('Gemini')
+                  ? 'Sending recent lines to Gemini…'
+                  : 'Sending recent lines to the model…'}
         </p>
       )}
       {active && snapshot?.lastDecision === 'quiet' && (
@@ -598,7 +632,7 @@ export function ProcessingControl({
           <button
             className="secondary-button"
             aria-describedby={
-              approved && snapshot?.processor?.id === 'anthropic-api'
+              approved && isOwnKeyProcessor(snapshot?.processor?.id)
                 ? 'own-key-pause-help'
                 : undefined
             }
@@ -654,7 +688,7 @@ export function ProcessingControl({
           </button>
         )}
       </div>
-      {approved && snapshot?.processor?.id === 'anthropic-api' && (
+      {approved && isOwnKeyProcessor(snapshot?.processor?.id) && (
         <p className="processing-muted" id="own-key-pause-help">
           Pause cues stops cue requests only: the session&apos;s audio still
           goes to Deepgram and is billed to your account. Disable processing or

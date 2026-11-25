@@ -269,3 +269,60 @@ test('the confirmation follows notes edited while it is open', async ({
     page.getByRole('textbox', { name: 'Notes to keep, editable' }),
   ).toBeVisible();
 });
+
+test('uses the selected provider and omits cost estimates for custom notes models', async ({
+  page,
+}) => {
+  await openNative(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Cue & notes provider').selectOption('openai');
+  await page
+    .getByLabel('Custom meeting notes model ID (optional)')
+    .fill('gpt-5.4-codex');
+  await page.getByRole('button', { name: 'Save notes model' }).click();
+  await expect(
+    page.getByText('Custom meeting notes model saved: gpt-5.4-codex.'),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await session(page, 'ended');
+  await writeButton(page).click();
+
+  const confirm = page.getByRole('group', {
+    name: 'Send this meeting to OpenAI?',
+  });
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText(
+    'To: the OpenAI API (US), with your own OpenAI API key, billed to your OpenAI account.',
+  );
+  await expect(confirm).toContainText(
+    'Notes setting: Custom, model gpt-5.4-codex.',
+  );
+  await expect(confirm).toContainText(
+    'Estimated cost unavailable for custom model',
+  );
+  await expect(confirm).not.toContainText('at most $');
+
+  await confirm.getByRole('button', { name: 'Send and write notes' }).click();
+  await expect(notesSection(page)).toContainText(
+    'Estimated cost unavailable for custom model; your OpenAI Platform shows it.',
+  );
+
+  // Switch to Gemini with curated default before ending another session.
+  await page.evaluate(() => window.meetingNotesTest.reset());
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Cue & notes provider').selectOption('gemini');
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await session(page, 'ended');
+  await writeButton(page).click();
+
+  const geminiConfirm = page.getByRole('group', {
+    name: 'Send this meeting to Gemini?',
+  });
+  await expect(geminiConfirm).toContainText(
+    'Notes setting: Most careful (default), model gemini-2.5-pro.',
+  );
+  await expect(geminiConfirm).toContainText(
+    'To: the Gemini API (Google AI Studio), with your own Gemini API key, billed to your Google account.',
+  );
+});

@@ -6806,9 +6806,9 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                     sent; you read it, then copy it.
                   </p>
                   <p class="panel-muted" style="margin-top: 8px">
-                    State 1: <strong>Show diagnostics</strong> (secondary). State
-                    2: the report in a mono block on the band background with a
-                    full 1px hairline, focused, then
+                    State 1: <strong>Show diagnostics</strong> (secondary).
+                    State 2: the report in a mono block on the band background
+                    with a full 1px hairline, focused, then
                     <strong>Copy diagnostics</strong> (primary) and
                     <strong>Refresh</strong>. State 3: a polite status line,
                     "Copied. Paste it into your report." or "Could not copy.
@@ -6826,7 +6826,8 @@ Open items: sign-off window for contract text, draft handoff date.</pre>
                       border: 1px solid var(--g-line, #d3d9e2);
                       border-radius: 2px;
                     "
->TalkQTE: 0.1 alpha
+                  >
+TalkQTE: 0.1 alpha
 Build: desktop
 Deepgram key: set, checked
 Anthropic key: set
@@ -7085,6 +7086,34 @@ Cue processing stopped: -</pre>
                   </div>
                 </div>
 
+                <div class="sk-row">
+                  <div class="sk-row-head">
+                    <strong style="font-size: 14px">OpenAI</strong>
+                    <span class="sk-chip is-set">Set, not checked yet</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 4px; font-size: 12px"
+                  >
+                    Decides when a cue would help or writes meeting notes, if
+                    selected. Billed by OpenAI per token.
+                  </p>
+                </div>
+
+                <div class="sk-row">
+                  <div class="sk-row-head">
+                    <strong style="font-size: 14px">Gemini</strong>
+                    <span class="sk-chip">Not set</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 4px; font-size: 12px"
+                  >
+                    Decides when a cue would help or writes meeting notes, if
+                    selected. Billed by Google per token.
+                  </p>
+                </div>
+
                 <div
                   class="sk-session-box"
                   style="margin-top: 10px; padding: 12px"
@@ -7098,8 +7127,42 @@ Cue processing stopped: -</pre>
                     "
                   >
                     This session: 12 of 400 cue requests, about $0.03 of $0.50
-                    (an estimate, not your bill).
+                    (an estimate, not your bill), model claude-haiku-5-5.
                   </p>
+                  <p
+                    class="panel-muted"
+                    style="
+                      font-size: 12px;
+                      font-family: var(--font-mono);
+                      color: var(--g-ink);
+                      margin-top: 6px;
+                    "
+                  >
+                    Custom model state: 7 of 400 cue requests. Estimated spend
+                    unavailable for custom model gpt-5.4-codex.
+                  </p>
+                </div>
+
+                <div class="sk-row" style="margin-top: 10px">
+                  <strong
+                    style="font-size: 13px; display: block; margin-bottom: 6px"
+                    >Cue &amp; notes provider</strong
+                  >
+                  <div class="panel-input" style="width: 100%">Anthropic ▾</div>
+                  <strong
+                    style="font-size: 13px; display: block; margin: 8px 0 6px"
+                    >Cue model</strong
+                  >
+                  <div class="panel-input" style="width: 100%">
+                    claude-haiku-5-5 (tested default) ▾
+                  </div>
+                  <strong
+                    style="font-size: 13px; display: block; margin: 8px 0 6px"
+                    >Custom cue model ID (optional)</strong
+                  >
+                  <div class="panel-input" style="width: 100%">
+                    Leave blank for tested default (claude-haiku-5-5)
+                  </div>
                 </div>
 
                 <div class="sk-row" style="margin-top: 10px">
@@ -7121,6 +7184,10 @@ Cue processing stopped: -</pre>
                 drawer). Commands: <code>provider_keys_status</code>,
                 <code>set_provider_key</code>, <code>test_provider_key</code>,
                 <code>remove_provider_key</code>,
+                <code>provider_preferences</code>,
+                <code>set_cue_provider</code>,
+                <code>set_cue_model_override</code>,
+                <code>set_notes_model_override</code>,
                 <code>transcription_language</code>,
                 <code>set_transcription_language</code>, event
                 <code>provider-keys:changed</code>, and <code>cue_usage</code>.
@@ -7674,15 +7741,23 @@ Cue processing stopped: -</pre>
                     <div class="panel-input" style="width: 100%">
                       Most careful (default) · highest cost ▾
                     </div>
+                    <strong
+                      style="font-size: 12px; display: block; margin: 8px 0 4px"
+                      >Custom meeting notes model ID (optional)</strong
+                    >
+                    <div class="panel-input" style="width: 100%">
+                      Leave blank for tested default (claude-opus-5-5)
+                    </div>
                     <p
                       class="panel-muted"
                       style="margin-top: 6px; font-size: 12px"
                     >
                       After a live session you can ask for notes written from
-                      its transcript with your Anthropic key, one request per
-                      meeting, shown before anything is sent. This picks the
-                      model for that request (now claude-opus-5-5); cues during
-                      a session use their own, cheaper one.
+                      its transcript with your chosen provider key (Anthropic,
+                      OpenAI, or Gemini), one request per meeting, shown before
+                      anything is sent. Leave the custom field blank to use the
+                      curated model; estimated dollar cost is unavailable for
+                      custom model IDs.
                     </p>
                   </div>
                 </div>
@@ -9343,10 +9418,11 @@ Date: 2026-11-23 · Length: 06:42
               </p>
               <p class="up-boundary" id="upcoming-kept-meetings">
                 <strong>Meetings &amp; kept meetings</strong>
-                (<code>KeepInHistory.tsx</code>, <code>MeetingHistory.tsx</code>,
+                (<code>KeepInHistory.tsx</code>,
+                <code>MeetingHistory.tsx</code>,
                 <code>MeetingHistorySettings.tsx</code>): built plainly with
-                shared tokens and no one-sided borders; tiles for every state are
-                still to be added here. Component boundaries:
+                shared tokens and no one-sided borders; tiles for every state
+                are still to be added here. Component boundaries:
                 <code>KeepInHistory.tsx</code> (after a live session ends: the
                 offer with title and the optional application name; kept; kept
                 with an Update; a failed keep),
@@ -9357,8 +9433,7 @@ Date: 2026-11-23 · Length: 06:42
                 and <code>MeetingHistorySettings.tsx</code> (Settings → Kept
                 meetings: the offer setting, where the files are, Delete all
                 with its inline confirmation, and the lab-run, unavailable and
-                newer-version states). Styles:
-                <code>meeting-history.css</code>.
+                newer-version states). Styles: <code>meeting-history.css</code>.
               </p>
             </div>
           </div>
