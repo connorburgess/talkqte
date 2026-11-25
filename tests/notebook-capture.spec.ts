@@ -55,7 +55,7 @@ test('pending Start can be cancelled outside the busy queue; late preparation ne
   await page.evaluate(() => window.captureTest.releaseStart());
   await expect(start(page)).toBeEnabled();
   await expect(start(page)).toBeFocused();
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(stop(page)).toHaveCount(0);
   await start(page).click();
@@ -143,7 +143,8 @@ test('a stale Stop rejects a replacement operation and refreshes without automat
     oldTarget,
     freshTarget,
   ]);
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
+  await expect(stop(page)).toHaveCount(0);
 });
 
 test('failed cancellation is retryable, and a genuine model failure remains visible', async ({
@@ -213,7 +214,7 @@ test('Stop bypasses the still-pending Start during microphone permission, withou
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeDisabled();
   await expect(stop(page)).toBeEnabled();
   await stop(page).click();
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
   await expect(cancel(page)).toHaveCount(0);
   await page.evaluate(() => window.captureTest.releasePermission());
   await expect(start(page)).toBeEnabled();
@@ -236,13 +237,15 @@ test('missing capture status offers recovery without an unscoped Stop fallback',
   expect(calls).toContain('stop_capture');
   expect(calls).not.toContain('stop_live_session');
   expect(calls).not.toContain('stop_microphone');
-  await expect(mic(page).getByRole('status')).toHaveText('Off');
+  await expect(mic(page)).toHaveCount(0);
+  await expect(start(page)).toBeEnabled();
 });
 
 test('independent microphone cleanup is not relabelled as a live session', async ({
   page,
 }) => {
   await open(page, '?live');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page
     .getByRole('button', { name: 'Start microphone', exact: true })
     .click();
@@ -251,6 +254,10 @@ test('independent microphone cleanup is not relabelled as a live session', async
     .getByRole('button', { name: 'Stop microphone', exact: true })
     .click();
   await page.evaluate(() => window.captureTest.send({ capture: 'stopping' }));
+  await expect(mic(page)).toContainText('Microphone check');
+  await expect(mic(page).getByRole('status')).toHaveText('Stopping…');
+  await expect(stop(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(mic(page)).toContainText('Microphone check');
   await expect(mic(page).getByRole('status')).toHaveText('Stopping…');
   await expect(stop(page)).toHaveCount(0);
