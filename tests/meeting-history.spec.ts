@@ -50,7 +50,7 @@ const offer = (page: Page) =>
   page.getByRole('region', { name: 'Keep this meeting?' });
 const keepSelect = (page: Page) =>
   page
-    .getByRole('region', { name: 'Kept meetings' })
+    .getByRole('region', { name: 'Meetings' })
     .getByRole('combobox', { name: 'After a live session ends' });
 
 test('non-empty live sessions auto-save by default without keeping the application name', async ({
@@ -59,9 +59,7 @@ test('non-empty live sessions auto-save by default without keeping the applicati
   await openNative(page);
   await expect(offer(page)).toHaveCount(0);
   await endedSession(page, 'Fictional Call');
-  await expect(
-    page.getByText(/Kept in your meetings as “Meeting, /),
-  ).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as “Meeting, /)).toBeVisible();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
   expect(meeting).toBeTruthy();
   expect(meeting.title).toMatch(/^Meeting, /);
@@ -74,7 +72,7 @@ test('non-empty live sessions auto-save by default without keeping the applicati
   await page.evaluate(() =>
     window.liveTest.publish({ notes: 'Ask about the orchard gate. And keys.' }),
   );
-  const update = page.getByRole('button', { name: 'Update kept meeting' });
+  const update = page.getByRole('button', { name: 'Update saved meeting' });
   await expect(update).toBeVisible();
   await update.click();
   await expect(update).toHaveCount(0);
@@ -91,7 +89,7 @@ test('under Ask mode, nothing is kept unless the person chooses Keep for that me
   await expect(offer(page)).toHaveCount(0);
   await endedSession(page);
   await expect(offer(page)).toBeVisible();
-  await expect(offer(page)).toContainText('Never its audio');
+  await expect(offer(page)).toContainText('never audio');
   const title = offer(page).getByRole('textbox', { name: 'Title' });
   await expect(title).toHaveValue(/^Meeting, /);
   // Not this one: nothing is written and the offer goes for this session.
@@ -118,11 +116,11 @@ test('keeping in Ask mode uses the title typed, leaves the application name out 
   const title = offer(page).getByRole('textbox', { name: 'Title' });
   await title.fill('Orchard review');
   const name = offer(page).getByRole('checkbox', {
-    name: 'Also keep the application’s name (Fictional Call)',
+    name: 'Include application name (Fictional Call)',
   });
   await expect(name).not.toBeChecked();
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  const kept = page.getByText('Kept in your meetings as “Orchard review”.');
+  const kept = page.getByText('Saved to Meetings as “Orchard review”.');
   await expect(kept).toBeVisible();
   await expect(kept).toBeFocused();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
@@ -136,7 +134,7 @@ test('keeping in Ask mode uses the title typed, leaves the application name out 
   await page.evaluate(() =>
     window.liveTest.publish({ notes: 'Ask about the orchard gate. And keys.' }),
   );
-  const update = page.getByRole('button', { name: 'Update kept meeting' });
+  const update = page.getByRole('button', { name: 'Update saved meeting' });
   await expect(update).toBeVisible();
   expect(
     (await page.evaluate(() => window.historyTest.meetings()))[0].notes,
@@ -156,11 +154,11 @@ test('the application name is kept only when the person ticks it in Ask mode', a
   await endedSession(page, 'Fictional Call');
   await offer(page)
     .getByRole('checkbox', {
-      name: 'Also keep the application’s name (Fictional Call)',
+      name: 'Include application name (Fictional Call)',
     })
     .check();
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as/)).toBeVisible();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
   expect(meeting.application).toBe('Fictional Call');
 });
@@ -181,7 +179,7 @@ test('a failed keep says nothing was saved and can be tried again', async ({
     'The meeting could not be saved. Nothing was changed.',
   );
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as/)).toBeVisible();
 });
 
 test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all asks first', async ({
@@ -200,12 +198,12 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
     }),
   );
   await page.getByRole('button', { name: 'Settings' }).click();
-  const section = page.getByRole('region', { name: 'Kept meetings' });
-  await expect(section).toContainText('stored unencrypted on this Mac');
+  const section = page.getByRole('region', { name: 'Meetings' });
+  await expect(section).toContainText('Stored unencrypted in');
   await expect(section).toContainText(
     '~/Library/Application Support/com.talkqte.desktop/meetings',
   );
-  await expect(section).toContainText('1 meeting is kept.');
+  await expect(section).toContainText('1 saved meeting.');
   await expect(keepSelect(page)).toHaveValue('auto');
   await keepSelect(page).selectOption('ask');
   await expect(keepSelect(page)).toHaveValue('ask');
@@ -214,7 +212,7 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
 
   await section.getByRole('button', { name: 'Delete all meetings…' }).click();
   const confirm = section.getByRole('group', {
-    name: /Delete every kept meeting from this Mac\?/,
+    name: /Delete all saved meetings from this Mac\?/,
   });
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   expect(await page.evaluate(() => window.historyTest.meetings())).toHaveLength(
@@ -223,10 +221,10 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
   await section.getByRole('button', { name: 'Delete all meetings…' }).click();
   await confirm.getByRole('button', { name: 'Delete all meetings' }).click();
   await expect(section.getByRole('status')).toHaveText(
-    'Every kept meeting was deleted.',
+    'All saved meetings deleted.',
   );
   expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
-  await expect(section).toContainText('No meetings are kept.');
+  await expect(section).toContainText('No saved meetings.');
 
   await page.getByRole('button', { name: 'Notebook' }).click();
   await endedSession(page);
@@ -242,9 +240,9 @@ test('a lab run neither offers nor lists kept meetings', async ({ page }) => {
   await expect(page.getByText('Live session ended').first()).toBeVisible();
   await expect(offer(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(
-    page.getByRole('region', { name: 'Kept meetings' }),
-  ).toContainText('This is a lab run: kept meetings are not read or written.');
+  await expect(page.getByRole('region', { name: 'Meetings' })).toContainText(
+    'Lab runs don’t read or save meetings.',
+  );
 });
 
 test('Meetings lists kept meetings newest first, searches by text, and opens read-only', async ({
@@ -297,24 +295,24 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
 
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Kept meetings', level: 1 }),
+    page.getByRole('heading', { name: 'Meetings', level: 1 }),
   ).toBeVisible();
 
-  const list = page.getByRole('list', { name: 'Kept meetings' });
+  const list = page.getByRole('list', { name: 'Meetings' });
   const items = list.getByRole('button');
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toContainText('Orchard rota planning');
   await expect(items.nth(0)).toContainText('Meeting notes');
   await expect(items.nth(1)).toContainText('Gate sign options');
 
-  const search = page.getByRole('searchbox', { name: 'Search kept meetings' });
+  const search = page.getByRole('searchbox', { name: 'Search meetings' });
   await search.fill('painted');
   await expect(items).toHaveCount(1);
   await expect(items.nth(0)).toContainText('Gate sign options');
 
   await search.fill('nothing-matches');
   await expect(
-    page.getByText('No kept meetings match “nothing-matches”.'),
+    page.getByText('No meetings match “nothing-matches”.'),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).click();
   await expect(items).toHaveCount(2);
@@ -402,7 +400,7 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
   await confirm
     .getByRole('button', { name: 'Delete meeting', exact: true })
     .click();
-  await expect(page.getByText('No meetings kept yet.')).toBeVisible();
+  await expect(page.getByText('No meetings yet.')).toBeVisible();
   expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
   expect(
     await page.evaluate(
@@ -418,25 +416,21 @@ test('Meetings discloses unreadable entries, lab runs, and newer versions', asyn
   await page.evaluate(() => window.historyTest.setUnreadable(2));
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText(
-      '2 kept meetings could not be read and were left untouched.',
-    ),
+    page.getByText('2 meetings could not be read and were left untouched.'),
   ).toBeVisible();
 
   await page.evaluate(() => window.historyTest.setAvailability('newer'));
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText(
-      'Your kept meetings were saved by a newer version of TalkQTE.',
-    ),
+    page.getByText('Your meetings were saved by a newer version of TalkQTE'),
   ).toBeVisible();
 
   await page.evaluate(() => window.historyTest.setAvailability('labRun'));
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText('This is a lab run: kept meetings are not read or written.'),
+    page.getByText('Lab runs don’t read or save meetings.'),
   ).toBeVisible();
 });
 

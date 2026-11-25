@@ -72,9 +72,9 @@ for (const [os, name] of [
         : 'Keys stay in your desktop keyring',
     );
     await expect(saved).not.toContainText('Mac');
-    await expect(page.getByText('TalkQTE remembers your name')).toContainText(
-      'on this computer.',
-    );
+    await expect(
+      page.getByText(/Highlights questions asked of you by name/),
+    ).toContainText('Saved on this computer.');
   });
 }
 

@@ -214,7 +214,7 @@ test('an ended session, its meeting notes offer and the export review have no au
   });
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Kept meetings', level: 1 }),
+    page.getByRole('heading', { name: 'Meetings', level: 1 }),
   ).toBeVisible();
   expect(await violations(page), 'meetings list').toEqual([]);
   await page.getByRole('button', { name: /Fictional orchard sync/ }).click();

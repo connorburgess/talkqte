@@ -106,7 +106,7 @@ test('both sides: the notice comes first, then the chosen application joins the 
   await expect(chooser).toContainText(
     'that one start covers the microphone and the application',
   );
-  await expect(chooser).toContainText('Use headphones if you can.');
+  await expect(chooser).toContainText('Use headphones if you can');
   await expect(start(page)).toBeDisabled();
   expect(await hostCalls(page)).toEqual([]);
 

@@ -48,13 +48,10 @@ export function KeepMeetingChoice({
         onChange={(event) => void choose(event.target.checked)}
       />
       <div>
-        <label htmlFor={`${id}-keep`}>
-          Also keep this meeting: its transcript and the cues shown
-        </label>
+        <label htmlFor={`${id}-keep`}>Include transcript and shown cues</label>
         <p id={`${id}-help`}>
-          For this session only. Note reminders and the Still open list are left
-          out. The text below changes to show exactly what will be saved;
-          nothing is written until you choose a destination.
+          This session only. Excludes note reminders and Focus lines. Preview
+          updates below; nothing saves until you choose a destination.
         </p>
         {error && <p role="alert">{error}</p>}
       </div>

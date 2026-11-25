@@ -4,14 +4,14 @@
 
 The user task is to make context readable without squeezing the current question out of view. The existing paper and evergreen appearance, optional setup and cue controls remain. The notebook column has a bounded width and scrolls when its contents are taller than the window. Notes and the question each retain a minimum width; they stack when their container cannot fit both. Smaller windows use the existing full-width notebook layout.
 
-Focus a divider and use Left/Right to resize, Shift for larger steps, and Home/End for the limits. Escape cancels an active drag. **Panel sizes** in the toolbar offers clickable range controls and **Reset panel sizes**, so dragging is optional. Escape closes that menu and returns focus to its summary. Widths survive Settings navigation and window resizing. Since 24 November 2026 the desktop app keeps the sidebar width and the notes share in the settings file ([privacy](../PRIVACY.md)), written once a drag or slider settles, and **Reset panel sizes** saves the defaults; the browser preview still forgets them on reload. No meeting data, capture command or provider request is added.
+Focus a divider and use Left/Right to resize, Shift for larger steps, and Home/End for the limits. Escape cancels an active drag. Widths survive Settings navigation and window resizing. Since 24 November 2026 the desktop app keeps the sidebar width and the notes share in the settings file ([privacy](../PRIVACY.md)), written once a drag settles, and **Reset panel sizes** in **Settings** restores and saves the defaults; the browser preview still forgets them on reload. No meeting data, capture command or provider request is added. The former toolbar **Panel sizes** disclosure and redundant sidebar **Set up a live session** checklist were removed in a later UI distill pass.
 
 The separator labels, controlled-pane references and value properties are informed by the [W3C window splitter pattern](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/) (checked 11 November 2026). That page notes its pattern review is incomplete. This implementation preserves non-collapsible panels and does not claim full pattern conformance or native assistive-technology acceptance.
 
 ## UI/UX checkpoint
 
-| Before: fixed widths | After: adjusted notebook and notes widths |
-| --- | --- |
+| Before: fixed widths                                                     | After: adjusted notebook and notes widths                                                      |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | ![Fictional notebook with fixed column widths](assets/panels-before.png) | ![Fictional notebook with wider columns and a focused resize divider](assets/panels-after.png) |
 
 These browser captures use the bundled fictional demo at 1320 × 880 with reduced motion. The [600-pixel stacked view](assets/panels-narrow.png) keeps the question above the editor. The toolbar menu, focused dividers and scrollable notebook were also visually inspected. No owner's screenshot or account content is included.

@@ -36,15 +36,12 @@ export function SavedSettings({ onReset }: { onReset: () => void }) {
       <div>
         <h2 id="saved-settings">Saved settings</h2>
         <p>
-          TalkQTE remembers the choices on this page between launches: your
-          name, the transcription language, the notes model, how questions look
-          and when they appear, where the companion sits, panel sizes, whether
-          ended meetings are kept and the call-starting offer.{' '}
+          Preferences on this page are saved between launches{' '}
           {platform?.os === 'windows'
-            ? 'They are kept in a small settings file in your user profile’s app data folder. Keys stay in Windows Credential Manager, and nothing from a meeting is saved there.'
+            ? 'in your user app data folder. Keys stay in Windows Credential Manager, and nothing from a meeting is saved there.'
             : platform?.os === 'linux'
-              ? 'They are kept in a small settings file in your home folder that only your account can read. Keys stay in your desktop keyring, and nothing from a meeting is saved there.'
-              : 'They are kept in a small settings file on this Mac that only your account can read. Keys stay in your Keychain, and nothing from a meeting is saved there.'}
+              ? 'in your home folder, readable only by you. Keys stay in your desktop keyring, and nothing from a meeting is saved there.'
+              : 'on this Mac, readable only by you. Keys stay in your Keychain, and nothing from a meeting is saved there.'}
         </p>
         {labRun && (
           <p className="small muted" role="status">

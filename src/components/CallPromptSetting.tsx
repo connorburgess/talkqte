@@ -75,15 +75,11 @@ export function CallPromptSetting() {
           While TalkQTE is open, it can notice when another app uses your
           microphone for 3 seconds. It reads only whether the microphone is in
           use and which app is in front, never audio or what is on screen, and
-          that stays on this Mac. Offer in the dock gives a 1-click Start
-          button. Start automatically begins listening immediately when a known
-          meeting app or browser starts using the microphone (when your keys are
-          configured and no session is running), sending your microphone to
-          Deepgram and recent lines to Anthropic until you press Stop, and shows
-          Listening · Stop in the dock. A browser call (Google Meet, for
-          example) looks like any other use of the microphone in a browser.
-          TalkQTE has to be running to notice. It remembers these settings, and
-          the apps you said not to ask about, by their identifiers only.
+          that stays on this Mac. Offer in the dock shows a 1-click Start
+          button; Start automatically begins listening right away (sending your
+          mic to Deepgram and recent lines to Anthropic until Stop, showing
+          Listening · Stop in the dock). Browser calls look like any other
+          browser mic use. App preferences save by identifier only.
         </p>
         {settings && (
           <>

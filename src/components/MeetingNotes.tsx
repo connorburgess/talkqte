@@ -248,10 +248,9 @@ export function MeetingNotes({
       {phase === 'none' && !plan && (
         <>
           <p className="meeting-notes-help">
-            A model can write a short summary, decisions, action items and open
-            questions from this meeting's transcript, using your chosen API key.
-            You see what will be sent and an estimated cost first; nothing is
-            sent until you confirm. Each meeting gets one request.
+            Generate a summary, decisions, action items, and open questions from
+            this transcript using your API key. You’ll review what’s sent and
+            the estimated cost first (one request per meeting).
           </p>
           <button
             ref={writeButton}
@@ -332,9 +331,9 @@ export function MeetingNotes({
             </p>
           </div>
           <p className="meeting-notes-help">
-            One request, no retry: if it fails, nothing more is sent for this
-            meeting. {plan.providerName ?? 'Anthropic'} handles what is sent
-            under your API account's terms, and it cannot be recalled once sent.
+            One request, no retry. Handled under your{' '}
+            {plan.providerName ?? 'Anthropic'} API terms and cannot be recalled
+            once sent.
           </p>
           <div className="meeting-notes-actions">
             <button
@@ -379,10 +378,8 @@ export function MeetingNotes({
             Check, edit, then keep or discard
           </h3>
           <p role="status">
-            Written by a model, which can still be wrong. Each item ends with
-            the transcript times or note lines it came from. An owner or date is
-            shown only when those words appear in the lines the item cites; that
-            does not show the person agreed to it.
+            Model-written—verify against cited lines. Owners and dates appear
+            only if spoken in those lines, which doesn’t confirm agreement.
             {cost}
           </p>
           <label htmlFor={`${id}-text`}>Notes to keep, editable</label>
@@ -414,8 +411,8 @@ export function MeetingNotes({
             </ul>
           </details>
           <p className="meeting-notes-help">
-            Kept notes are added to your export after your own notes; the export
-            review shows them. Nothing is saved until you export.
+            Kept notes append to your Markdown export; nothing saves to disk
+            until you export or update the saved meeting.
           </p>
           <div className="meeting-notes-actions">
             <button
@@ -474,8 +471,7 @@ export function MeetingNotes({
 
       {phase === 'discarded' && (
         <p className="meeting-notes-help" role="status">
-          Notes discarded. Each meeting gets one request, so none will be
-          written again for this meeting.
+          Notes discarded. One request per meeting.
         </p>
       )}
 

@@ -121,7 +121,7 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
   await expect(
-    page.getByRole('heading', { name: 'Make room for your conversation.' }),
+    page.getByRole('heading', { name: 'Settings', level: 1 }),
   ).toBeVisible();
   await nav
     .getByRole('button', { name: 'Notebook', exact: true })

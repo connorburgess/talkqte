@@ -58,9 +58,7 @@ test('default auto-save saves on stop and shows Meeting saved in the companion d
 
   const card = page.getByRole('region', { name: 'Meeting saved' });
   await expect(card).toBeVisible();
-  await expect(card).toContainText(
-    '1 line · notes · Saved to your Meetings list.',
-  );
+  await expect(card).toContainText('1 line · notes · Saved to Meetings.');
 
   // Never exposes transcript, notes, title, or application name in companion.
   await expect(card).not.toContainText(firstLine);
@@ -106,7 +104,7 @@ test('auto-saved notes-only live session hides Write notes and supports Dismiss'
 
   const card = page.getByRole('region', { name: 'Meeting saved' });
   await expect(card).toBeVisible();
-  await expect(card).toContainText('Your notes · Saved to your Meetings list.');
+  await expect(card).toContainText('Your notes · Saved to Meetings.');
   await expect(card.getByRole('button', { name: 'Write notes' })).toHaveCount(
     0,
   );
@@ -127,9 +125,7 @@ test('Ask mode offers Keep meeting in the dock and retries inline on failure', a
 
   const askCard = page.getByRole('region', { name: 'Meeting ended' });
   await expect(askCard).toBeVisible();
-  await expect(askCard).toContainText(
-    '1 line · notes · Keep in your Meetings list?',
-  );
+  await expect(askCard).toContainText('1 line · notes · Save to Meetings?');
   expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
 
   await page.evaluate(() =>
@@ -144,7 +140,7 @@ test('Ask mode offers Keep meeting in the dock and retries inline on failure', a
   await askCard.getByRole('button', { name: 'Keep meeting' }).click();
   const keptCard = page.getByRole('region', { name: 'Kept' });
   await expect(keptCard).toBeVisible();
-  await expect(keptCard).toContainText('Saved to your Meetings list.');
+  await expect(keptCard).toContainText('Saved to Meetings.');
   await expect(keptCard.getByRole('button', { name: 'Open' })).toBeVisible();
   await expect(
     keptCard.getByRole('button', { name: 'Write notes' }),

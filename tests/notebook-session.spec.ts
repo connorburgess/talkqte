@@ -23,7 +23,7 @@ test('before a session, a build without live transcription says plainly that it 
   await standIn(page);
   await expect(title(page)).toHaveText('No session yet');
   await expect(session(page)).toContainText(
-    'Nothing is being captured. Cues appear only during a live session. This build has no live transcription.',
+    'Nothing is captured. This build has no live transcription.',
   );
   await expect(
     page.getByRole('button', { name: 'Start live session' }),
@@ -31,14 +31,14 @@ test('before a session, a build without live transcription says plainly that it 
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
   ).toContainText(
-    'No cue yet.During a live session, one cue at a time appears here. In this version cues come from simple phrase rules, not AI.',
+    'No cue yet.One cue at a time appears here during a live session (phrase rules only in this build).',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
     'No transcript yet.Lines appear here during a live session.',
   );
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'Your notes stay in memory until you quit. Export anything you want to keep before closing.',
+    'Notes stay in memory until you quit. Export before closing to keep them.',
   );
   // No session clock and nothing fictional: this is the person's own notebook.
   await expect(page.locator('.session-clock')).toHaveCount(0);
@@ -52,7 +52,9 @@ test('before a session, the notebook never says nothing is captured while the mi
   page,
 }) => {
   await standIn(page, '/?live');
-  await expect(session(page)).toContainText('Nothing is being captured.');
+  await expect(session(page)).toContainText(
+    'Nothing is captured until you start a live session.',
+  );
   await page.evaluate(() =>
     window.microphoneTest.send({
       status: 'listening',
@@ -61,7 +63,7 @@ test('before a session, the notebook never says nothing is captured while the mi
     }),
   );
   await expect(session(page)).toContainText(
-    'No live session. The microphone check above is on; it records and transcribes nothing.',
+    'No live session. Mic check is on; nothing is recorded or transcribed.',
   );
   await expect(session(page)).not.toContainText('Nothing is being captured');
   // A denied permission leaves the check failed and released: Settings
@@ -77,7 +79,9 @@ test('before a session, the notebook never says nothing is captured while the mi
   await expect(
     page.getByRole('region', { name: 'Microphone', exact: true }),
   ).toHaveCount(0);
-  await expect(session(page)).toContainText('Nothing is being captured.');
+  await expect(session(page)).toContainText(
+    'Nothing is captured until you start a live session.',
+  );
   await expect(session(page)).not.toContainText('microphone check above is on');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
@@ -91,7 +95,7 @@ test('before a session, the notebook never says nothing is captured while the mi
     window.microphoneTest.send({ status: 'error', canStart: false }),
   );
   await expect(session(page)).toContainText(
-    'No live session. The microphone is still being released; see above.',
+    'No live session. Releasing microphone; see above.',
   );
   await expect(session(page)).not.toContainText('Nothing is being captured');
   await page.evaluate(() =>
@@ -101,7 +105,9 @@ test('before a session, the notebook never says nothing is captured while the mi
       message: null,
     }),
   );
-  await expect(session(page)).toContainText('Nothing is being captured.');
+  await expect(session(page)).toContainText(
+    'Nothing is captured until you start a live session.',
+  );
   await page.evaluate(() =>
     window.captureTest.send({
       source: {
@@ -117,7 +123,7 @@ test('before a session, the notebook never says nothing is captured while the mi
     }),
   );
   await expect(session(page)).toContainText(
-    'No live session. Audio from a selected application may still be captured; see Cue processing above.',
+    'No live session. Selected app audio may still be capturing; see Cue processing above.',
   );
   await expect(session(page)).not.toContainText('Nothing is being captured');
 });
@@ -130,14 +136,14 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .getByRole('textbox', { name: 'Meeting notes' })
     .fill('Fictional note: ask about the welcome guide.');
   await expect(session(page)).toContainText(
-    'Nothing is being captured. Start a live session when your meeting begins.',
+    'Nothing is captured until you start a live session.',
   );
   await session(page)
     .getByRole('button', { name: 'Start live session' })
     .click();
   await expect(title(page)).toHaveText('Live session in progress');
   await expect(session(page)).toContainText(
-    'Your microphone · not saved by TalkQTE',
+    'Your microphone · audio not recorded',
   );
   await expect(
     session(page).getByRole('button', { name: 'Start live session' }),
@@ -161,7 +167,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
   await expect(session(page)).toContainText(
-    'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.',
+    'Saved to Meetings. Notes stay here until you start another session or quit.',
   );
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
@@ -186,7 +192,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(review).not.toContainText('first draft');
   await page.keyboard.press('Escape');
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.',
+    'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.',
   );
   // A new session can be started.
   await expect(
@@ -314,7 +320,7 @@ test('with cloud transcription, the notebook names the service, and says plainly
     page.evaluate((value) => window.liveTest.publish(value as never), value);
   await publish({ transcription: { provider: 'Deepgram' } });
   await expect(session(page)).toContainText(
-    'Your microphone · not saved by TalkQTE',
+    'Your microphone · audio not recorded',
   );
   await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
     'Your microphone is sent to Deepgram for transcription. TalkQTE does not record audio.',
@@ -407,7 +413,7 @@ test('a live launch says where audio goes in Settings, offers no speech model, a
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.locator('#live-transcription').locator('..');
   await expect(settings).toContainText(
-    'TalkQTE does not transcribe on this device: pressing Start live session immediately sends the session’s audio to Deepgram and recent lines to Anthropic with your keys until you press Stop or turn off processing.',
+    'TalkQTE does not transcribe on this device. Pressing Start live session sends audio (from your mic or a chosen Mac app) to Deepgram and recent lines to Anthropic with your keys until you stop or turn off processing.',
   );
   await expect(settings.getByRole('status')).toHaveText(
     'Ready. Pressing Start live session sends audio to Deepgram and recent lines to Anthropic until you stop.',

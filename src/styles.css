@@ -178,13 +178,6 @@ svg {
   display: flex;
   flex-direction: column;
 }
-.meeting-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--muted);
-  margin-bottom: var(--space-12);
-}
 .workspace {
   flex: 1;
   min-width: 0;
@@ -490,16 +483,10 @@ svg {
   margin-top: var(--space-32);
   border-block: 1px solid var(--line);
 }
-.focus-disclosure > summary,
-.setup-disclosure > summary {
+.focus-disclosure > summary {
   cursor: pointer;
   min-height: 44px;
   padding: var(--space-12) 0;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-}
-.focus-disclosure > summary {
   color: var(--ink);
   font-family: var(--font);
   font-size: 14px;
@@ -513,8 +500,7 @@ svg {
   font-size: 14px;
   font-weight: 400;
 }
-.focus-disclosure > summary:focus-visible,
-.setup-disclosure > summary:focus-visible {
+.focus-disclosure > summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-control);
@@ -524,9 +510,6 @@ svg {
 }
 .focus-disclosure .setting-control {
   margin-top: var(--space-12);
-}
-.setup-disclosure {
-  border-top: 1px solid var(--line);
 }
 .meeting-focus-heading {
   display: flex;
@@ -1124,8 +1107,7 @@ svg {
 .setting:first-of-type {
   margin-top: var(--space-24);
 }
-.setting h2,
-.coming-next h2 {
+.setting h2 {
   font-family: var(--font);
   font-size: 17px;
   font-weight: 600;
@@ -1201,15 +1183,6 @@ svg {
   width: min(100%, 24rem);
   height: 10px;
   accent-color: var(--ink);
-}
-.coming-next {
-  padding-top: var(--space-32);
-}
-.coming-next p {
-  margin-top: var(--space-8);
-  font-size: 16px;
-  line-height: 1.75;
-  max-width: 60ch;
 }
 .small {
   font-size: 14px;
@@ -1654,15 +1627,6 @@ svg {
     grid-auto-flow: column;
     gap: 4px;
   }
-  .meeting-list-content {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .meeting-line {
-    float: right;
-    margin: 0;
-    gap: 10px;
-  }
   .toolbar {
     height: 48px;
     padding-inline: var(--space-24);
@@ -1725,52 +1689,6 @@ svg {
     animation: none !important;
     scroll-behavior: auto !important;
   }
-}
-
-/* Optional setup sits below the navigation. */
-.setup-card {
-  text-align: left;
-  padding: 12px 4px;
-  margin-bottom: 16px;
-}
-.setup-card .meeting-line {
-  float: none;
-  margin-bottom: 8px;
-}
-.setup-steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 10px;
-}
-.setup-steps li {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-.setup-steps li.done strong {
-  color: var(--muted);
-}
-.setup-mark {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  margin-top: 1px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-inverse);
-}
-.setup-steps li.done .setup-mark {
-  background: var(--ink);
-  border-color: var(--ink);
-}
-.setup-steps .text-button {
-  margin-top: 4px;
-  min-height: 44px;
 }
 
 /* Focus suggestions from Granola, under the focus field in the notebook. */

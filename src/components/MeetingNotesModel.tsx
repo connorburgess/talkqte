@@ -166,12 +166,10 @@ export function MeetingNotesModel({
         )}
       </div>
       <p id={`${id}-help`} className="provider-key-role">
-        After a live session you can ask for notes written from its transcript
-        with your {cueProviderName(provider)} key, one request per meeting,
-        shown before anything is sent. This picks the model for that request
-        (now {model ?? '…'}). Leave the custom field blank to use the selected
-        curated model; estimated dollar cost is unavailable for custom model
-        IDs.
+        Generates notes from a transcript using your {cueProviderName(provider)}{' '}
+        key (one request per meeting, confirmed first; now {model ?? '…'}).
+        Leave custom blank for the curated model; cost estimates are unavailable
+        for custom IDs.
       </p>
       {error ? (
         <p id={`${id}-error`} className="provider-keys-error" role="alert">

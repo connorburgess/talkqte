@@ -13,6 +13,7 @@ import {
   deleteKeptMeeting,
   exportKeptMeeting,
   failure,
+  historyStatus,
   keptMeetingExportPreview,
   keptMeetings,
   meetingDate,
@@ -20,6 +21,7 @@ import {
   openKeptMeeting,
   renameKeptMeeting,
   sourceNames,
+  type AfterSessionKeep,
   type KeptListing,
   type KeptMeeting,
 } from '../lib/meetingHistory';
@@ -49,6 +51,7 @@ export function MeetingHistory({
   const id = useId();
   const [query, setQuery] = useState('');
   const [listing, setListing] = useState<KeptListing | null>(null);
+  const [afterKeep, setAfterKeep] = useState<AfterSessionKeep>('auto');
   const [selected, setSelected] = useState<KeptMeeting | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -78,15 +81,19 @@ export function MeetingHistory({
     const request = ++listRequest.current;
     setLoading(true);
     try {
-      const next = await keptMeetings(search.trim() || undefined);
+      const [next, status] = await Promise.all([
+        keptMeetings(search.trim() || undefined),
+        historyStatus().catch(() => null),
+      ]);
       if (request !== listRequest.current) return;
       setListing(next);
+      if (status) setAfterKeep(status.afterSessionKeep);
       if (next.availability !== 'on') {
         setSelected(null);
       }
     } catch (problem) {
       if (request !== listRequest.current) return;
-      setError(failure(problem, 'Kept meetings could not be read.'));
+      setError(failure(problem, 'Meetings could not be read.'));
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
@@ -385,7 +392,7 @@ export function MeetingHistory({
           {selected.notes.trim() ? (
             <pre className="history-text">{selected.notes}</pre>
           ) : (
-            <p className="history-help">No notes were written.</p>
+            <p className="history-help">No notes.</p>
           )}
         </section>
 
@@ -405,7 +412,7 @@ export function MeetingHistory({
         >
           <h2 id={`${id}-cues-heading`}>Cues shown ({selected.cues.length})</h2>
           {selected.cues.length === 0 ? (
-            <p className="history-help">No cues were shown in this meeting.</p>
+            <p className="history-help">No cues shown.</p>
           ) : (
             <ul className="history-cues">
               {selected.cues.map((cue, index) => (
@@ -508,12 +515,8 @@ export function MeetingHistory({
 
   return (
     <div className="history">
-      <h1>Kept meetings</h1>
-      <p className="page-description">
-        Kept meetings on this Mac, newest first. By default, non-empty live
-        sessions save here when they end; you can change this in Settings → Kept
-        meetings.
-      </p>
+      <h1>Meetings</h1>
+      <p className="page-description">Saved on this Mac, newest first.</p>
 
       <p className="visually-hidden" role="status">
         {notice}
@@ -523,27 +526,26 @@ export function MeetingHistory({
 
       {!desktop && listing?.availability !== 'on' ? (
         <p className="history-help">
-          Kept meetings are available in the desktop app.
+          Meetings are available in the desktop app.
         </p>
       ) : listing?.availability === 'labRun' ? (
         <p className="history-help" role="status">
-          This is a lab run: kept meetings are not read or written.
+          Lab runs don’t read or save meetings.
         </p>
       ) : listing?.availability === 'unavailable' ? (
         <p className="history-help" role="status">
-          Kept meetings are not available in this launch.
+          Meetings are not available in this launch.
         </p>
       ) : listing?.availability === 'newer' ? (
         <p className="history-help" role="status">
-          Your kept meetings were saved by a newer version of TalkQTE. This
-          version leaves them as they are; Settings → Kept meetings → Delete all
-          meetings still removes them.
+          Your meetings were saved by a newer version of TalkQTE and are left as
+          they are. Delete all meetings in Settings removes them.
         </p>
       ) : (
         <>
           <div className="history-search">
             <label className="visually-hidden" htmlFor={`${id}-search`}>
-              Search kept meetings
+              Search meetings
             </label>
             <Search size={16} aria-hidden="true" />
             <input
@@ -551,7 +553,7 @@ export function MeetingHistory({
               type="search"
               value={query}
               maxLength={200}
-              placeholder="Search titles, notes, cues, or transcripts"
+              placeholder="Search meetings…"
               onChange={(event) => setQuery(event.target.value)}
             />
             {query && (
@@ -568,8 +570,8 @@ export function MeetingHistory({
           {listing && listing.unreadable > 0 && (
             <p className="history-help" role="status">
               {listing.unreadable === 1
-                ? '1 kept meeting could not be read and was left untouched.'
-                : `${listing.unreadable} kept meetings could not be read and were left untouched.`}
+                ? '1 meeting could not be read and was left untouched.'
+                : `${listing.unreadable} meetings could not be read and were left untouched.`}
             </p>
           )}
 
@@ -577,7 +579,7 @@ export function MeetingHistory({
             <div className="history-empty">
               {query.trim() ? (
                 <>
-                  <p>No kept meetings match “{query.trim()}”.</p>
+                  <p>No meetings match “{query.trim()}”.</p>
                   <button
                     type="button"
                     className="secondary-button"
@@ -588,13 +590,16 @@ export function MeetingHistory({
                 </>
               ) : (
                 <p>
-                  No meetings kept yet. Non-empty live sessions save here when
-                  they end unless you change Kept meetings in Settings.
+                  {afterKeep === 'ask'
+                    ? 'No meetings yet. Choose Keep meeting after a session ends to save one here.'
+                    : afterKeep === 'off'
+                      ? 'No meetings yet. Auto-save is off in Settings.'
+                      : 'No meetings yet. Ended sessions save here automatically.'}
                 </p>
               )}
             </div>
           ) : (
-            <ul className="history-list" aria-label="Kept meetings">
+            <ul className="history-list" aria-label="Meetings">
               {(listing?.meetings ?? []).map((item) => (
                 <li key={item.id}>
                   <button
@@ -620,7 +625,7 @@ export function MeetingHistory({
 
           {loading && !listing && (
             <p className="history-help" role="status">
-              Loading kept meetings…
+              Loading meetings…
             </p>
           )}
         </>
