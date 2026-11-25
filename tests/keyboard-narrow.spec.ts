@@ -133,12 +133,10 @@ test('a live session starts and stops from the keyboard without losing focus at 
   await expectWithinViewport(page, stop, 'Stop live session');
   await stop.press('Enter');
   await expect(stop).toHaveCount(0);
-  // Focus stays on a capture control instead of falling back to the page.
+  // Focus returns to the session start control instead of falling back to the page.
   await expect(
-    page
-      .getByRole('region', { name: 'Microphone', exact: true })
-      .locator(':focus'),
-  ).toHaveCount(1);
+    page.getByRole('button', { name: 'Start live session', exact: true }),
+  ).toBeFocused();
 });
 
 test('the companion shows a question and its source without animation under reduced motion', async ({

@@ -34,6 +34,13 @@ test('browser preview never asks for microphone access or invents activity', asy
     };
   });
   await page.goto('/');
+  await expect(
+    page.getByRole('region', { name: 'Microphone', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Start microphone' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('Available in the macOS app');
   await expect(
@@ -46,6 +53,10 @@ test('microphone requires explicit start and only native snapshots confirm activ
   page,
 }) => {
   await nativePage(page);
+  await expect(
+    page.getByRole('region', { name: 'Microphone', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText('Off');
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
@@ -60,6 +71,10 @@ test('microphone requires explicit start and only native snapshots confirm activ
     message: null,
   });
   await expect(panel).toContainText('Signal detected');
+  // Navigating back to Notebook keeps a compact active-mic bar with Stop reachable.
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('On');
+  await expect(panel).toContainText('Signal detected');
   // Other notebook actions leave the check running; only Stop ends it.
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toContainText(/microphone/i);
@@ -72,6 +87,8 @@ test('microphone requires explicit start and only native snapshots confirm activ
   await expect(panel.getByRole('status')).toHaveText('Stopping…');
   await expect(panel.getByRole('button')).toBeDisabled();
   await signal(page, { status: 'off', canStart: true });
+  await expect(panel).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(panel.getByRole('status')).toHaveText('Off');
   await expect(
     panel.getByRole('button', { name: 'Start microphone' }),
@@ -82,6 +99,7 @@ test('permission errors remain visible and retry waits for device cleanup', asyn
   page,
 }) => {
   await nativePage(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await panel.getByRole('button', { name: 'Start microphone' }).click();
   await signal(page, {
@@ -106,6 +124,7 @@ test('a failed stop command never reports the microphone as off', async ({
   page,
 }) => {
   await nativePage(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText('Off');
   await signal(page, { status: 'listening', canStart: false });
@@ -127,6 +146,7 @@ test('a queued stop acknowledges the request without claiming native cleanup has
   page,
 }) => {
   await nativePage(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await panel.getByRole('button', { name: 'Start microphone' }).click();
   await page.evaluate(() => window.microphoneTest.holdNextStop());
@@ -145,6 +165,10 @@ test('a delayed initial snapshot and older events cannot overwrite the microphon
   page,
 }) => {
   await nativePage(page, '?delay-microphone');
+  await expect(
+    page.getByRole('region', { name: 'Microphone', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText(
     'Checking microphone status…',
@@ -466,6 +490,7 @@ test('input label follows ordered capture state through stop, failure and explic
   page,
 }) => {
   await nativePage(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).not.toContainText('Input:');
   const help = panel.locator('summary', { hasText: 'Change microphone' });
@@ -544,12 +569,18 @@ test('unknown and long input names do not hide narrow-window controls', async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await nativePage(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await signal(page, { status: 'listening', deviceName: null });
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('Input: name unavailable');
   await signal(page, { deviceName: 'Fictional'.repeat(13) });
   await panel.locator('summary').click();
   await expect(panel).toContainText('wait for Off');
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  // Compact indicator on Notebook also fits narrow viewports and keeps Stop reachable.
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);

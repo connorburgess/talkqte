@@ -154,8 +154,13 @@ test('dictation is disabled during a live session and during microphone monitori
   const noteBtn = page.getByRole('button', { name: 'Dictate note' });
   const focusBtn = page.getByRole('button', { name: 'Dictate focus' });
 
-  // Active microphone check disables dictation.
+  // Active microphone check (started from Settings) disables dictation on Notebook.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Start microphone' }).click();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  if (!(await focusBtn.isVisible())) {
+    await page.locator('.focus-disclosure > summary').press('Enter');
+  }
   await expect(noteBtn).toBeDisabled();
   await expect(noteBtn).toHaveAttribute(
     'title',
@@ -167,7 +172,7 @@ test('dictation is disabled during a live session and during microphone monitori
     'Stop the microphone check before dictating.',
   );
 
-  // Release microphone check.
+  // Release microphone check from Notebook's active-mic bar.
   await page.getByRole('button', { name: 'Stop microphone' }).click();
   await page.evaluate(() =>
     window.microphoneTest.send({ status: 'off', canStart: true }),
