@@ -77,14 +77,9 @@ import { MenuBarSettings } from './components/MenuBarSettings';
 import { UpdateSettings } from './components/UpdateSettings';
 import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
 import {
-  SessionSources,
-  microphoneOnly,
-  ready,
-  type SourceChoice,
-} from './components/SessionSources';
-import {
   type EchoLine,
   applicationEndedText,
+  bothSources,
   echoText,
   sourcesHeading,
   transcribedWhere,
@@ -95,7 +90,6 @@ import {
 } from './lib/transcription';
 import {
   microphoneNotCapturing,
-  processingApi,
   sourceOnlyApplication,
 } from './lib/processing';
 
@@ -558,22 +552,13 @@ function transcriptLines(state: Snapshot) {
 
 /** Concise disclosure shown right beside Start live session. */
 function startDisclosure(
-  sources: SourceChoice,
-  canChooseSources: boolean,
+  systemAudio: boolean,
   liveStatus: LiveStatus | null,
 ): string | null {
   if (!liveStatus?.available) return null;
-  const active = canChooseSources ? sources : microphoneOnly;
-  const sourceLabel =
-    active.mode === 'microphone'
-      ? 'your microphone'
-      : active.mode === 'both'
-        ? active.application
-          ? `your microphone and ${active.application.name}`
-          : 'your microphone and the chosen application'
-        : active.application
-          ? `${active.application.name} audio`
-          : 'the chosen application’s audio';
+  const sourceLabel = systemAudio
+    ? 'your microphone and system audio'
+    : 'your microphone';
   const stt = liveStatus.transcription;
   const cueProvider = liveStatus.cueProvider;
   if (stt && cueProvider)
@@ -676,68 +661,17 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
-  const [sources, setSources] = useState<SourceChoice>(microphoneOnly);
-  // Start in the companion's call-starting offer: show the notebook with
-  // the microphone and the offered application chosen. Nothing starts here.
-  useEffect(() => {
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    void listen<{ name: string; bundleId: string } | null>(
-      'call-prompt:start',
-      ({ payload }) => {
-        setView('notebook');
-        setSources({
-          mode: payload ? 'both' : 'microphone',
-          application: null,
-          wanted: payload ?? undefined,
-        });
-      },
-    )
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stop = unlisten;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      stop?.();
-    };
-  }, []);
-  // Only a build that can hear an application reports one beside the
-  // microphone; any other build starts from the microphone as before.
-  const canChooseSources = !!capture.state?.source;
+  const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
-    const choice = canChooseSources ? sources : microphoneOnly;
     void run(async () => {
       setNotice('');
       if (dictation.active) await dictation.stop();
       try {
-        if (choice.mode === 'microphone' || !choice.application) {
-          await bridge.command('start_live_session');
-          return;
-        }
-        // Review exactly the chosen application, then start with it: the
-        // session declares it, so its one approval names what is sent.
-        const review = await processingApi.applicationAudio({
-          kind: 'review',
-          source: choice.application.id,
-        });
-        if (!review?.operation)
-          throw new Error('The selected application changed. Choose it again.');
-        if (choice.mode === 'both')
-          await bridge.command('start_live_session', {
-            application: review.operation,
-          });
-        else
-          await processingApi.applicationAudio({
-            kind: 'startSession',
-            review: review.operation,
-          });
-        setSources((current) => ({ ...current, application: null }));
+        await bridge.command('start_live_session');
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -1854,7 +1788,10 @@ function Notebook() {
                                 : 'Microphone and transcript continue. Stop live session when done.'
                               : sourceApp
                                 ? `Audio from ${sourceApp} · audio not recorded`
-                                : 'Your microphone · audio not recorded'
+                                : bothSources(state.sources) &&
+                                    !state.sources?.applicationEnded
+                                  ? 'Your microphone and system audio · audio not recorded'
+                                  : 'Your microphone · audio not recorded'
                             : sessionHistory?.kept
                               ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
                               : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
@@ -1873,6 +1810,17 @@ function Notebook() {
                                     ? `Nothing is captured. ${liveStatus.reason}`
                                     : 'Nothing is captured.'}
                   </p>
+                  {capturesSystemAudio &&
+                    liveStatus?.available &&
+                    !state.live &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing && (
+                      <p className="small muted">
+                        Use headphones if you can—speaker playback can echo into
+                        your mic and TalkQTE can’t catch every repeat.
+                      </p>
+                    )}
                   {notMacos(platform) &&
                     !state.live &&
                     !simulated &&
@@ -1965,35 +1913,20 @@ function Notebook() {
                         <button
                           className="primary-button"
                           ref={startButton}
-                          disabled={
-                            busy ||
-                            startPending ||
-                            micCheckActive ||
-                            (canChooseSources && !ready(sources))
-                          }
+                          disabled={busy || startPending || micCheckActive}
                           title={
                             micCheckActive
                               ? 'Stop the microphone check first.'
-                              : canChooseSources && !ready(sources)
-                                ? 'Choose the application first.'
-                                : undefined
+                              : undefined
                           }
                           onClick={startLive}
                         >
                           <Play size={15} />
                           Start live session
                         </button>
-                        {startDisclosure(
-                          sources,
-                          canChooseSources,
-                          liveStatus,
-                        ) && (
+                        {startDisclosure(capturesSystemAudio, liveStatus) && (
                           <p className="session-start-disclosure">
-                            {startDisclosure(
-                              sources,
-                              canChooseSources,
-                              liveStatus,
-                            )}
+                            {startDisclosure(capturesSystemAudio, liveStatus)}
                           </p>
                         )}
                       </>
@@ -2002,18 +1935,6 @@ function Notebook() {
                 )}
               </div>
             </section>
-            {canChooseSources &&
-              liveStatus?.available &&
-              !preparing &&
-              !finishing &&
-              !live &&
-              !simulated && (
-                <SessionSources
-                  value={sources}
-                  onChange={setSources}
-                  disabled={busy || startPending}
-                />
-              )}
 
             <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
             <KeepInHistory
@@ -2872,8 +2793,8 @@ function Notebook() {
                 </h2>
                 <p>
                   TalkQTE does not transcribe on this device. Pressing Start
-                  live session sends audio (from your mic or a chosen Mac app)
-                  to{' '}
+                  live session sends audio (from your mic and, on macOS 14.2+,
+                  system audio) to{' '}
                   {liveStatus?.transcription ??
                     'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
                   and recent lines to{' '}

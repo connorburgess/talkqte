@@ -12,8 +12,10 @@ use std::collections::VecDeque;
 
 /// The label for a microphone line in a session with both sources.
 pub const YOU: &str = "You";
-/// The label for an application line in a session with both sources.
+/// The label for an application or system-audio line in a session with both sources.
 pub const THEM: &str = "Them";
+/// The application label used when macOS captures global system audio alongside the microphone.
+pub const SYSTEM_AUDIO: &str = "System audio";
 
 /// Longest application name the session keeps and the review shows.
 const MAX_APPLICATION_CHARS: usize = 60;
@@ -99,6 +101,22 @@ impl SessionSources {
 
     pub fn both<'a>(declared: impl Into<Declared<'a>>) -> Self {
         Self::with(true, declared.into())
+    }
+
+    /// Microphone plus macOS global system audio tap (all apps except TalkQTE).
+    pub fn system_audio() -> Self {
+        Self {
+            microphone: true,
+            application: Some(SYSTEM_AUDIO.into()),
+            selection: None,
+            bundle_id: None,
+        }
+    }
+
+    /// Whether this session uses the global system audio tap rather than a
+    /// named application picker selection.
+    pub fn is_system_audio(&self) -> bool {
+        self.microphone && self.application.as_deref() == Some(SYSTEM_AUDIO)
     }
 
     /// Whether `application` is the one this session was started with: the

@@ -111,6 +111,7 @@ pub mod provider_keys;
 mod selected_attestation;
 pub mod settings;
 mod settings_commands;
+pub mod system_audio_tap;
 pub mod timing_log;
 pub mod transcription;
 mod update_commands;
@@ -1741,18 +1742,22 @@ fn disconnect_granola(
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
-/// capturing for it, and its runner once capture has begun.
+/// capturing for it, its runner once capture has begun, and on macOS the
+/// global system audio tap when active.
 struct Live {
     operation: Option<String>,
     session: u64,
     microphone: Option<u64>,
     runner: Option<live::LiveSession>,
+    #[cfg(target_os = "macos")]
+    system_audio: Option<system_audio_tap::Handle>,
 }
 
 /// Finishes a live session already taken out of the runtime: releases its
-/// microphone, transcribes the queued audio (`flush`) or discards it, then
-/// ends the engine session if it is still the one this fed. Blocks; call it
-/// without holding the runtime lock, because delivering lines takes it.
+/// microphone, stops any global system audio tap, transcribes the queued audio
+/// (`flush`) or discards it, then ends the engine session if it is still the
+/// one this fed. Blocks; call it without holding the runtime lock, because
+/// delivering lines takes it.
 fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     #[cfg(all(
         debug_assertions,
@@ -1764,6 +1769,10 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     if let Some(generation) = live.microphone {
         let controller = app.state::<microphone::Controller>().inner().clone();
         microphone::stop_blocking(app, controller, generation);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(system_audio) = live.system_audio {
+        system_audio.stop(flush);
     }
     if let Some(runner) = live.runner {
         if flush {
@@ -1864,10 +1873,20 @@ pub(crate) async fn start_live_session_now(
             None => None,
             Some(review) => Some(application_source::reviewed(&app, &review)?),
         };
-        let start = {
+        let (start, use_system_audio) = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-            let sources = runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app));
-            runtime.begin_live_start()?.with_sources(sources)
+            let has_joining = joining.is_some() || runtime.dev_join_application.is_some();
+            let use_system_audio =
+                cfg!(target_os = "macos") && !has_joining && !crate::settings::lab_run();
+            let sources = if use_system_audio {
+                engine::SessionSources::system_audio()
+            } else {
+                runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app))
+            };
+            (
+                runtime.begin_live_start()?.with_sources(sources),
+                use_system_audio,
+            )
         };
         // Made only once this start holds the gate, so a refused second
         // start can never replace or reuse this session's minute budget.
@@ -1879,14 +1898,15 @@ pub(crate) async fn start_live_session_now(
                 .await
                 .map_err(|_| "Could not start the live session.")??;
         let (opener, reopener) = streams.into_parts();
-        let session = {
+        let (session, session_started_at) = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
             let session = runtime.install_live_start_with(&start, auto_started)?;
+            let started_at = runtime.engine.state.elapsed_ms;
             // An application joining this session spends the same budget.
-            runtime.live_budget = budget.map(|budget| (session, budget));
+            runtime.live_budget = budget.clone().map(|budget| (session, budget));
             publish(&app, &mut runtime);
-            session
+            (session, started_at)
         };
         companion::refresh(&app);
         let handle = app.clone();
@@ -2031,6 +2051,11 @@ pub(crate) async fn start_live_session_now(
                             publish(&app, &mut runtime);
                         }
                     }
+                } else if use_system_audio {
+                    #[cfg(target_os = "macos")]
+                    start_system_audio_tap(&app, session, session_started_at, budget);
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = (session_started_at, budget);
                 }
                 Ok(())
             }
@@ -2057,6 +2082,120 @@ pub(crate) async fn start_live_session_now(
                 Err(error)
             }
         }
+    }
+}
+
+/// Starts the macOS 14.2+ Core Audio global system audio tap (`Them`) beside
+/// the running microphone (`You`) for `session`. If system audio is unavailable
+/// (macOS < 14.2 or permission denied), falls back cleanly to microphone-only.
+#[cfg(target_os = "macos")]
+fn start_system_audio_tap(
+    app: &tauri::AppHandle,
+    session: u64,
+    session_started_at: u64,
+    budget: Option<transcription::cloud::Budget>,
+) {
+    let state = app.state::<AppState>();
+    let Ok(streams) = transcription::cloud::streams_sharing(budget) else {
+        if let Ok(mut runtime) = state.0.lock() {
+            runtime.engine.application_ended(session, "not_started");
+            publish(app, &mut runtime);
+        }
+        return;
+    };
+    let (opener, reopener) = streams.into_parts();
+    let approval_app = app.clone();
+    let keep_app = app.clone();
+    let dropped_app = app.clone();
+    let reconnect_app = app.clone();
+    let failure_app = app.clone();
+    let sink_app = app.clone();
+    let attached_app = app.clone();
+    let unavailable_app = app.clone();
+
+    let feed = transcription::cloud::CloudFeed::new(
+        session,
+        1,
+        opener,
+        move || {
+            approval_app
+                .state::<AppState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|runtime| runtime.engine.audio_approval(session))
+        },
+        move |session, segment| {
+            let state = sink_app.state::<AppState>();
+            let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+            runtime.sync();
+            let result =
+                runtime.ingest_timed_from(session, engine::LineOrigin::Application, segment);
+            publish(&sink_app, &mut runtime);
+            result
+        },
+    )
+    .stop_sending_when(move || {
+        keep_app.state::<AppState>().0.lock().map_or(
+            Some(transcription::cloud::SttFailure::Withdrawn),
+            |runtime| transcription::cloud::withdrawal(runtime.engine.audio_withdrawal(session)),
+        )
+    })
+    .on_dropped(move || {
+        if let Ok(mut runtime) = dropped_app.state::<AppState>().0.lock() {
+            runtime.engine.cloud_transcription_dropped(session);
+            publish(&dropped_app, &mut runtime);
+        }
+    })
+    .on_failure(move |failure| {
+        if let Ok(mut runtime) = failure_app.state::<AppState>().0.lock() {
+            runtime.engine.source_transcription_stopped(
+                session,
+                engine::LineOrigin::Application,
+                failure.code(),
+            );
+            publish(&failure_app, &mut runtime);
+        }
+    })
+    .on_reconnect(move |lost_ms| {
+        if let Ok(mut runtime) = reconnect_app.state::<AppState>().0.lock() {
+            runtime
+                .engine
+                .cloud_transcription_reconnected(session, lost_ms);
+            publish(&reconnect_app, &mut runtime);
+        }
+    })
+    .with_reopener(reopener);
+
+    let handle = system_audio_tap::Handle::start(
+        session,
+        session_started_at,
+        feed,
+        move || {
+            if let Ok(mut runtime) = attached_app.state::<AppState>().0.lock() {
+                runtime.engine.application_attached(session);
+                publish(&attached_app, &mut runtime);
+            }
+        },
+        move |err| {
+            if let Ok(mut runtime) = unavailable_app.state::<AppState>().0.lock() {
+                runtime.engine.application_ended(session, err.ended_code());
+                publish(&unavailable_app, &mut runtime);
+            }
+        },
+    );
+
+    let installed = state.0.lock().is_ok_and(|mut runtime| {
+        match runtime.live.as_mut().filter(|live| live.session == session) {
+            Some(live) => {
+                live.system_audio = Some(handle);
+                true
+            }
+            None => false,
+        }
+    });
+    if !installed {
+        // Session ended before the handle could be stored; Drop stops it.
     }
 }
 
@@ -2571,6 +2710,8 @@ mod lab_clock_tests {
             session: runtime.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         runtime
     }

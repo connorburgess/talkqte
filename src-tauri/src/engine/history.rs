@@ -66,7 +66,9 @@ impl Engine {
             return None;
         }
         let declared = self.sources();
-        let application = declared.and_then(|sources| sources.application.clone());
+        let application = declared
+            .and_then(|sources| sources.application.clone())
+            .filter(|name| name != super::sources::SYSTEM_AUDIO);
         let both = declared.is_some_and(|sources| sources.both_sources());
         let sources = match (both, application.is_some()) {
             (true, _) => Sources::Both,

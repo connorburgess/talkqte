@@ -54,6 +54,12 @@ jobs:
       - run: npm ci
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Restore compiled Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          key: release-macos
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
       - run: npm run test:release
       - run: npm run check:release
 

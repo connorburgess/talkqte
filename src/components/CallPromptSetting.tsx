@@ -80,9 +80,9 @@ export function CallPromptSetting() {
           bundle identifier, never audio, video, or what is on screen, and that
           stays on this Mac. Offer in the dock shows a 1-click Start button
           without starting capture; Start automatically (off by default) begins
-          listening right away (sending your mic to Deepgram and recent lines to
-          Anthropic until Stop, showing Listening · Stop in the dock). App
-          preferences save by bundle identifier only.
+          listening right away (sending your mic and macOS system audio to
+          Deepgram and recent lines to Anthropic until Stop, showing Listening ·
+          Stop in the dock). App preferences save by bundle identifier only.
         </p>
         {settings && (
           <>

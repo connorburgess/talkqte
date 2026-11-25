@@ -30,7 +30,11 @@ export function KeepInHistory({
     snapshot.live &&
     snapshot.status === 'ended' &&
     (snapshot.transcript.length > 0 || snapshot.notes.trim().length > 0);
-  const application = snapshot.sources?.application ?? null;
+  const application =
+    snapshot.sources?.application &&
+    snapshot.sources.application !== 'System audio'
+      ? snapshot.sources.application
+      : null;
   const [status, setStatus] = useState<HistoryStatus | null>(null);
   const [title, setTitle] = useState('');
   const [includeApplication, setIncludeApplication] = useState(false);

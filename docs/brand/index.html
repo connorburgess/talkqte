@@ -7581,106 +7581,55 @@ Cue processing stopped: -</pre>
               </p>
             </article>
 
-            <!-- 14. Session sources chooser (Listen to) -->
+            <!-- 14. Zero-picker session sources & start disclosure -->
             <article class="panel-card is-wide" id="panel-session-sources">
               <div class="panel-card-tag mono-label">
-                <span>14 · Session sources (Listen to chooser)</span
+                <span>14 · Session sources (Zero-picker start)</span
                 ><span
-                  >Microphone, both, or one application · all built states</span
+                  >macOS 14.2+ Microphone + System Audio · Windows/Linux Mic
+                  only</span
                 >
               </div>
               <div class="km-split">
                 <div class="km-pane">
                   <div class="sk-row-head">
                     <strong class="panel-h3"
-                      >Listen to · Call offer preselect &amp; listed
-                      apps</strong
+                      >Start live session · Automatic dual-stream</strong
                     >
                     <span class="mono-label" style="color: var(--g-amber-ink)"
-                      >SessionSources.tsx</span
+                      >App.tsx</span
                     >
                   </div>
-                  <div class="panel-check" style="margin-top: 8px">
-                    <span class="panel-radio"></span>
-                    <div>
-                      <strong>Microphone</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        Everyone your Mac’s microphone hears, as in a room.
-                      </p>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-radio is-checked"></span>
-                    <div>
-                      <strong>Microphone and one application</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        For a call: you through the microphone, the other side
-                        from the app you choose.
-                      </p>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-radio"></span>
-                    <div>
-                      <strong>One application only</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        Only the app’s sound, such as a recording. The
-                        microphone is not used.
-                      </p>
-                    </div>
-                  </div>
-
+                  <p
+                    class="panel-muted"
+                    style="font-size: 12px; margin-top: 8px"
+                  >
+                    Starts immediately: sends your microphone and system audio
+                    to Deepgram and recent lines to Anthropic until you press
+                    Stop.
+                  </p>
                   <div
                     style="
                       margin-top: 10px;
-                      padding: 12px 14px;
-                      background: var(--g-band);
+                      padding: 8px 12px;
+                      background: #ffffff;
                       border: 1px solid var(--g-line);
                       border-radius: 2px;
-                      display: grid;
-                      gap: 10px;
+                      font-size: 12px;
                     "
                   >
-                    <div class="panel-wanted-box">
-                      For the call in Fictional Call: list applications, check
-                      it is chosen, then start.
-                    </div>
-                    <p class="panel-muted" style="font-size: 12px">
-                      Audio from all windows of this application may be
-                      included. The first time you list applications, macOS asks
-                      you to allow Screen &amp; System Audio Recording for
-                      TalkQTE. Nothing is captured until the session starts, and
-                      nothing is sent until you enable cue processing for it;
-                      that one approval covers the microphone and the
-                      application.
-                    </p>
-                    <div
-                      style="
-                        padding: 8px 12px;
-                        background: #ffffff;
-                        border: 1px solid var(--g-line);
-                        border-radius: 2px;
-                        font-size: 12px;
-                      "
-                    >
-                      Use headphones if you can. Through speakers the microphone
-                      also hears the call; TalkQTE leaves out lines it can tell
-                      are repeats, but not all of them.
-                    </div>
-                    <div class="sk-actions" style="margin-top: 0">
-                      <span class="sk-btn">List applications</span>
-                      <span class="sk-btn">Cancel listing</span>
-                    </div>
+                    Use headphones if you can—speaker playback can echo into
+                    your mic and TalkQTE can’t catch every repeat.
                   </div>
                 </div>
 
                 <div class="km-pane">
                   <div class="sk-row-head">
                     <strong class="panel-h3"
-                      >Listed applications &amp; permission problem</strong
+                      >Mic-only fallback &amp; Windows/Linux</strong
                     >
                     <span class="mono-label" style="color: var(--g-muted)"
-                      >Matches bundle ID</span
+                      >Graceful notice</span
                     >
                   </div>
                   <div
@@ -7694,34 +7643,21 @@ Cue processing stopped: -</pre>
                       gap: 8px;
                     "
                   >
-                    <strong style="font-size: 13px">Application</strong>
-                    <div class="panel-check" style="padding: 3px 0">
-                      <span class="panel-radio"></span
-                      ><span>Fictional player</span>
-                    </div>
-                    <div class="panel-check" style="padding: 3px 0">
-                      <span class="panel-radio is-checked"></span
-                      ><span><strong>Fictional Call</strong></span>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      System audio permission was not allowed. Check System
+                      Audio Recording Only for TalkQTE in System Settings →
+                      Privacy &amp; Security. Only your microphone is heard now.
                     </div>
                     <p class="panel-muted" style="font-size: 12px">
-                      Only open applications with a window are listed. If yours
-                      is missing, open it or one of its windows, then list
-                      again. A browser can be listed and still give no sound:
-                      browser calls are not yet known to work.
+                      On macOS &lt; 14.2 or when System Audio Recording Only is
+                      declined, live sessions continue smoothly with the
+                      microphone only.
                     </p>
-                    <div class="sk-actions" style="margin-top: 0">
-                      <span class="sk-btn">List again</span>
-                    </div>
-                    <div class="panel-error-box" style="font-size: 12px">
-                      Application audio did not start. Try again.
-                    </div>
                   </div>
                   <p class="panel-footer-line" style="margin-top: 12px">
-                    Component boundary:
-                    <code>src/components/SessionSources.tsx</code> +
-                    <code>src/components/processing.css</code>, mounted in
-                    <code>src/App.tsx</code> directly below
-                    <code>.session-strip</code> before a live session starts.
+                    Component boundary: <code>src/App.tsx</code> +
+                    <code>src-tauri/src/system_audio_tap.rs</code> (no app
+                    picker in the notebook).
                   </p>
                 </div>
               </div>
@@ -8734,17 +8670,18 @@ Cue processing stopped: -</pre>
                     <div class="ob-perm-card">
                       <div class="sk-row-head">
                         <strong class="panel-h3"
-                          >Screen &amp; System Audio Recording</strong
+                          >System Audio Recording Only</strong
                         >
                         <span class="mono-label" style="color: var(--g-muted)"
-                          >Only if choosing application audio</span
+                          >Asked on first session start</span
                         >
                       </div>
                       <p class="panel-muted" style="margin-top: 6px">
-                        Needed only if you choose to capture audio from a
-                        specific application window instead of your microphone.
-                        macOS will not ask for this unless you pick an
-                        application audio source.
+                        Needed on macOS 14.2 and later so TalkQTE can hear the
+                        other side of your call (all apps except TalkQTE) with
+                        no Screen Recording permission and no app picker. If you
+                        decline or run an earlier macOS, live sessions continue
+                        with your microphone only.
                       </p>
                     </div>
                   </div>
@@ -9055,8 +8992,8 @@ Cue processing stopped: -</pre>
                 >What macOS will ask later</strong
               >
               <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
-                Nothing requested here. Microphone on first session start;
-                Screen &amp; System Audio only for application audio.
+                Nothing requested here. Microphone and System Audio Recording
+                Only on first session start (no Screen Recording permission).
               </p>
               <div
                 class="ob-perm-card"
@@ -9068,7 +9005,7 @@ Cue processing stopped: -</pre>
                 class="ob-perm-card"
                 style="padding: 8px 10px; font-size: 12px"
               >
-                <strong>App audio</strong> · optional
+                <strong>System audio</strong> · first start
               </div>
               <div
                 class="sk-actions"

@@ -135,6 +135,8 @@ mod tests {
             session: runtime.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         (runtime, rx)
     }
@@ -704,6 +706,8 @@ mod tests {
             session: r.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         let pending = prepare(&mut r, &[]);
         assert_ne!(r.engine.session(), old.session);
@@ -781,6 +785,8 @@ mod tests {
             session: r.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         let id = prepare(&mut r, &[]);
         approve(&mut r, &id).unwrap();

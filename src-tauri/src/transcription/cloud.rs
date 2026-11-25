@@ -1075,6 +1075,9 @@ fn audio_of(sources: &SessionSources) -> String {
         (false, Some(app)) => format!(
             "the live audio of {app} (audio from all of its windows may be included), not your microphone,"
         ),
+        (true, Some(crate::engine::SYSTEM_AUDIO)) => {
+            "the live audio from your microphone and, as a second stream, macOS system audio (all apps except TalkQTE),".into()
+        }
         (true, Some(app)) => format!(
             "the live audio from your microphone and, as a second stream, from {app} (audio from all of its windows may be included),"
         ),
