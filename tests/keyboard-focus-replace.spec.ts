@@ -28,26 +28,19 @@ async function liveWithProcessor(page: Page) {
     name: 'Cue processing',
     exact: true,
   });
+  await expect(panel.getByRole('status')).toHaveText('Model connection on');
   const review = panel.getByRole('button', {
     name: 'Review processing',
     exact: true,
   });
-  await review.press('Enter');
-  await panel
-    .getByRole('button', { name: 'Review selected sources' })
-    .press('Enter');
-  await panel
-    .getByRole('button', { name: 'Enable for this session' })
-    .press('Enter');
-  await expect(panel.getByRole('status')).toHaveText('Model connection on');
   return {
     panel,
     review,
-    disable: panel.getByRole('button', { name: 'Disable processing' }),
+    disable: panel.getByRole('button', { name: 'Turn off processing' }),
   };
 }
 
-test('keyboard Disable processing moves focus to Review processing and leaves capture on', async ({
+test('keyboard Turn off processing moves focus to Review processing and leaves capture on', async ({
   page,
 }) => {
   const { review, disable } = await liveWithProcessor(page);
@@ -64,7 +57,7 @@ test('keyboard Disable processing moves focus to Review processing and leaves ca
   ).toBeVisible();
 });
 
-test('a delayed Disable processing does not take focus back from another control', async ({
+test('a delayed Turn off processing does not take focus back from another control', async ({
   page,
 }) => {
   const { review, disable } = await liveWithProcessor(page);

@@ -70,7 +70,7 @@ const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
 // The call-starting prompt's settings and the companion's answers.
-let callPrompt = { enabled: false, notFor: [] as string[] };
+let callPrompt = { enabled: false, autoStart: false, notFor: [] as string[] };
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -309,18 +309,20 @@ async function simulate(value: Partial<Snapshot> = {}) {
     cue: null,
   });
 }
-async function startLive() {
+async function startLive(options?: { autoStarted?: boolean }) {
+  const labRun = new URLSearchParams(location.search).has('lab');
+  const autoApprove = !!processing.processor && !labRun;
   await publish({
     live: true,
     simulated: false,
     cuesPaused: false,
+    autoStarted: !!options?.autoStarted,
     status: 'running',
     title: 'Live session',
     description: "Transcript lines from this session's transcription.",
     elapsedMs: 0,
-    // Every live session is transcribed by the launch's cloud provider,
-    // which sends nothing until cue processing is enabled.
     transcription: { provider: 'Deepgram' },
+    model: autoApprove ? 'on' : undefined,
     // Rust sends u64::MAX for a live session, which has no end.
     durationMs: 18_446_744_073_709_552_000,
     transcript: [],
@@ -329,10 +331,10 @@ async function startLive() {
   await send({ status: 'listening', activity: 'active', canStart: false });
   await sendProcessing({
     capture: 'running',
-    phase: 'off',
+    phase: autoApprove ? 'active' : 'off',
     startup: 'idle',
     session: `fictional-session-${operation}`,
-    approved: null,
+    approved: autoApprove ? { conversation: 'newSpeechOnly', notes: [] } : null,
     scopeRevision: processing.scopeRevision + 1,
   });
 }
@@ -626,7 +628,12 @@ mockIPC(
             keyStatus[stt]?.state === 'set' &&
             keyStatus.anthropic.state === 'set');
         const value: LiveStatus = available
-          ? { available: true, reason: null, transcription: provider }
+          ? {
+              available: true,
+              reason: null,
+              transcription: provider,
+              cueProvider: 'Anthropic',
+            }
           : {
               available: false,
               reason: 'This build has no live transcription.',
@@ -663,7 +670,7 @@ mockIPC(
       case 'reset_settings':
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
-        callPrompt = { enabled: false, notFor: [] };
+        callPrompt = { enabled: false, autoStart: false, notFor: [] };
         historyFixture.resetAfterSessionKeep();
         return;
       case 'respond_to_end_prompt': {
@@ -684,12 +691,28 @@ mockIPC(
       }
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
-      case 'set_call_prompt':
+      case 'set_call_prompt': {
+        const update = args as { enabled?: boolean; autoStart?: boolean };
         callPrompt = {
           ...callPrompt,
-          enabled: (args as { enabled: boolean }).enabled,
+          ...(typeof update.enabled === 'boolean'
+            ? { enabled: update.enabled }
+            : {}),
+          ...(typeof update.autoStart === 'boolean'
+            ? { autoStart: update.autoStart }
+            : {}),
         };
         return structuredClone(callPrompt);
+      }
+      case 'turn_off_processing': {
+        await sendProcessing({
+          phase: 'off',
+          approved: null,
+          scopeRevision: processing.scopeRevision + 1,
+        });
+        await publish({ model: undefined, cue: null });
+        return;
+      }
       case 'clear_call_prompt_apps':
         callPrompt = { ...callPrompt, notFor: [] };
         return structuredClone(callPrompt);
@@ -817,7 +840,11 @@ declare global {
       applicationAudio: unknown[];
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
-      callPrompt: () => { enabled: boolean; notFor: string[] };
+      callPrompt: () => {
+        enabled: boolean;
+        autoStart: boolean;
+        notFor: string[];
+      };
       savedSettings: () => typeof savedSettings;
       presence: () => typeof presence;
       /** The menu bar's Start session…, as the native side relays it. */

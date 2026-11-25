@@ -395,7 +395,7 @@ impl Runtime {
                 control.application(),
             ));
         let session = self
-            .install_live_start(&ticket)
+            .install_live_start_with(&ticket, false)
             .map_err(|_| Failure::Unavailable)?;
         // The ticket ends here, so startup reads idle; the operation it set
         // stays current for the source's attachment and for Stop.

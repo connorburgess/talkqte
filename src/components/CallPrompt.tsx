@@ -11,7 +11,7 @@ export type CallPromptAnswer =
   'start' | 'dismiss' | 'notForThisApp' | 'dontAskAgain';
 
 /** Quiet and small: it never takes focus (the companion cannot), goes away
- * by itself, and Start only opens the notebook's ordinary start. */
+ * by itself, and Start begins listening and processing in one click. */
 export function CallPrompt({
   offer,
   busy,
@@ -37,11 +37,9 @@ export function CallPrompt({
           : 'The microphone is in use. A call?'}
       </p>
       <p className="call-prompt-detail">
-        {app && offer.kind !== 'browser'
-          ? `Start a session with your microphone and ${app}? You choose and approve everything in the notebook; nothing is heard until then.`
-          : 'Start a session with your microphone? You approve it in the notebook; nothing is heard until then.'}
-        {offer.kind === 'browser' &&
-          ` You can add ${app} there, but a browser’s audio includes every tab and may not be heard yet.`}
+        Start listening with your microphone? Sends audio to Deepgram and recent
+        lines to Anthropic until you stop.
+        {offer.kind === 'browser' && ' A browser call includes mic audio only.'}
       </p>
       <div className="call-prompt-actions">
         <button
@@ -50,7 +48,7 @@ export function CallPrompt({
           onClick={() => onAnswer('start')}
         >
           <Play size={13} fill="currentColor" aria-hidden="true" />
-          Start session…
+          Start
         </button>
         {app && (
           <button

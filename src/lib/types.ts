@@ -51,6 +51,8 @@ export interface CueSnapshot {
   status: Status;
   /** A live session fed by transcription. */
   live: boolean;
+  /** True when the session started automatically when a call began. */
+  autoStarted?: boolean;
   /** Browser preview and test stand-in only: a replay of a fictional
    * conversation that captures nothing. The desktop app never sends it. */
   simulated?: boolean;
@@ -129,6 +131,7 @@ export type Commands = {
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string } | undefined;
   stop_live_session: undefined;
+  turn_off_processing: undefined;
   respond_to_call_prompt: {
     id: number;
     answer: import('../components/CallPrompt').CallPromptAnswer;
@@ -229,6 +232,8 @@ export interface LiveStatus {
   reason: string | null;
   /** The cloud service this launch transcribes with, when one is selected. */
   transcription?: string;
+  /** The cue provider configured for live sessions, when available. */
+  cueProvider?: string | null;
 }
 export function clockTime(ms: number) {
   const seconds = Math.floor(ms / 1000);

@@ -520,6 +520,9 @@ test('kept meetings can be selected into Prior context (notes only), approved in
     exact: true,
   });
   await panel
+    .getByRole('button', { name: 'Turn off processing', exact: true })
+    .click();
+  await panel
     .getByRole('button', { name: 'Review processing', exact: true })
     .click();
   const historyCheckbox = panel.getByRole('checkbox', {

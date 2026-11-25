@@ -13,6 +13,7 @@
     "allow-inspect-cue",
     "allow-set-overlay",
     "allow-set-live-cues-paused",
+    "allow-turn-off-processing",
     "allow-microphone-snapshot",
     "allow-stop-microphone",
     "allow-stop-live-session",

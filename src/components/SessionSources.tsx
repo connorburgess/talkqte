@@ -176,11 +176,11 @@ export function SessionSources({
             {status?.scopeNotice ??
               'Audio from all windows of this application may be included.'}{' '}
             The first time you list applications, macOS asks you to allow Screen
-            &amp; System Audio Recording for TalkQTE. Nothing is captured until
-            the session starts, and nothing is sent until you enable cue
-            processing for it
+            &amp; System Audio Recording for TalkQTE. Nothing is captured or
+            sent until you press Start live session; starting sends the selected
+            source(s) to Deepgram and recent lines to Anthropic until Stop
             {value.mode === 'both'
-              ? '; that one approval covers the microphone and the application'
+              ? '; that one start covers the microphone and the application'
               : ''}
             .
           </p>
