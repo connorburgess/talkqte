@@ -130,7 +130,8 @@ pub(crate) fn install(app: &tauri::AppHandle) {
             let microphone_busy = app
                 .state::<crate::microphone::Controller>()
                 .try_not_capturing()
-                != Some(true);
+                != Some(true)
+                || app.state::<crate::dictation::Controller>().is_active();
             let Ok(mut runtime) = state.0.lock() else {
                 continue;
             };
