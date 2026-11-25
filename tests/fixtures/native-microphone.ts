@@ -10,6 +10,10 @@ import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
 import * as preview from '../../src/lib/preview';
 import type { MicrophoneSnapshot } from '../../src/lib/microphone';
+import type {
+  DictationSnapshot,
+  DictationTarget,
+} from '../../src/lib/dictation';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type {
   ApplicationAudioAction,
@@ -26,6 +30,18 @@ let microphone: MicrophoneSnapshot = {
   message: null,
   deviceName: null,
 };
+let dictation: DictationSnapshot = {
+  revision: 0,
+  status: 'off',
+  target: null,
+  canStart: true,
+  message: null,
+};
+let dictationSeq = 0;
+let dictationHoldStart = false;
+let dictationRejectStart: string | null = null;
+let dictationRejectStop: string | null = null;
+const dictationCalls: { command: string; target?: DictationTarget }[] = [];
 let session: Snapshot;
 let processing: ProcessingSnapshot = {
   revision: 0,
@@ -258,6 +274,11 @@ async function send(value: Partial<MicrophoneSnapshot>) {
   await emit('microphone:changed', microphone);
 }
 
+async function sendDictation(value: Partial<DictationSnapshot>) {
+  dictation = { ...dictation, revision: dictation.revision + 1, ...value };
+  await emit('dictation:changed', structuredClone(dictation));
+}
+
 // Stands in for the Rust live session: no device, stream, or transcription.
 /** Counts sessions, as Rust's session number does, for kept meetings. */
 let historySession = 0;
@@ -483,6 +504,57 @@ mockIPC(
           status: 'stopping',
           canStart: false,
           activity: 'quiet',
+          message: null,
+        });
+        return;
+      case 'note_dictation_snapshot':
+        return structuredClone(dictation);
+      case 'start_note_dictation': {
+        const { target } = args as { target: DictationTarget };
+        dictationCalls.push({ command: 'start_note_dictation', target });
+        if (dictationRejectStart) {
+          const msg = dictationRejectStart;
+          dictationRejectStart = null;
+          throw new Error(msg);
+        }
+        if (session?.live && session.status === 'running') {
+          throw new Error('Stop the live session before dictating.');
+        }
+        if (
+          microphone.status !== 'off' &&
+          !(microphone.status === 'error' && microphone.canStart)
+        ) {
+          throw new Error('Stop the microphone check before dictating.');
+        }
+        dictationSeq = 0;
+        await sendDictation({
+          status: 'starting',
+          target,
+          canStart: false,
+          message: 'Checking microphone access…',
+        });
+        if (!dictationHoldStart) {
+          await sendDictation({
+            status: 'listening',
+            target,
+            canStart: false,
+            message: null,
+          });
+        }
+        dictationHoldStart = false;
+        return;
+      }
+      case 'stop_note_dictation':
+        dictationCalls.push({ command: 'stop_note_dictation' });
+        if (dictationRejectStop) {
+          const msg = dictationRejectStop;
+          dictationRejectStop = null;
+          throw new Error(msg);
+        }
+        await sendDictation({
+          status: 'off',
+          target: null,
+          canStart: true,
           message: null,
         });
         return;
@@ -816,6 +888,15 @@ declare global {
       holdNextStop: () => void;
       releaseStop: () => void;
     };
+    dictationTest: {
+      send: typeof sendDictation;
+      deliverText: (target: DictationTarget, text: string) => Promise<void>;
+      state: () => DictationSnapshot;
+      calls: () => { command: string; target?: DictationTarget }[];
+      holdStart: () => void;
+      rejectNextStart: (message: string) => void;
+      rejectNextStop: (message: string) => void;
+    };
   }
 }
 window.permissionTest = permissionFixture;
@@ -946,6 +1027,24 @@ window.microphoneTest = {
     delayStop = true;
   },
   releaseStop: () => releaseStop?.(),
+};
+window.dictationTest = {
+  send: sendDictation,
+  deliverText: async (target, text) => {
+    dictationSeq += 1;
+    await emit('dictation:text', { target, seq: dictationSeq, text });
+  },
+  state: () => structuredClone(dictation),
+  calls: () => structuredClone(dictationCalls),
+  holdStart: () => {
+    dictationHoldStart = true;
+  },
+  rejectNextStart: (message) => {
+    dictationRejectStart = message;
+  },
+  rejectNextStop: (message) => {
+    dictationRejectStop = message;
+  },
 };
 await import('../../src/main');
 

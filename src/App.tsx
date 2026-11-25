@@ -50,8 +50,14 @@ import {
   useElementWidth,
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
+import {
+  appendDictatedText,
+  dictationStatusLabel,
+  useDictation,
+  type DictationTarget,
+} from './lib/dictation';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { keysStatus, type KeysStatus } from './lib/providerKeys';
+import { keysStatus, watchKeys, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
@@ -614,6 +620,7 @@ function Notebook() {
     const choice = canChooseSources ? sources : microphoneOnly;
     void run(async () => {
       setNotice('');
+      if (dictation.active) await dictation.stop();
       try {
         if (choice.mode === 'microphone' || !choice.application) {
           await bridge.command('start_live_session');
@@ -752,9 +759,13 @@ function Notebook() {
     }
   };
   const focusField = useRef<HTMLTextAreaElement>(null);
-  // Clear is a mousedown before a click, so the blur that would save the old
-  // text is skipped when it heads for Clear; the field keeps the focus.
+  // Clear and mouse clicks on Focus dictation skip premature blur validation
+  // so an incomplete draft can be cleared or extended by voice; keyboard Tab
+  // still submits Focus as usual.
   const clearButton = useRef<HTMLButtonElement>(null);
+  const skipFocusBlur = useRef(false);
+  const focusDictationTouched = useRef(false);
+  const lastDictationTarget = useRef<DictationTarget | null>(null);
   // All Focus writes share the command queue and latest-request error state.
   const applyFocus = (lines: string[]): Promise<boolean> => {
     const value = lines.join('\n');
@@ -990,6 +1001,7 @@ function Notebook() {
   useEffect(() => {
     if (!bridge.desktop) return;
     let live = true;
+    let stopWatch: (() => void) | undefined;
     keysStatus().then(
       (next) => {
         if (!live) return;
@@ -1004,8 +1016,19 @@ function Notebook() {
         if (live) setKeysAvailable(false);
       },
     );
+    void watchKeys((next) => {
+      if (!live) return;
+      setKeysAvailable(true);
+      setInitialKeys(next);
+    })
+      .then((unlisten) => {
+        if (!live) unlisten();
+        else stopWatch = unlisten;
+      })
+      .catch(() => {});
     return () => {
       live = false;
+      stopWatch?.();
     };
   }, []);
   const showOnboarding =
@@ -1055,7 +1078,13 @@ function Notebook() {
   };
   const startFromOnboarding = () => {
     setOnboardingMode('finished');
-    if (liveStatus?.available && !busy && !startPending && !microphone.active) {
+    if (
+      liveStatus?.available &&
+      !busy &&
+      !startPending &&
+      !microphone.active &&
+      !dictation.active
+    ) {
       void startLive();
     } else {
       focusSessionHeading();
@@ -1075,6 +1104,67 @@ function Notebook() {
   // change the editor takes from a snapshot; a snapshot that lags typing is
   // ignored, and nothing typed meanwhile is lost.
   const engineNotes = useRef('');
+  const dictation = useDictation((event) => {
+    if (event.target === 'notes') {
+      setNotes((current) => {
+        const next = appendDictatedText(current, event.text, 20_000);
+        if (next === current) return current;
+        engineNotes.current = next;
+        void bridge
+          .command('update_notes', { notes: next })
+          .catch((e: unknown) => setError(String(e)));
+        return next;
+      });
+    } else {
+      focusDictationTouched.current = true;
+      focusEdit.current++;
+      setFocus((current) => appendDictatedText(current, event.text));
+    }
+  });
+  if (dictation.state?.target) {
+    lastDictationTarget.current = dictation.state.target;
+  }
+  const dictationTarget =
+    dictation.state?.target ?? lastDictationTarget.current;
+  useEffect(() => {
+    if (
+      focusDictationTouched.current &&
+      !dictation.active &&
+      dictation.state &&
+      (dictation.state.status === 'off' || dictation.state.status === 'error')
+    ) {
+      focusDictationTouched.current = false;
+      if (document.activeElement !== focusField.current) {
+        saveFocus();
+      }
+    }
+  }, [dictation.active, dictation.state?.status]);
+  const notesFieldVisible =
+    view === 'notebook' && !showOnboarding && tab === 'notes';
+  const focusFieldVisible =
+    view === 'notebook' && !showOnboarding && focusExpanded;
+  useEffect(() => {
+    if (!dictation.active) return;
+    if (
+      (dictation.state?.target === 'notes' && !notesFieldVisible) ||
+      (dictation.state?.target === 'focus' && !focusFieldVisible)
+    ) {
+      dictation.stopQuietly();
+    }
+  }, [
+    dictation.active,
+    dictation.state?.target,
+    notesFieldVisible,
+    focusFieldVisible,
+  ]);
+  const dictationActiveRef = useRef(false);
+  dictationActiveRef.current = dictation.active;
+  useEffect(
+    () => () => {
+      if (dictationActiveRef.current) dictation.stopQuietly();
+    },
+    [],
+  );
   useEffect(() => {
     if (!state || !initialized.current) return;
     if (state.notes === engineNotes.current) return;
@@ -1154,6 +1244,145 @@ function Notebook() {
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
   // so every `simulated` branch is unreachable in the app.
   const simulated = !!state.simulated && state.status === 'running';
+  const dictationUnavailableReason = (
+    target: DictationTarget,
+  ): { reason: string; visibleHint: boolean } | null => {
+    if (!bridge.desktop) {
+      return {
+        reason: 'Dictation is available in the desktop app.',
+        visibleHint: false,
+      };
+    }
+    if (live || preparing || finishing || simulated) {
+      return {
+        reason: 'Stop the live session before dictating.',
+        visibleHint: false,
+      };
+    }
+    if (microphone.active) {
+      return {
+        reason: 'Stop the microphone check before dictating.',
+        visibleHint: false,
+      };
+    }
+    const dgState = initialKeys?.deepgram.state;
+    if (dgState === 'rejected') {
+      return {
+        reason:
+          'Deepgram rejected your API key. Replace it in Settings to dictate.',
+        visibleHint: true,
+      };
+    }
+    if (dgState === 'unreadable') {
+      return {
+        reason: 'Your Deepgram key could not be read. Check it in Settings.',
+        visibleHint: true,
+      };
+    }
+    if (
+      (dgState === 'notSet' || (!initialKeys && keysAvailable)) &&
+      !liveStatus?.transcription
+    ) {
+      return {
+        reason: 'Add your Deepgram API key in Settings to dictate.',
+        visibleHint: true,
+      };
+    }
+    if (
+      dictation.state &&
+      (dictation.state.status === 'stopping' ||
+        (dictation.state.status === 'error' && !dictation.state.canStart))
+    ) {
+      return { reason: 'Finishing dictation…', visibleHint: false };
+    }
+    if (dictation.active && dictation.state?.target !== target) {
+      return {
+        reason: 'Stop dictating before switching fields.',
+        visibleHint: false,
+      };
+    }
+    if (dictation.busy) {
+      return { reason: 'Updating dictation…', visibleHint: false };
+    }
+    return null;
+  };
+
+  const toggleDictation = (target: DictationTarget) => {
+    const activeHere =
+      dictation.state?.target === target &&
+      (dictation.state.status === 'starting' ||
+        dictation.state.status === 'listening');
+    if (activeHere) {
+      void dictation.stop();
+    } else {
+      lastDictationTarget.current = target;
+      void dictation.start(target);
+    }
+  };
+
+  const notesDictating =
+    dictation.state?.target === 'notes' &&
+    (dictation.state.status === 'starting' ||
+      dictation.state.status === 'listening');
+  const notesDictationBlock = notesDictating
+    ? null
+    : dictationUnavailableReason('notes');
+  const notesDictationFeedback = (() => {
+    if (
+      notesDictating ||
+      (dictation.state?.target === 'notes' &&
+        dictation.state.status === 'stopping')
+    ) {
+      return {
+        kind: 'status' as const,
+        text: dictationStatusLabel(dictation.state),
+      };
+    }
+    if (dictationTarget === 'notes') {
+      if (dictation.error) {
+        return { kind: 'error' as const, text: dictation.error };
+      }
+      if (dictation.state?.status === 'error' && dictation.state.message) {
+        return { kind: 'error' as const, text: dictation.state.message };
+      }
+      if (dictation.state?.status === 'off' && dictation.state.message) {
+        return { kind: 'status' as const, text: dictation.state.message };
+      }
+    }
+    return null;
+  })();
+
+  const focusDictating =
+    dictation.state?.target === 'focus' &&
+    (dictation.state.status === 'starting' ||
+      dictation.state.status === 'listening');
+  const focusDictationBlock = focusDictating
+    ? null
+    : dictationUnavailableReason('focus');
+  const focusDictationFeedback = (() => {
+    if (
+      focusDictating ||
+      (dictation.state?.target === 'focus' &&
+        dictation.state.status === 'stopping')
+    ) {
+      return {
+        kind: 'status' as const,
+        text: dictationStatusLabel(dictation.state),
+      };
+    }
+    if (dictationTarget === 'focus') {
+      if (dictation.error) {
+        return { kind: 'error' as const, text: dictation.error };
+      }
+      if (dictation.state?.status === 'error' && dictation.state.message) {
+        return { kind: 'error' as const, text: dictation.state.message };
+      }
+      if (dictation.state?.status === 'off' && dictation.state.message) {
+        return { kind: 'status' as const, text: dictation.state.message };
+      }
+    }
+    return null;
+  })();
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -1816,8 +2045,72 @@ function Notebook() {
                     />
                     <div className="editor-footer">
                       <span>Kept in memory for this session</span>
-                      <span>{notes.length.toLocaleString()} / 20,000</span>
+                      <div className="editor-footer-actions">
+                        <span>{notes.length.toLocaleString()} / 20,000</span>
+                        <button
+                          type="button"
+                          className={`dictation-button${notesDictating ? ' is-listening' : ''}`}
+                          aria-label={
+                            notesDictating ? 'Stop dictating' : 'Dictate note'
+                          }
+                          aria-pressed={notesDictating}
+                          aria-describedby={
+                            notesDictationBlock?.visibleHint
+                              ? 'notes-dictation-hint'
+                              : undefined
+                          }
+                          disabled={
+                            notesDictating
+                              ? dictation.busy
+                              : !!notesDictationBlock
+                          }
+                          title={
+                            notesDictating
+                              ? 'Stop dictating'
+                              : (notesDictationBlock?.reason ?? 'Dictate note')
+                          }
+                          onClick={() => toggleDictation('notes')}
+                        >
+                          {notesDictating ? (
+                            <Square size={14} aria-hidden="true" />
+                          ) : (
+                            <Mic size={16} aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
                     </div>
+                    {notesDictationFeedback && (
+                      <p
+                        className={
+                          notesDictationFeedback.kind === 'error'
+                            ? 'dictation-error'
+                            : 'dictation-status'
+                        }
+                        role={
+                          notesDictationFeedback.kind === 'error'
+                            ? 'alert'
+                            : 'status'
+                        }
+                      >
+                        {notesDictationFeedback.kind === 'status' &&
+                          notesDictating && (
+                            <span
+                              className="dictation-dot"
+                              aria-hidden="true"
+                            />
+                          )}
+                        {notesDictationFeedback.text}
+                      </p>
+                    )}
+                    {!notesDictationFeedback &&
+                      notesDictationBlock?.visibleHint && (
+                        <p
+                          id="notes-dictation-hint"
+                          className="small muted dictation-hint"
+                        >
+                          {notesDictationBlock.reason}
+                        </p>
+                      )}
                   </div>
                 ) : (
                   <div
@@ -2036,29 +2329,100 @@ function Notebook() {
                   <label htmlFor="meeting-focus">
                     Focus <span className="muted small">· optional</span>
                   </label>
-                  <textarea
-                    id="meeting-focus"
-                    ref={focusField}
-                    aria-describedby={
-                      focusError
-                        ? 'meeting-focus-help meeting-focus-error'
-                        : 'meeting-focus-help'
-                    }
-                    value={focus}
-                    rows={3}
-                    spellCheck={false}
-                    onChange={(e) => {
-                      focusEdit.current++;
-                      setFocus(e.target.value);
-                    }}
-                    onBlur={(e) => {
-                      if (
-                        !clearButton.current ||
-                        e.relatedTarget !== clearButton.current
-                      )
-                        saveFocus();
-                    }}
-                  />
+                  <div className="focus-input-row">
+                    <textarea
+                      id="meeting-focus"
+                      ref={focusField}
+                      aria-describedby={
+                        focusError
+                          ? 'meeting-focus-help meeting-focus-error'
+                          : 'meeting-focus-help'
+                      }
+                      value={focus}
+                      rows={3}
+                      spellCheck={false}
+                      onChange={(e) => {
+                        focusEdit.current++;
+                        setFocus(e.target.value);
+                      }}
+                      onBlur={(e) => {
+                        if (skipFocusBlur.current) {
+                          skipFocusBlur.current = false;
+                          return;
+                        }
+                        if (
+                          !clearButton.current ||
+                          e.relatedTarget !== clearButton.current
+                        )
+                          saveFocus();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={`dictation-button${focusDictating ? ' is-listening' : ''}`}
+                      aria-label={
+                        focusDictating ? 'Stop dictating' : 'Dictate focus'
+                      }
+                      aria-pressed={focusDictating}
+                      aria-describedby={
+                        focusDictationBlock?.visibleHint
+                          ? 'focus-dictation-hint'
+                          : undefined
+                      }
+                      disabled={
+                        focusDictating ? dictation.busy : !!focusDictationBlock
+                      }
+                      title={
+                        focusDictating
+                          ? 'Stop dictating'
+                          : (focusDictationBlock?.reason ?? 'Dictate focus')
+                      }
+                      onMouseDown={() => {
+                        if (!focusDictating && !focusDictationBlock) {
+                          skipFocusBlur.current = true;
+                        }
+                      }}
+                      onClick={() => {
+                        skipFocusBlur.current = false;
+                        toggleDictation('focus');
+                      }}
+                    >
+                      {focusDictating ? (
+                        <Square size={14} aria-hidden="true" />
+                      ) : (
+                        <Mic size={16} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  {focusDictationFeedback && (
+                    <p
+                      className={
+                        focusDictationFeedback.kind === 'error'
+                          ? 'dictation-error'
+                          : 'dictation-status'
+                      }
+                      role={
+                        focusDictationFeedback.kind === 'error'
+                          ? 'alert'
+                          : 'status'
+                      }
+                    >
+                      {focusDictationFeedback.kind === 'status' &&
+                        focusDictating && (
+                          <span className="dictation-dot" aria-hidden="true" />
+                        )}
+                      {focusDictationFeedback.text}
+                    </p>
+                  )}
+                  {!focusDictationFeedback &&
+                    focusDictationBlock?.visibleHint && (
+                      <p
+                        id="focus-dictation-hint"
+                        className="small muted dictation-hint"
+                      >
+                        {focusDictationBlock.reason}
+                      </p>
+                    )}
                   {focusError && (
                     <p id="meeting-focus-error" role="alert">
                       Focus wasn't applied. {focusError} Edit the lines and

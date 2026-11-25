@@ -65,6 +65,7 @@ mod dev_source_observation;
 mod dev_stop;
 #[cfg(debug_assertions)]
 mod dev_user_name;
+pub mod dictation;
 pub mod engine;
 mod export_file;
 pub mod granola;
@@ -1469,6 +1470,9 @@ async fn start_live_session(
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
         }
+        // Release any active note dictation before starting a live session so
+        // they never compete for the microphone.
+        dictation::stop_for_live_session(&app).await;
         // The application under review, if the person chose one beside the
         // microphone. The session declares it, so its review names both.
         let joining = match application {
@@ -1786,6 +1790,7 @@ pub fn run() {
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
+        .manage(dictation::Controller::default())
         .manage(menu_bar::Shown::default())
         .manage(login_item::LoginItems(login_item::for_app()))
         .invoke_handler(tauri::generate_handler![
@@ -1867,6 +1872,9 @@ pub fn run() {
             microphone::microphone_snapshot,
             microphone::start_microphone,
             stop_microphone,
+            dictation::note_dictation_snapshot,
+            dictation::start_note_dictation,
+            dictation::stop_note_dictation,
             settings_commands::settings_status,
             settings_commands::panel_sizes,
             settings_commands::set_panel_sizes,
@@ -1971,6 +1979,7 @@ pub fn run() {
                     drop(runtime);
                     menu_bar::update(&handle, menu);
                     microphone::refresh(&handle);
+                    dictation::refresh(&handle);
                     let Some(microphone) = handle.state::<microphone::Controller>().try_status()
                     else {
                         continue;
@@ -2037,6 +2046,7 @@ pub fn run() {
                 ))]
                 lab_evaluator::cancel_active(lab_evaluator::ControlReason::Exit);
                 microphone::stop_on_exit(app);
+                dictation::stop_on_exit(app);
                 // End any model call still in flight, and its helpers.
                 #[cfg(feature = "claude-cli")]
                 claude_cli::end_all();
@@ -2883,6 +2893,112 @@ mod context_file_path_tests {
         assert_eq!(
             notes_file::explicit_path(absolute.to_str().unwrap()).unwrap(),
             absolute
+        );
+    }
+}
+
+#[cfg(test)]
+mod dictation_ipc_tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dictation_ipc_is_restricted_to_main_and_refuses_while_live_or_mic_is_active() {
+        use tauri::Manager;
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .invoke_handler(tauri::generate_handler![
+                dictation::note_dictation_snapshot,
+                dictation::start_note_dictation,
+                dictation::stop_note_dictation,
+            ])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+                      cmd: &str,
+                      body: serde_json::Value,
+                      url: &str| {
+            tauri::test::get_ipc_response(
+                window,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: url.parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+        let local = "http://127.0.0.1:1420";
+
+        let snap: dictation::Snapshot = invoke(
+            &main,
+            "note_dictation_snapshot",
+            serde_json::json!({}),
+            local,
+        )
+        .unwrap()
+        .deserialize()
+        .unwrap();
+        assert_eq!(snap.status, dictation::Status::Off);
+        assert!(snap.can_start);
+
+        // Companion window and untrusted origins cannot call dictation commands.
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            for (cmd, body) in [
+                ("note_dictation_snapshot", serde_json::json!({})),
+                (
+                    "start_note_dictation",
+                    serde_json::json!({ "target": "notes" }),
+                ),
+                ("stop_note_dictation", serde_json::json!({})),
+            ] {
+                let denied = invoke(window, cmd, body, url).unwrap_err();
+                assert!(
+                    denied.as_str().unwrap().contains("not allowed"),
+                    "{cmd}: {denied}"
+                );
+            }
+        }
+
+        // Invalid target rejected.
+        assert!(invoke(
+            &main,
+            "start_note_dictation",
+            serde_json::json!({ "target": "other" }),
+            local
+        )
+        .is_err());
+
+        // Live session active refuses start_note_dictation before touching keys/mic.
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state.0.lock().unwrap();
+            runtime.engine = Engine::live();
+            runtime.engine.start().unwrap();
+        }
+        let err = invoke(
+            &main,
+            "start_note_dictation",
+            serde_json::json!({ "target": "notes" }),
+            local,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.as_str().unwrap(),
+            "Stop the live session before dictating."
         );
     }
 }

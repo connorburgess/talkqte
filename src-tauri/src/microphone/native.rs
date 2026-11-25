@@ -12,7 +12,7 @@ use super::{CaptureStream, Failure, Meter};
 use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
-pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
+pub(crate) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
@@ -44,12 +44,12 @@ pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send +
 /// Windows and Linux have no access prompt for a desktop app to request:
 /// the stream itself is the check.
 #[cfg(any(windows, target_os = "linux"))]
-pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
+pub(crate) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
     complete(Ok(()));
 }
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
-pub(super) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
+pub(crate) fn request_permission(complete: impl Fn(Result<(), Failure>) + Send + Sync + 'static) {
     complete(Err(Failure::Unsupported));
 }
 
@@ -117,7 +117,7 @@ where
 }
 
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
-pub(super) fn build_stream(
+pub(crate) fn build_stream(
     meter: Arc<Meter>,
     tap_chunk_ms: Option<u64>,
 ) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
@@ -158,7 +158,7 @@ pub(super) fn build_stream(
 }
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
-pub(super) fn build_stream(
+pub(crate) fn build_stream(
     _meter: Arc<Meter>,
     _tap_chunk_ms: Option<u64>,
 ) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
