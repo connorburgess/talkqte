@@ -2,8 +2,59 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { desktop } from './bridge';
 
-/** The two providers a person brings a key for. */
-export type KeyProvider = 'deepgram' | 'anthropic';
+/** The providers a person brings a key for. */
+export type KeyProvider = 'deepgram' | 'anthropic' | 'openai' | 'gemini';
+
+/** The providers supported for cue decisions and meeting notes. */
+export type CueProvider = 'anthropic' | 'openai' | 'gemini';
+
+export function cueProviderName(provider: CueProvider): string {
+  switch (provider) {
+    case 'openai':
+      return 'OpenAI';
+    case 'gemini':
+      return 'Gemini';
+    default:
+      return 'Anthropic';
+  }
+}
+
+export const CURATED_CUE_MODELS: Record<
+  CueProvider,
+  readonly { id: string; label: string }[]
+> = {
+  anthropic: [
+    { id: 'claude-haiku-5-5', label: 'claude-haiku-5-5 (tested default)' },
+    { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5' },
+    { id: 'claude-opus-5-5', label: 'claude-opus-5-5' },
+  ],
+  openai: [
+    { id: 'gpt-5-mini', label: 'gpt-5-mini (tested default)' },
+    { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
+    { id: 'gpt-4.1', label: 'gpt-4.1' },
+    { id: 'gpt-5', label: 'gpt-5' },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash (tested default)' },
+    { id: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite' },
+    { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
+  ],
+};
+
+export function defaultCueModel(provider: CueProvider): string {
+  return CURATED_CUE_MODELS[provider][0].id;
+}
+
+export function defaultNotesModelFor(provider: CueProvider): string {
+  switch (provider) {
+    case 'openai':
+      return 'gpt-5';
+    case 'gemini':
+      return 'gemini-2.5-pro';
+    default:
+      return 'claude-opus-5-5';
+  }
+}
 
 /** What the notebook may know about a key; never the key itself. */
 export interface KeyStatus {
@@ -26,7 +77,9 @@ export interface KeyStore {
 export interface KeysStatus {
   deepgram: KeyStatus;
   anthropic: KeyStatus;
-  /** Either key is not set: what a first-run screen asks for. */
+  openai: KeyStatus;
+  gemini: KeyStatus;
+  /** Deepgram or all cue provider keys are not set: what a first-run screen asks for. */
   anyMissing: boolean;
   /** Absent only from a payload older than this field. */
   store?: KeyStore;
@@ -60,13 +113,26 @@ export function keyStoreLabel(kind: KeyStoreKind | undefined) {
   }
 }
 
-/** This session's use of the Anthropic key; an estimate, not a bill. */
+/** This session's use of the active cue key; spend fields are null for custom models. */
 export interface CueUsage {
+  provider?: CueProvider;
   model: string;
   requests: number;
   requestCap: number;
-  spentMicroUsd: number;
-  spendCapMicroUsd: number;
+  spentMicroUsd: number | null;
+  spendCapMicroUsd: number | null;
+  customModel?: boolean;
+}
+
+export interface ProviderPreferences {
+  cueProvider: CueProvider;
+  cueModelOverride: string | null;
+  notesModel: string;
+  notesModelOverride: string | null;
+  effectiveCueModel: string;
+  effectiveCueCustom: boolean;
+  effectiveNotesModel: string;
+  effectiveNotesCustom: boolean;
 }
 
 // The browser preview keeps fictional keys in memory and contacts nothing.
@@ -75,18 +141,96 @@ export interface CueUsage {
 const previewKeys: Record<KeyProvider, KeyStatus | null> = {
   deepgram: null,
   anthropic: null,
+  openai: null,
+  gemini: null,
 };
 const previewListeners = new Set<(status: KeysStatus) => void>();
+const previewPrefListeners = new Set<(prefs: ProviderPreferences) => void>();
+
+let previewPrefs: {
+  cueProvider: CueProvider;
+  cueModelOverride: string | null;
+  anthropicNotesModel: string;
+  notesModelOverride: string | null;
+} = {
+  cueProvider: 'anthropic',
+  cueModelOverride: null,
+  anthropicNotesModel: 'claude-opus-5-5',
+  notesModelOverride: null,
+};
+
+function isCuratedCue(provider: CueProvider, id: string) {
+  return CURATED_CUE_MODELS[provider].some((m) => m.id === id);
+}
+
+function isCuratedNotes(provider: CueProvider, id: string) {
+  const curated: Record<CueProvider, string[]> = {
+    anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+    openai: ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'gpt-4.1-mini'],
+    gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+  };
+  return curated[provider].includes(id);
+}
+
+function currentPreviewPrefs(): ProviderPreferences {
+  const provider = previewPrefs.cueProvider;
+  const effectiveCueModel =
+    previewPrefs.cueModelOverride ?? defaultCueModel(provider);
+  const fallbackNotes =
+    provider === 'anthropic'
+      ? previewPrefs.anthropicNotesModel
+      : defaultNotesModelFor(provider);
+  const effectiveNotesModel = previewPrefs.notesModelOverride ?? fallbackNotes;
+  return {
+    cueProvider: provider,
+    cueModelOverride: previewPrefs.cueModelOverride,
+    notesModel: effectiveNotesModel,
+    notesModelOverride: previewPrefs.notesModelOverride,
+    effectiveCueModel,
+    effectiveCueCustom: !isCuratedCue(provider, effectiveCueModel),
+    effectiveNotesModel,
+    effectiveNotesCustom: !isCuratedNotes(provider, effectiveNotesModel),
+  };
+}
+
+function notifyPreviewPrefs(): ProviderPreferences {
+  const next = currentPreviewPrefs();
+  for (const listener of previewPrefListeners) listener(next);
+  return next;
+}
+
+export function validateModelId(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.length > 96 ||
+    trimmed.includes('..') ||
+    !/^[A-Za-z0-9._:/-]+$/.test(trimmed)
+  ) {
+    throw new Error(
+      'Model ID must be up to 96 ASCII characters (letters, digits, ., _, :, /, -).',
+    );
+  }
+  return trimmed;
+}
 
 function previewStatus(): KeysStatus {
   const of = (provider: KeyProvider) =>
     previewKeys[provider] ?? { state: 'notSet' as const, verified: false };
   const deepgram = of('deepgram');
   const anthropic = of('anthropic');
+  const openai = of('openai');
+  const gemini = of('gemini');
+  const cueMissing =
+    anthropic.state === 'notSet' &&
+    openai.state === 'notSet' &&
+    gemini.state === 'notSet';
   return {
     deepgram,
     anthropic,
-    anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    openai,
+    gemini,
+    anyMissing: deepgram.state === 'notSet' || cueMissing,
     store: { kind: 'keychain', available: true },
   };
 }
@@ -103,6 +247,27 @@ function previewShapeError(provider: KeyProvider, text: string) {
     return ok
       ? null
       : 'That does not look like an Anthropic API key. It starts with sk-ant-api.';
+  }
+  if (provider === 'openai') {
+    const ok =
+      key.startsWith('sk-') &&
+      !key.startsWith('sk-ant-') &&
+      key.length >= 20 &&
+      key.length <= 256 &&
+      /^[A-Za-z0-9_-]+$/.test(key);
+    return ok
+      ? null
+      : 'That does not look like an OpenAI API key. It starts with sk-.';
+  }
+  if (provider === 'gemini') {
+    const ok =
+      key.startsWith('AIza') &&
+      key.length >= 30 &&
+      key.length <= 128 &&
+      /^[A-Za-z0-9_-]+$/.test(key);
+    return ok
+      ? null
+      : 'That does not look like a Gemini API key. It starts with AIza.';
   }
   return key.length >= 32 && key.length <= 128 && /^[A-Za-z0-9]+$/.test(key)
     ? null
@@ -154,6 +319,54 @@ export async function removeKey(provider: KeyProvider): Promise<KeysStatus> {
 export async function cueUsage(): Promise<CueUsage | null> {
   if (!desktop) return null;
   return invoke<CueUsage | null>('cue_usage');
+}
+
+export async function providerPreferences(): Promise<ProviderPreferences> {
+  if (!desktop) return currentPreviewPrefs();
+  return invoke<ProviderPreferences>('provider_preferences');
+}
+
+export async function setCueProvider(
+  provider: CueProvider,
+): Promise<ProviderPreferences> {
+  if (!desktop) {
+    if (previewPrefs.cueProvider !== provider) {
+      previewPrefs.cueProvider = provider;
+      previewPrefs.cueModelOverride = null;
+      previewPrefs.notesModelOverride = null;
+    }
+    return notifyPreviewPrefs();
+  }
+  return invoke<ProviderPreferences>('set_cue_provider', { provider });
+}
+
+export async function setCueModelOverride(
+  model: string | null,
+): Promise<ProviderPreferences> {
+  if (!desktop) {
+    previewPrefs.cueModelOverride = model ? validateModelId(model) : null;
+    return notifyPreviewPrefs();
+  }
+  return invoke<ProviderPreferences>('set_cue_model_override', { model });
+}
+
+export async function setNotesModelOverride(
+  model: string | null,
+): Promise<ProviderPreferences> {
+  if (!desktop) {
+    previewPrefs.notesModelOverride = model ? validateModelId(model) : null;
+    return notifyPreviewPrefs();
+  }
+  return invoke<ProviderPreferences>('set_notes_model_override', { model });
+}
+
+export function watchPreviewPreferences(
+  receive: (prefs: ProviderPreferences) => void,
+) {
+  previewPrefListeners.add(receive);
+  return () => {
+    previewPrefListeners.delete(receive);
+  };
 }
 
 /** Key changes made anywhere in the app, including a first-run screen. */

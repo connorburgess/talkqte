@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { desktop } from './bridge';
+import type { CueProvider } from './providerKeys';
 
 /** Where this session's model-written notes stand (Rust's `Phase`). */
 export type MeetingNotesPhase =
@@ -12,12 +13,15 @@ export interface MeetingNotesPlan {
   /** Present only when the person chose to include their notes. */
   noteLines?: number;
   kilobytes: number;
+  provider?: CueProvider;
+  providerName?: string;
   model: string;
-  likelyMicroUsd: number;
-  worstMicroUsd: number;
-  spendCapMicroUsd: number;
+  customModel?: boolean;
+  likelyMicroUsd?: number | null;
+  worstMicroUsd?: number | null;
+  spendCapMicroUsd?: number | null;
   destination: string;
-  /** This session's cue spend with the same key, when there was any. */
+  /** This session's cue spend with the same provider, when there was any. */
   cueSpentMicroUsd?: number;
   /** Names exactly what would be sent; the request must match it. */
   fingerprint: string;
@@ -40,19 +44,29 @@ export interface CheckItem {
 export interface MeetingNotesDraft {
   markdown: string;
   items: CheckItem[];
-  /** Absent when the API did not report the cost. */
-  spentMicroUsd?: number;
+  /** Absent when the API did not report the cost or a custom model was used. */
+  spentMicroUsd?: number | null;
+  providerName?: string;
+  customModel?: boolean;
 }
 
 export interface MeetingNotesResult {
   draft?: MeetingNotesDraft;
   failure?: string;
   kept?: string;
-  spentMicroUsd?: number;
+  spentMicroUsd?: number | null;
+  providerName?: string;
+  customModel?: boolean;
 }
 
-/** The models the app lists for notes, most careful first. */
-export const notesModels = [
+export interface NotesModelOption {
+  id: string;
+  label: string;
+  cost: string;
+}
+
+/** The models the app lists for Anthropic notes, most careful first. */
+export const notesModels: readonly NotesModelOption[] = [
   {
     id: 'claude-opus-5-5',
     label: 'Most careful (default)',
@@ -64,7 +78,39 @@ export const notesModels = [
     label: 'Quickest',
     cost: 'lowest cost, least careful',
   },
-] as const;
+];
+
+export const notesModelsByProvider: Record<
+  CueProvider,
+  readonly NotesModelOption[]
+> = {
+  anthropic: notesModels,
+  openai: [
+    { id: 'gpt-5', label: 'Most careful (default)', cost: 'highest cost' },
+    { id: 'gpt-4.1', label: 'Balanced', cost: 'standard cost' },
+    { id: 'gpt-5-mini', label: 'Quickest', cost: 'lower cost' },
+    { id: 'gpt-4.1-mini', label: 'Lowest cost', cost: 'least careful' },
+  ],
+  gemini: [
+    {
+      id: 'gemini-2.5-pro',
+      label: 'Most careful (default)',
+      cost: 'highest cost',
+    },
+    { id: 'gemini-2.5-flash', label: 'Quickest', cost: 'lower cost' },
+    {
+      id: 'gemini-2.5-flash-lite',
+      label: 'Lowest cost',
+      cost: 'lowest cost, least careful',
+    },
+  ],
+};
+
+export function notesModelsFor(
+  provider: CueProvider,
+): readonly NotesModelOption[] {
+  return notesModelsByProvider[provider] ?? notesModels;
+}
 
 // The browser preview never has a live session, so it never writes notes.
 const unavailable = () =>

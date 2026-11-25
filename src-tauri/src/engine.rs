@@ -2200,8 +2200,8 @@ impl Engine {
         if self.meeting_cut {
             return Err(crate::meeting_notes::Refusal::TooLong);
         }
-        let prepared = crate::meeting_notes::prepare(
-            crate::meeting_notes::notes_model(),
+        let prepared = crate::meeting_notes::prepare_for(
+            crate::meeting_notes::active_target(),
             &self.meeting,
             include_notes.then_some(self.state.notes.as_str()),
         )?;
@@ -2215,6 +2215,14 @@ impl Engine {
         include_notes: bool,
     ) -> Result<crate::meeting_notes::Plan, crate::meeting_notes::Refusal> {
         Ok(self.meeting_notes_input(include_notes)?.plan())
+    }
+
+    /// Multi-provider confirmation facts, with honest `None` cost fields for custom model IDs.
+    pub fn meeting_notes_plan_view(
+        &self,
+        include_notes: bool,
+    ) -> Result<crate::meeting_notes::PlanView, crate::meeting_notes::Refusal> {
+        Ok(self.meeting_notes_input(include_notes)?.plan_view())
     }
 
     /// Marks this session's one notes request as being written and returns
@@ -2260,12 +2268,29 @@ impl Engine {
         result: Result<crate::meeting_notes::Draft, crate::meeting_notes::Failure>,
         spent_micro_usd: Option<u64>,
     ) -> bool {
+        self.finish_meeting_notes_for(
+            session,
+            crate::llm_provider::CueProvider::Anthropic,
+            result,
+            spent_micro_usd,
+        )
+    }
+
+    pub fn finish_meeting_notes_for(
+        &mut self,
+        session: u64,
+        provider: crate::llm_provider::CueProvider,
+        result: Result<crate::meeting_notes::Draft, crate::meeting_notes::Failure>,
+        spent_micro_usd: Option<u64>,
+    ) -> bool {
         if self.session() != session
             || self.state.meeting_notes != crate::meeting_notes::Phase::Writing
         {
             return false;
         }
-        self.state.meeting_notes = self.meeting_notes.finish(result, spent_micro_usd);
+        self.state.meeting_notes = self
+            .meeting_notes
+            .finish_for(provider, result, spent_micro_usd);
         self.changed();
         true
     }

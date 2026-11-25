@@ -145,6 +145,32 @@ test('the notebook, the review and a two-source session with a cue have no autom
   expect(await violations(page), 'settings').toEqual([]);
 });
 
+test('an active microphone check has no automated accessibility violations in Settings or the compact Notebook bar', async ({
+  page,
+}) => {
+  await standIn(page, '/?live&keys=set');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  expect(await violations(page), 'settings idle mic').toEqual([]);
+  await page
+    .getByRole('button', { name: 'Start microphone', exact: true })
+    .click();
+  await page.evaluate(() =>
+    window.microphoneTest.send({
+      status: 'listening',
+      activity: 'active',
+      deviceName: 'Fictional microphone',
+    }),
+  );
+  expect(await violations(page), 'settings active mic').toEqual([]);
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(
+    page
+      .getByRole('region', { name: 'Microphone', exact: true })
+      .getByRole('button', { name: 'Stop microphone', exact: true }),
+  ).toBeVisible();
+  expect(await violations(page), 'notebook compact active mic').toEqual([]);
+});
+
 test('an ended session, its meeting notes offer and the export review have no automated accessibility violations', async ({
   page,
 }) => {

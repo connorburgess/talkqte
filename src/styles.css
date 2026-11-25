@@ -290,6 +290,25 @@ svg {
   padding-bottom: var(--space-16);
   border-bottom: 0;
 }
+.microphone-panel.is-compact .microphone-panel-body {
+  padding-bottom: var(--space-12);
+}
+.microphone-panel.is-settings {
+  max-width: none;
+  margin: 0;
+  padding: var(--space-24) 0 0;
+}
+.microphone-panel.is-settings .microphone-panel-body {
+  padding-bottom: var(--space-24);
+}
+.microphone-panel.is-settings .microphone-heading h2 {
+  font-family: var(--font);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--ink);
+}
 .microphone-heading {
   display: flex;
   align-items: center;
@@ -1443,7 +1462,7 @@ svg {
     padding-inline: var(--space-12);
   }
   .toolbar,
-  .microphone-panel,
+  .microphone-panel:not(.is-settings),
   .notebook-body,
   .secondary-page {
     padding-inline: var(--space-24);
@@ -1531,7 +1550,7 @@ svg {
     height: 48px;
     padding-inline: var(--space-24);
   }
-  .microphone-panel {
+  .microphone-panel:not(.is-settings) {
     padding: var(--space-12) var(--space-24) 0;
   }
   .error-banner {
@@ -1572,7 +1591,7 @@ svg {
 }
 @media (max-width: 400px) {
   .toolbar,
-  .microphone-panel,
+  .microphone-panel:not(.is-settings),
   .notebook-body,
   .secondary-page {
     padding-inline: var(--space-16);

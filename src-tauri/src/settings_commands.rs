@@ -21,6 +21,12 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
     if crate::meeting_notes::set_notes_model(settings.notes_model).is_err() {
         let _ = crate::meeting_notes::set_notes_model(crate::meeting_notes::DEFAULT_MODEL);
     }
+    crate::llm_provider::apply_preferences(crate::llm_provider::Preferences {
+        cue_provider: settings.cue_provider,
+        cue_model_override: settings.cue_model_override.clone(),
+        notes_model: settings.notes_model,
+        notes_model_override: settings.notes_model_override.clone(),
+    });
     let engine = &mut runtime.engine;
     engine.set_question_size(settings.question_size);
     engine.set_companion_position(settings.companion_position);

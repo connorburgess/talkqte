@@ -23,6 +23,7 @@
 use crate::{
     call_prompt,
     engine::{CompanionPosition, QuestionSize, Sensitivity},
+    llm_provider::{self, CueProvider},
     transcription::cloud::Language,
 };
 use serde::Serialize;
@@ -49,8 +50,11 @@ pub const NOTES_RATIO: (f64, f64) = (0.15, 0.85);
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub transcription_language: Language,
+    pub cue_provider: CueProvider,
+    pub cue_model_override: Option<String>,
     /// One of `anthropic_api::MODELS`.
     pub notes_model: &'static str,
+    pub notes_model_override: Option<String>,
     pub question_size: QuestionSize,
     pub companion_position: CompanionPosition,
     pub sensitivity: Sensitivity,
@@ -82,7 +86,10 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             transcription_language: Language::English,
+            cue_provider: CueProvider::Anthropic,
+            cue_model_override: None,
             notes_model: crate::meeting_notes::DEFAULT_MODEL,
+            notes_model_override: None,
             question_size: QuestionSize::Standard,
             companion_position: CompanionPosition::BottomRight,
             sensitivity: Sensitivity::Balanced,
@@ -139,11 +146,19 @@ pub fn parse(bytes: &[u8]) -> Settings {
     if object.get("version").and_then(Value::as_u64) != Some(VERSION) {
         return defaults;
     }
+    let cue_model_override = object
+        .get("cueModelOverride")
+        .and_then(Value::as_str)
+        .and_then(|value| llm_provider::validate_model_id(value).ok().flatten());
     let notes_model = object
         .get("notesModel")
         .and_then(Value::as_str)
         .and_then(crate::anthropic_api::model)
         .map_or(defaults.notes_model, |model| model.id);
+    let notes_model_override = object
+        .get("notesModelOverride")
+        .and_then(Value::as_str)
+        .and_then(|value| llm_provider::validate_model_id(value).ok().flatten());
     let panels = object
         .get("panels")
         .and_then(Value::as_object)
@@ -187,7 +202,10 @@ pub fn parse(bytes: &[u8]) -> Settings {
             "transcriptionLanguage",
             defaults.transcription_language,
         ),
+        cue_provider: field(&object, "cueProvider", defaults.cue_provider),
+        cue_model_override,
         notes_model,
+        notes_model_override,
         question_size: field(&object, "questionSize", defaults.question_size),
         companion_position: field(&object, "companionPosition", defaults.companion_position),
         sensitivity: field(&object, "sensitivity", defaults.sensitivity),
@@ -210,7 +228,10 @@ pub fn render(settings: &Settings) -> Vec<u8> {
     let value = json!({
         "version": VERSION,
         "transcriptionLanguage": settings.transcription_language,
+        "cueProvider": settings.cue_provider,
+        "cueModelOverride": settings.cue_model_override,
         "notesModel": settings.notes_model,
+        "notesModelOverride": settings.notes_model_override,
         "questionSize": settings.question_size,
         "companionPosition": settings.companion_position,
         "sensitivity": settings.sensitivity,
@@ -500,7 +521,10 @@ mod tests {
     fn chosen() -> Settings {
         Settings {
             transcription_language: Language::Multilingual,
+            cue_provider: CueProvider::OpenAi,
+            cue_model_override: Some("gpt-5.4-codex".into()),
             notes_model: "claude-haiku-5-5",
+            notes_model_override: Some("gpt-4.1".into()),
             question_size: QuestionSize::Large,
             companion_position: CompanionPosition::TopLeft,
             sensitivity: Sensitivity::Focused,
@@ -558,9 +582,12 @@ mod tests {
             [
                 "callPrompt",
                 "companionPosition",
+                "cueModelOverride",
+                "cueProvider",
                 "floatingWindow",
                 "keepRunningInMenuBar",
                 "notesModel",
+                "notesModelOverride",
                 "panels",
                 "questionSize",
                 "sensitivity",
@@ -661,7 +688,10 @@ mod tests {
             br#"{
                 "version": 1,
                 "transcriptionLanguage": "fr",
+                "cueProvider": "other-provider",
+                "cueModelOverride": "bad model with spaces",
                 "notesModel": "some-other-model",
+                "notesModelOverride": "../traversal",
                 "questionSize": "large",
                 "companionPosition": "middle",
                 "sensitivity": 3,

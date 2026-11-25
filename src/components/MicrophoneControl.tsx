@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { desktop } from '../lib/bridge';
 import { usePlatform } from '../lib/platform';
 import type { CloudTranscription } from '../lib/transcription';
@@ -56,6 +56,9 @@ export function MicrophoneControl({
   live = false,
   preparing = false,
   cancelling = false,
+  compact = false,
+  inSettings = false,
+  stopActionRef,
   action,
   processingConfigured = false,
   processingApproved = true,
@@ -67,6 +70,11 @@ export function MicrophoneControl({
   live?: boolean;
   preparing?: boolean;
   cancelling?: boolean;
+  /** Compact active-mic indicator shown outside Settings when mic check runs. */
+  compact?: boolean;
+  /** Full microphone check inside Settings. */
+  inSettings?: boolean;
+  stopActionRef?: Ref<HTMLButtonElement>;
   action?: ReactNode;
   processingConfigured?: boolean;
   processingApproved?: boolean;
@@ -156,6 +164,68 @@ export function MicrophoneControl({
     (state?.status === 'error' && !state.canStart);
   const canStop =
     (active && state?.status !== 'error') || (!!error && !state) || stopping;
+  if (compact)
+    return (
+      <section className="microphone-panel is-compact" aria-label="Microphone">
+        <div className="microphone-panel-body">
+          <div className="microphone-heading">
+            <div>
+              <strong>Microphone check</strong>
+              <span className="status-sep" aria-hidden="true">
+                ·
+              </span>
+              <span className="microphone-status" role="status">
+                {error && !state
+                  ? 'Status unavailable'
+                  : microphoneLabel(state)}
+              </span>
+              {state?.status === 'listening' && (
+                <>
+                  <span className="status-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span
+                    className={`microphone-activity${
+                      state.activity === 'active' ? ' is-active' : ''
+                    }`}
+                  >
+                    <span
+                      className={`status-dot ${state.activity}`}
+                      aria-hidden="true"
+                    />
+                    {state.activity === 'active'
+                      ? 'Signal detected'
+                      : 'Quiet input'}
+                  </span>
+                </>
+              )}
+            </div>
+            <button
+              ref={stopActionRef}
+              className="secondary-button"
+              disabled={
+                !desktop || busy || stopping || (!canStop && !state?.canStart)
+              }
+              onClick={() => void stop()}
+              aria-label="Stop microphone"
+            >
+              {stopping ? 'Stopping…' : 'Stop microphone'}
+            </button>
+          </div>
+          {microphone.stopPending && state?.status !== 'stopping' && (
+            <p aria-live="polite">Stop requested… waiting for microphone.</p>
+          )}
+          {(error || state?.message) && (
+            <p
+              className="microphone-message"
+              role={error || state?.status === 'error' ? 'alert' : undefined}
+            >
+              {error || state?.message}
+            </p>
+          )}
+        </div>
+      </section>
+    );
   const idle =
     !active &&
     !stopping &&
@@ -164,17 +234,23 @@ export function MicrophoneControl({
     !state?.message &&
     !microphone.stopPending;
   const description = sourceMayBeCapturing
-    ? 'Shows whether your microphone picks up sound. Nothing from the microphone is recorded or transcribed. Audio from a selected application may still be captured; see Cue processing below.'
+    ? 'Shows whether your microphone picks up sound. Nothing from the microphone is recorded or transcribed. Audio from a selected application may still be captured; see Cue processing above.'
     : 'Shows whether your microphone picks up sound. Nothing is recorded or transcribed, and no system audio is used.';
   return (
     <section
-      className={`microphone-panel${idle ? ' is-quiet' : ''}`}
+      className={`microphone-panel${inSettings ? ' is-settings' : ''}${
+        idle ? ' is-quiet' : ''
+      }`}
       aria-label="Microphone"
     >
       <div className="microphone-panel-body">
         <div className="microphone-heading">
           <div>
-            <strong>Microphone check</strong>
+            {inSettings ? (
+              <h2>Microphone check</h2>
+            ) : (
+              <strong>Microphone check</strong>
+            )}
             <span className="status-sep" aria-hidden="true">
               ·
             </span>

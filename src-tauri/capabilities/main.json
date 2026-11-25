@@ -2,9 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Notebook commands for the local main window only.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -61,6 +59,10 @@
     "allow-test-provider-key",
     "allow-remove-provider-key",
     "allow-cue-usage",
+    "allow-provider-preferences",
+    "allow-set-cue-provider",
+    "allow-set-cue-model-override",
+    "allow-set-notes-model-override",
     "allow-transcription-language",
     "allow-set-transcription-language",
     "allow-model-status",

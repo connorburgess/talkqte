@@ -170,10 +170,15 @@ impl Engine {
 
     pub(super) fn model_provider(&self) -> Option<String> {
         self.evaluation.as_ref().map(|s| {
-            if s.permission.processor.disclosure.name.starts_with("Claude") {
+            let name = &s.permission.processor.disclosure.name;
+            if name.starts_with("Claude") {
                 "Claude".into()
+            } else if name.starts_with("OpenAI") {
+                "OpenAI".into()
+            } else if name.starts_with("Gemini") {
+                "Gemini".into()
             } else {
-                s.permission.processor.disclosure.name.clone()
+                name.clone()
             }
         })
     }
@@ -189,11 +194,16 @@ impl Engine {
         })
     }
 
-    /// The in-app Anthropic API connection with the person's own key.
+    /// Any in-app own-key provider connection (Anthropic, OpenAI, or Gemini).
     pub(crate) fn is_own_key(&self) -> bool {
-        self.evaluation
-            .as_ref()
-            .is_some_and(|s| s.permission.processor.id == crate::anthropic_api::PROCESSOR_ID)
+        self.evaluation.as_ref().is_some_and(|s| {
+            matches!(
+                s.permission.processor.id.as_str(),
+                crate::anthropic_api::PROCESSOR_ID
+                    | crate::openai_api::PROCESSOR_ID
+                    | crate::gemini_api::PROCESSOR_ID
+            )
+        })
     }
 
     /// The lab backend that sends conversation text to the paid Anthropic
