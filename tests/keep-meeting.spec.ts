@@ -46,6 +46,7 @@ test('notes only by default; keeping the meeting is a reviewed choice', async ({
   });
   await expect(keep).not.toBeChecked();
   await expect(dialog.locator('pre')).not.toContainText(LINE);
+  await expect(dialog.locator('pre')).not.toContainText('auto-saved');
   await keep.check();
   // The preview now shows exactly what will be saved.
   await expect(dialog.locator('pre')).toContainText(LINE);

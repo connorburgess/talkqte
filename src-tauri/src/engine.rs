@@ -10,7 +10,8 @@ pub use evaluation::{
     ProcessingSnapshot, ProcessingTracker, ProcessorConfiguration, ProcessorDisclosure,
     ProcessorSummary, Scope, SourceCapture, SourcePhase, SourceProblem, StartupState, StopTarget,
 };
-pub use sources::{SessionSources, SourcesStatus, THEM, YOU};
+pub use history::{EndPrompt, EndPromptAction, EndPromptState};
+pub use sources::{Declared, SessionSources, SourcesStatus, THEM, YOU};
 
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.
@@ -481,6 +482,9 @@ pub struct Snapshot {
     pub question_size: QuestionSize,
     /// True for a live session fed by transcription.
     pub live: bool,
+    /// True when the live session was started automatically when a call began.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_started: bool,
     /// Live cue suppression only; capture, transcription and the clock continue.
     pub cues_paused: bool,
     /// The person's name, used to notice questions asked of them. Kept in
@@ -579,6 +583,8 @@ pub struct CueSnapshot {
     pub revision: u64,
     pub status: Status,
     pub live: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_started: bool,
     pub cues_paused: bool,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
@@ -594,6 +600,9 @@ pub struct CueSnapshot {
     /// person has turned that prompt on. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_prompt: Option<crate::call_prompt::Prompt>,
+    /// An ended non-empty live session prompt: counts and keep status only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_prompt: Option<EndPrompt>,
     /// Whether conversation lines may leave the device for a model, and
     /// whether a request is being sent. Absent without a model connection.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -746,6 +755,7 @@ impl Engine {
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
                 live: script.segments.is_empty() && script.duration_ms == u64::MAX,
+                auto_started: false,
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
@@ -796,6 +806,7 @@ impl Engine {
             revision: self.state.revision,
             status: self.state.status,
             live: self.state.live,
+            auto_started: self.state.auto_started,
             cues_paused: self.state.cues_paused,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
@@ -804,6 +815,7 @@ impl Engine {
             sensitivity: self.state.sensitivity,
             source_session: false,
             call_prompt: None,
+            end_prompt: None,
             model: match self.evaluation_status() {
                 Some(EvaluationStatus::Unavailable(_)) if self.state.live => {
                     Some(ModelLink::Stopped)
@@ -887,6 +899,7 @@ impl Engine {
         self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
         self.generation += 1;
+        self.state.auto_started = false;
         self.state.cues_paused = false;
         self.cues_after_ms = None;
         self.last_shown.clear();

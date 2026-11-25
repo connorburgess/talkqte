@@ -7,28 +7,15 @@ no build has kept a real meeting on a device yet.
 
 ## Keeping a meeting
 
-Nothing is kept unless the person keeps that meeting.
+By default, non-empty live sessions save automatically into local **Meetings** history when they stop, with a floating dock card to review, write cited notes, open, or delete right away. Lab runs never read, write, or auto-save to kept meetings.
 
-- After a live session with a transcript ends, the notebook shows **Keep this
-  meeting?** below the meeting notes, with a **Title** (by default the date
-  and time, for example "Meeting, 24 Nov 2026, 14:05"), **Keep meeting** and
-  **Not this one**. In a session that heard an application, **Also keep the
-  application's name (…)** is offered, unticked.
-- **Not this one**, quitting, or starting another session stores nothing.
-  The next meeting is offered again.
-- **Settings → Kept meetings → Offer to keep each meeting** turns the
-  question off. It is on by default, because offering stores nothing, and
-  lasts until quit (moving it into the [settings file](release-path.md#recoverable-upgrades)
-  is a separate follow-up).
-- Once kept, the card says **Kept in your meetings as "…"**. Notes typed
-  afterwards, meeting notes kept afterwards, or echo answers change nothing
-  on disk until the person chooses **Update kept meeting**, which appears only
-  when the session differs from what was kept. A new session ends that link:
-  a kept meeting is only ever updated from the session it came from.
+- **Auto-save to Meetings (default, `auto`).** When a live session with transcript lines or manual notes stops, TalkQTE saves it under a date-and-time title (for example, `"Meeting, 24 Nov 2026, 14:05"`), without recording the captured application's name. The floating companion shows **`Meeting saved`** with counts only (lines and whether notes exist, never transcript text, notes, titles, IDs, or app names) plus **Write notes** (when transcript lines exist, bringing Notebook forward to the explicit confirmation plan), **Open**, **Delete**, and **Dismiss**. In Notebook, `KeepInHistory.tsx` shows **`Kept in your meetings as "…"`** so you can update later note edits or rename it in **Meetings**.
+- **Ask each time (`ask`).** Under **Settings → Kept meetings → After a live session ends**, choosing **Ask each time** holds writes until chosen: the floating companion shows **`Meeting ended`** with **Keep meeting** (briefly confirming **`Kept`**), **Write notes**, and **Dismiss**, while Notebook shows **Keep this meeting?** below meeting notes with an editable **Title** and optional **Also keep the application's name (…)** checkbox. **Not this one**, **Dismiss**, quitting, or starting another session stores nothing.
+- **Don't keep automatically or ask (`off`).** Neither auto-saves nor shows a post-session dock card or notebook offer. The **Settings → Kept meetings → After a live session ends** preference persists in `settings.json` (and resets to **Auto-save to Meetings** on **Reset settings**).
+- Once kept (whether auto-saved or manually kept), notes typed afterwards, meeting notes kept afterwards, or echo answers change nothing on disk until the person chooses **Update kept meeting**, which appears only when the session differs from what was kept. A new session ends that link: a kept meeting is only ever updated from the session it came from.
 - **Meetings page (`src/components/MeetingHistory.tsx`).** Lists kept meetings newest first, searches across titles, notes, kept meeting notes, cues and transcript text, opens any meeting read-only (metadata, notes, kept meeting notes, cues shown and transcript with `You`/`Them` and echo labels), renames a meeting inline, deletes one with an inline confirmation, and exports a kept meeting as Markdown through the same preview-before-destination dialog.
 - **Prior context (`Choose kept meetings`).** Lists kept meetings that have kept meeting notes or the person's own notes (`HistorySource` in `src-tauri/src/meeting_history.rs`) into the same `Prior context` chooser (`Provider::History`). Only the ticked meetings' kept meeting notes and user notes (bounded to 2,000 characters, never transcripts, cues, or application names) enter memory, off unless selected, and appear explicitly in the session's processing review with citations back to that meeting (`prior:history:<id>`).
-- The export review's **Also keep this meeting** is unchanged: it only
-  decides whether that one Markdown export includes the transcript and cues.
+- The export review's **Also keep this meeting** is unchanged: it only decides whether that one Markdown export includes the transcript and cues.
 
 ## What a kept meeting holds
 
@@ -100,45 +87,55 @@ meetings/                 mode 700
 
 ## Commands
 
-All notebook-only (`capabilities/main.json`, checked in
-`tests/privacy_boundaries.rs`); the companion has none. File work runs off
-the main thread (`src-tauri/src/meeting_history_commands.rs`).
+History storage and management commands are notebook-only
+(`capabilities/main.json`, checked in `tests/privacy_boundaries.rs`). The
+companion receives only `endPrompt` counts/state and permits only
+`respond_to_end_prompt` (`capabilities/cue.json`). File work runs off the main
+thread (`src-tauri/src/meeting_history_commands.rs`).
 
-| Command                       | Does                                                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `meeting_history_status`      | Availability, the offer setting, the session number, the session's kept meeting and whether it changed |
-| `set_offer_to_keep`           | The offer setting, for this launch                                                                     |
-| `keep_meeting_in_history`     | Keeps the ended session under a title, optionally with the application's name                          |
-| `update_kept_session_meeting` | Writes the same session's later changes to its kept meeting                                            |
-| `kept_meetings`               | The list, newest first, optionally filtered by a search                                                |
-| `open_kept_meeting`           | One meeting in full                                                                                    |
-| `rename_kept_meeting`         | A new title                                                                                            |
-| `delete_kept_meeting`         | Deletes one for good                                                                                   |
-| `delete_all_kept_meetings`    | Deletes the whole folder                                                                               |
-| `kept_meeting_export_preview` | Builds the Markdown preview for one kept meeting and holds it for save                                 |
-| `export_kept_meeting`         | Saves the exact reviewed Markdown for a kept meeting through the native dialog                         |
-| `list_kept_meetings_for_context` | Lists kept meetings' notes and meeting notes (never transcripts) for Prior context selection        |
+| Command                          | Does                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `meeting_history_status`         | Availability, persisted `afterSessionKeep` (`auto`, `ask`, `off`), session number, kept meeting and whether it changed |
+| `set_after_session_keep`         | Persists `afterSessionKeep` (`auto`, `ask`, `off`) in `settings.json`                                                  |
+| `respond_to_end_prompt`          | Companion dock action for an ended non-empty live session (`keep`, `writeNotes`, `open`, `delete`, `dismiss`)          |
+| `keep_meeting_in_history`        | Keeps the ended session under a title, optionally with the application's name                                          |
+| `update_kept_session_meeting`    | Writes the same session's later changes to its kept meeting                                                            |
+| `kept_meetings`                  | The list, newest first, optionally filtered by a search                                                                |
+| `open_kept_meeting`              | One meeting in full                                                                                                    |
+| `rename_kept_meeting`            | A new title                                                                                                            |
+| `delete_kept_meeting`            | Deletes one for good                                                                                                   |
+| `delete_all_kept_meetings`       | Deletes the whole folder                                                                                               |
+| `kept_meeting_export_preview`    | Builds the Markdown preview for one kept meeting and holds it for save                                                 |
+| `export_kept_meeting`            | Saves the exact reviewed Markdown for a kept meeting through the native dialog                                         |
+| `list_kept_meetings_for_context` | Lists kept meetings' notes and meeting notes (never transcripts) for Prior context selection                           |
 
 ## Evidence
 
-- `cargo test --lib meeting_history engine::history`: round trip, newest
-  first and search, owner-only modes and no leftover temporary file, the
-  exact fields stored, newer index and newer meeting left untouched, damaged,
-  version-less, oversized, foreign and out-of-bounds files neither shown nor
-  rewritten, ids and titles checked before any write, a full history refused,
-  update keeps the title, lab runs and a missing folder read and write
-  nothing, every lab setting turns it off, a fixed version-1 file is read,
-  and kept-meeting Markdown export omits unkept fields;
-  the engine offers nothing before the end or without a transcript, drops
-  provider speaker labels, keeps You/Them and echo marks with both sources,
-  and keeps the application's name only when asked.
-- `tests/meeting-history.spec.ts` (browser, a fictional stand-in for the
-  commands): nothing is kept without **Keep meeting**, the title and the
-  application-name choice, a later notes change kept only through **Update
-  kept meeting**, a failed keep, the Settings offer and **Delete all
-  meetings** confirmation, a lab run, and the **Meetings** page (newest-first
-  list, search, read-only detail, rename, reviewed Markdown export, delete
-  confirmation, narrow layout, unreadable/newer/lab-run notices).
+- `cargo test --manifest-path src-tauri/Cargo.toml`: `settings` (`afterSessionKeep`
+  defaults to `auto` and parses `auto`/`ask`/`off`), `companion` (opens for
+  `end_prompt` when not hidden), `tests/privacy_boundaries.rs` (companion
+  capability permits `respond_to_end_prompt` only and `CueSnapshot` carries
+  counts without transcript text, notes, titles, IDs, or app names),
+  `meeting_history` (round trip, newest first and search, owner-only modes and
+  no leftover temporary file, exact fields stored, newer index and newer
+  meeting left untouched, damaged, version-less, oversized, foreign and
+  out-of-bounds files neither shown nor rewritten, ids and titles checked before
+  any write, full history refused, update keeps the title, lab runs and missing
+  folder read and write nothing, every lab setting turns it off, fixed version-1
+  file is read, kept-meeting Markdown export omits unkept fields), and
+  `engine::history` (offers nothing before the end or when completely empty,
+  drops provider speaker labels, keeps You/Them and echo marks with both sources,
+  and keeps the application's name only when asked).
+- `tests/meeting-history.spec.ts` and `tests/dock-end-prompt.spec.ts` (browser,
+  a fictional stand-in for the commands): default auto-save on stop without
+  application name, companion `Meeting saved` / `Meeting ended` (`Ask` mode) /
+  `Kept` cards, **Write notes** opening the confirmation plan without sending,
+  **Open** opening the kept meeting, **Delete** removing it, **Off** and lab
+  runs saving nothing, inline retry on failure, later notes updates via **Update
+  kept meeting**, Settings `After a live session ends` selector and **Delete all
+  meetings** confirmation, and the **Meetings** page (newest-first list, search,
+  read-only detail, rename, reviewed Markdown export, delete confirmation,
+  narrow layout, unreadable/newer/lab-run notices).
 - `tests/accessibility.spec.ts`: automated axe-core checks on the **Meetings**
   list, opened meeting detail and export review dialog.
 

@@ -17,6 +17,7 @@ interface OnboardingProps {
   onSkip: () => void;
   onFinish: () => void;
   onStartLive: () => void;
+  onKeysChanged?: () => void;
 }
 
 const STEP_META: Record<
@@ -50,6 +51,7 @@ export function Onboarding({
   onSkip,
   onFinish,
   onStartLive,
+  onKeysChanged,
 }: OnboardingProps) {
   const [step, setStep] = useState<Step>(1);
   const [keyStore, setKeyStore] = useState<KeyStore>();
@@ -233,7 +235,7 @@ export function Onboarding({
                 </strong>{' '}
                 You can skip either key now and add it later in Settings.
               </p>
-              <ProviderKeysRows showWhereToGet />
+              <ProviderKeysRows showWhereToGet onKeysChanged={onKeysChanged} />
             </>
           )}
 
@@ -282,34 +284,33 @@ export function Onboarding({
           {step === 4 && (
             <>
               <p className="ob-lead">
-                Nothing leaves {device} when you press Start live session. You
-                approve each session before anything is sent, and Stop ends the
-                session and stops sending.
+                Pressing Start live session starts capture and sends audio to
+                Deepgram and recent transcript lines to your chosen cue provider
+                immediately, until you press Stop or Turn off processing.
               </p>
 
               <div className="ob-perm-card">
                 <span className="ob-sequence-label">
-                  Per-session approval sequence
+                  One-click session flow
                 </span>
                 <ol className="ob-sequence-list">
                   <li>
-                    <strong>Start live session</strong> opens the floating dock
-                    and starts local capture only. Audio captured before
-                    approval is discarded.
-                  </li>
-                  <li>
-                    <strong>
-                      Review processing → Review selected sources → Enable for
-                      this session
-                    </strong>{' '}
-                    names both services explicitly:{' '}
+                    <strong>Start live session</strong> opens the floating dock,
+                    starts capture on {device}, and immediately enables{' '}
                     <strong>Deepgram or ElevenLabs</strong> (session audio for
                     transcription, up to 120 minutes per session) and your
                     chosen cue provider — <strong>Anthropic</strong>,{' '}
                     <strong>OpenAI</strong>, or <strong>Gemini</strong> (up to
                     six recent transcript lines, the cue on screen and earlier
                     cues, and your session name if set, for cue decisions; never
-                    audio, your notes or focus lines).
+                    audio, your notes or focus lines). Lab runs keep the
+                    three-click{' '}
+                    <strong>Cue processing → Review processing</strong> review.
+                  </li>
+                  <li>
+                    <strong>Pause cues</strong> stops cue decisions while
+                    listening continues. <strong>Turn off processing</strong>{' '}
+                    stops sending audio and lines.
                   </li>
                   <li>
                     <strong>Stop</strong> ends the session, releases the

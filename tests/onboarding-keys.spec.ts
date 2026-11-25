@@ -29,6 +29,8 @@ async function openDesktop(page: Page, query = '') {
 const providerRow = (page: Page, name: string) =>
   page.getByRole('form', { name, exact: true });
 
+const SAVED_MASK = '••••••••••••••••••••••••';
+
 test('when key commands are unavailable, onboarding does not open and Settings reports an error without Set up TalkQTE again', async ({
   page,
 }) => {
@@ -46,6 +48,12 @@ test('when key commands are unavailable, onboarding does not open and Settings r
   await expect(keysSection.getByRole('alert')).toHaveText(
     'Your keys could not be read. Try again later.',
   );
+  await expect(providerRow(page, 'Deepgram')).toContainText('Unavailable');
+  await expect(
+    providerRow(page, 'Deepgram').locator(
+      '.provider-key-state.is-unreadable svg',
+    ),
+  ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Set up TalkQTE again' }),
   ).toHaveCount(0);
@@ -206,7 +214,7 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   );
   await expect(anthropicInput).toHaveValue('');
 
-  // Valid Deepgram key clears, sets Set, not checked yet, and never echoes.
+  // Valid Deepgram key clears, shows Saved · not checked yet with checkmark + masked display, and never echoes.
   const input = deepgram.getByLabel('Deepgram API key');
   await expect(input).toHaveAttribute('type', 'password');
   const save = deepgram.getByRole('button', { name: 'Save key' });
@@ -216,7 +224,18 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(save).toBeEnabled();
   await save.click();
 
-  await expect(deepgram).toContainText('Set, not checked yet');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(deepgram.locator('.provider-key-stored')).toContainText(
+    'Stored in macOS Keychain',
+  );
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toHaveCount(0);
+  await expect(
+    deepgram.getByRole('button', { name: 'Replace key' }),
+  ).toBeEnabled();
   await expect(page.locator('body')).not.toContainText(FICTIONAL_DEEPGRAM_KEY);
   expect(
     await page.evaluate(
@@ -225,7 +244,7 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
     ),
   ).toBe(false);
 
-  // Unreachable error shows exact message without changing Set state.
+  // Unreachable error shows exact message without changing Saved state.
   await page.evaluate(() => {
     window.providerKeysTest.setTestOutcome('deepgram', {
       error:
@@ -236,9 +255,9 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(deepgram.getByRole('alert')).toHaveText(
     'Deepgram could not be reached to check the key. Nothing was changed.',
   );
-  await expect(deepgram).toContainText('Set, not checked yet');
+  await expect(deepgram).toContainText('Saved · not checked yet');
 
-  // Test -> Checking… (controls disabled) -> Rejected.
+  // Test -> Checking… (controls disabled) -> Rejected (input opens directly).
   await page.evaluate(() => {
     window.providerKeysTest.setTestOutcome('deepgram', 'rejected');
     window.providerKeysTest.holdNextTest();
@@ -256,13 +275,22 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(deepgram).toContainText(
     'Rejected by Deepgram. Replace it with a new key.',
   );
+  await expect(
+    deepgram.locator('.provider-key-state.is-rejected svg'),
+  ).toBeVisible();
 
-  // Replace -> password input is empty -> Set, not checked yet -> Test verifies.
+  // Rejected -> password input is immediately visible & empty -> Saved · not checked yet -> Test verifies.
   const replaceInput = deepgram.getByLabel('Replace Deepgram key');
+  await expect(replaceInput).toBeVisible();
   await expect(replaceInput).toHaveValue('');
+  await expect(replaceInput).toHaveAttribute(
+    'placeholder',
+    'Paste a new key to replace the rejected one',
+  );
   await replaceInput.fill(FICTIONAL_DEEPGRAM_REPLACEMENT);
   await deepgram.getByRole('button', { name: 'Save key' }).click();
-  await expect(deepgram).toContainText('Set, not checked yet');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   expect(
     await page.evaluate(
       (secret) => document.documentElement.innerHTML.includes(secret),
@@ -274,12 +302,28 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
     window.providerKeysTest.setTestOutcome('deepgram', 'verified');
   });
   await deepgram.getByRole('button', { name: 'Test key' }).click();
-  await expect(deepgram).toContainText('Set and checked');
+  await expect(deepgram).toContainText('Saved · checked');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await expect(deepgram.getByRole('alert')).toHaveCount(0);
 
-  // Remove resets state to Not set.
+  // Clicking Replace key in Step 2 reveals the input + Cancel, and Cancel hides it.
+  await deepgram.getByRole('button', { name: 'Replace key' }).click();
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toBeVisible();
+  await deepgram.getByRole('button', { name: 'Cancel' }).click();
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toHaveCount(0);
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+
+  // Remove resets state to Not set and restores the direct API key input.
   await deepgram.getByRole('button', { name: 'Remove key' }).click();
   await expect(deepgram).toContainText('Not set');
+  await expect(deepgram.getByLabel('Deepgram API key')).toBeVisible();
+  await expect(deepgram.getByLabel('Deepgram API key')).not.toHaveAttribute(
+    'placeholder',
+    /.+/,
+  );
 
   // Skip setup, verify Settings has ONE keys surface ("Your API keys") beside
   // "Set up TalkQTE again", live-syncs provider-keys:changed, and reopens onboarding.
@@ -304,9 +348,15 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
       anyMissing: true,
     }),
   );
-  await expect(providerRow(page, 'Deepgram')).toContainText('Set and checked');
+  await expect(providerRow(page, 'Deepgram')).toContainText('Saved · checked');
+  await expect(
+    providerRow(page, 'Deepgram').locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(
+    providerRow(page, 'Deepgram').locator('.provider-key-mask'),
+  ).toHaveText(SAVED_MASK);
 
-  // Reopen onboarding via "Set up TalkQTE again".
+  // Reopen onboarding via "Set up TalkQTE again" and verify Step 2 preserves the masked saved UI.
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
   await expect(
     page.getByRole('heading', {
@@ -314,6 +364,20 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
       level: 1,
     }),
   ).toBeFocused();
+  await page.getByRole('button', { name: 'Next: Your keys' }).click();
+  await expect(providerRow(page, 'Deepgram')).toContainText('Saved · checked');
+  await expect(
+    providerRow(page, 'Deepgram').locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(
+    providerRow(page, 'Deepgram').locator('.provider-key-mask'),
+  ).toHaveText(SAVED_MASK);
+  await providerRow(page, 'Deepgram')
+    .getByRole('button', { name: 'Replace key' })
+    .click();
+  await expect(
+    providerRow(page, 'Deepgram').getByLabel('Replace Deepgram key'),
+  ).toHaveValue('');
 
   // Fresh load with keys already set does not auto-open onboarding.
   await openDesktop(page, '?keys=set');
@@ -350,7 +414,7 @@ test('keyboard-only path completes all four steps and finishes in the notebook',
   await anthropicInput.focus();
   await page.keyboard.type(FICTIONAL_ANTHROPIC_KEY);
   await page.keyboard.press('Enter');
-  await expect(anthropic).toContainText('Set, not checked yet');
+  await expect(anthropic).toContainText('Saved · not checked yet');
 
   await page.getByRole('button', { name: 'Next: Permissions' }).focus();
   await page.keyboard.press('Enter');
@@ -434,4 +498,45 @@ test('a launch whose live transcription is already available (development or lab
   await expect(
     page.getByRole('heading', { name: 'One quiet cue beside your live call' }),
   ).toBeFocused();
+});
+
+test('saving keys in onboarding Step 2 immediately enables Start live session in Step 4 without restarting', async ({
+  page,
+}) => {
+  await openDesktop(page, '?live-from-keys');
+
+  await page.getByRole('button', { name: 'Next: Your keys' }).click();
+  await page.getByRole('button', { name: 'Next: Permissions' }).click();
+  await page.getByRole('button', { name: 'Next: First session' }).click();
+  const startLive = page.getByRole('button', {
+    name: 'Start live session',
+    exact: true,
+  });
+  await expect(startLive).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByRole('button', { name: 'Back' }).click();
+
+  const deepgram = providerRow(page, 'Deepgram');
+  const anthropic = providerRow(page, 'Anthropic');
+  await deepgram.getByLabel('Deepgram API key').fill(FICTIONAL_DEEPGRAM_KEY);
+  await deepgram.getByRole('button', { name: 'Save key' }).click();
+  await expect(deepgram).toContainText('Saved · not checked yet');
+
+  await anthropic.getByLabel('Anthropic API key').fill(FICTIONAL_ANTHROPIC_KEY);
+  await anthropic.getByRole('button', { name: 'Save key' }).click();
+  await expect(anthropic).toContainText('Saved · not checked yet');
+
+  await page.getByRole('button', { name: 'Next: Permissions' }).click();
+  await page.getByRole('button', { name: 'Next: First session' }).click();
+  await expect(startLive).toBeEnabled();
+
+  // Removing a required key in Step 2 disables Step 4's Start live session again.
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await deepgram.getByRole('button', { name: 'Remove key' }).click();
+  await expect(deepgram).toContainText('Not set');
+  await page.getByRole('button', { name: 'Next: Permissions' }).click();
+  await page.getByRole('button', { name: 'Next: First session' }).click();
+  await expect(startLive).toBeDisabled();
 });

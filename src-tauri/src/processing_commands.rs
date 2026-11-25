@@ -240,6 +240,32 @@ pub(crate) fn revoke_processing(
     change(&window, &app, &state, |r| r.disable_processing(&expected))
 }
 
+/// Immediately turns off processing for the active live session, callable
+/// from either the notebook or the floating dock.
+#[tauri::command]
+pub(crate) fn turn_off_processing(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<(), Error> {
+    if !matches!(window.label(), "main" | "cue") {
+        return Err(Error::Unavailable);
+    }
+    let mut runtime = state.0.lock().map_err(|_| Error::Unavailable)?;
+    runtime.sync();
+    runtime.withdraw_processing();
+    let Runtime {
+        engine,
+        processing_reviews,
+        ..
+    } = &mut *runtime;
+    processing_reviews.reconcile(engine);
+    crate::publish(&app, &mut runtime);
+    drop(runtime);
+    crate::companion::refresh(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn set_processing_paused(
     window: tauri::WebviewWindow,

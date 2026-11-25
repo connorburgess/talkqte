@@ -36,9 +36,11 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
     if engine.set_user_name(settings.user_name.clone()).is_err() {
         let _ = engine.set_user_name(None);
     }
-    runtime
-        .call_prompt
-        .restore(settings.call_prompt_enabled, &settings.call_prompt_not_for);
+    runtime.call_prompt.restore(
+        settings.call_prompt_enabled,
+        settings.call_prompt_auto_start && !crate::settings::lab_run(),
+        &settings.call_prompt_not_for,
+    );
 }
 
 /// Reads the settings file and applies it, before the first snapshot is
@@ -61,9 +63,11 @@ pub(crate) fn record(app: &tauri::AppHandle, change: impl FnOnce(&mut Settings))
 /// Saves the call-starting prompt's choices.
 pub(crate) fn record_call_prompt(app: &tauri::AppHandle, watcher: &crate::call_prompt::Watcher) {
     let enabled = watcher.enabled();
+    let auto_start = watcher.auto_start();
     let not_for = watcher.not_for_ids().to_vec();
     record(app, |settings| {
         settings.call_prompt_enabled = enabled;
+        settings.call_prompt_auto_start = auto_start;
         settings.call_prompt_not_for = not_for;
     });
 }

@@ -661,7 +661,7 @@ export function ProcessingControl({
               void act('disable', () => processingApi.disable(snapshot!));
             }}
           >
-            Disable processing
+            Turn off processing
           </button>
         )}
         {!status && (microphone !== 'off' || startup !== 'idle') && (
@@ -700,13 +700,12 @@ export function ProcessingControl({
               : snapshot?.processor?.audioDestination?.startsWith('Deepgram')
                 ? 'Deepgram'
                 : 'the transcription service')}{' '}
-          and is billed to your account. Disable processing or Stop ends that.
+          and is billed to your account. Turn off processing or Stop ends that.
         </p>
       )}
       {approved && (
         <p className="processing-muted">
-          Pause and Disable processing leave the microphone on. Disable
-          processing before choosing different sources.
+          Pause and Turn off processing leave the microphone on until Stop.
           {status && ' Use Stop live session above to release the microphone.'}
         </p>
       )}

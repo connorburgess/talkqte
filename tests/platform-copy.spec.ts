@@ -98,7 +98,7 @@ test('macOS: no platform note at the session start, and setup reads as before', 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(
     page.getByRole('checkbox', {
-      name: 'Offer to start a session when a call seems to start',
+      name: 'Offer in the dock when a call seems to start',
     }),
   ).toBeVisible();
 });

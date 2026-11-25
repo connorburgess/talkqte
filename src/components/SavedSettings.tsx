@@ -38,8 +38,8 @@ export function SavedSettings({ onReset }: { onReset: () => void }) {
         <p>
           TalkQTE remembers the choices on this page between launches: your
           name, the transcription language, the notes model, how questions look
-          and when they appear, where the companion sits, panel sizes and the
-          call-starting offer.{' '}
+          and when they appear, where the companion sits, panel sizes, whether
+          ended meetings are kept and the call-starting offer.{' '}
           {platform?.os === 'windows'
             ? 'They are kept in a small settings file in your user profile’s app data folder. Keys stay in Windows Credential Manager, and nothing from a meeting is saved there.'
             : platform?.os === 'linux'

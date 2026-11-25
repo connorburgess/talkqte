@@ -73,7 +73,7 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   // The call-starting offer reads its setting again: off.
   await expect(
     page.getByRole('checkbox', {
-      name: 'Offer to start a session when a call seems to start',
+      name: 'Offer in the dock when a call seems to start',
     }),
   ).not.toBeChecked();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();

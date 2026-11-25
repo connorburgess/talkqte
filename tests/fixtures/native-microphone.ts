@@ -86,7 +86,7 @@ const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
 // The call-starting prompt's settings and the companion's answers.
-let callPrompt = { enabled: false, notFor: [] as string[] };
+let callPrompt = { enabled: false, autoStart: false, notFor: [] as string[] };
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -267,6 +267,7 @@ const delayed = new URLSearchParams(location.search).has('delay-microphone');
 const liveAvailable = ['live', 'cloud'].some((key) =>
   new URLSearchParams(location.search).has(key),
 );
+const liveFromKeys = new URLSearchParams(location.search).has('live-from-keys');
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -283,15 +284,34 @@ async function sendDictation(value: Partial<DictationSnapshot>) {
 /** Counts sessions, as Rust's session number does, for kept meetings. */
 let historySession = 0;
 async function publish(value: Partial<Snapshot>) {
-  if (value.status === 'running' && session?.status !== 'running')
+  const wasRunning = session?.status === 'running';
+  if (value.status === 'running' && session?.status !== 'running') {
     historySession += 1;
-  session = {
+    historyFixture.clearEndPrompt();
+  }
+  const next: Snapshot = {
     ...session,
     ...value,
     revision: Math.max(session.revision, 1_000) + 1,
   };
+  let historyChanged = false;
+  if (value.status === 'running') {
+    delete next.endPrompt;
+  } else if (
+    wasRunning &&
+    next.live &&
+    next.status === 'ended' &&
+    !('endPrompt' in value)
+  ) {
+    const ended = historyFixture.onSessionEnded(next, historySession);
+    if (ended.endPrompt) next.endPrompt = ended.endPrompt;
+    else delete next.endPrompt;
+    historyChanged = ended.changed;
+  }
+  session = next;
   await emit('session:changed', session);
   await emit('cue:changed', session);
+  if (historyChanged) await emit('meeting-history:changed');
 }
 /** A replay of a fictional conversation: no microphone, nothing captured.
  * The app labels it as simulated in its own words. Used by the lab recorder. */
@@ -310,18 +330,20 @@ async function simulate(value: Partial<Snapshot> = {}) {
     cue: null,
   });
 }
-async function startLive() {
+async function startLive(options?: { autoStarted?: boolean }) {
+  const labRun = new URLSearchParams(location.search).has('lab');
+  const autoApprove = !!processing.processor && !labRun;
   await publish({
     live: true,
     simulated: false,
     cuesPaused: false,
+    autoStarted: !!options?.autoStarted,
     status: 'running',
     title: 'Live session',
     description: "Transcript lines from this session's transcription.",
     elapsedMs: 0,
-    // Every live session is transcribed by the launch's cloud provider,
-    // which sends nothing until cue processing is enabled.
     transcription: { provider: 'Deepgram' },
+    model: autoApprove ? 'on' : undefined,
     // Rust sends u64::MAX for a live session, which has no end.
     durationMs: 18_446_744_073_709_552_000,
     transcript: [],
@@ -330,10 +352,10 @@ async function startLive() {
   await send({ status: 'listening', activity: 'active', canStart: false });
   await sendProcessing({
     capture: 'running',
-    phase: 'off',
+    phase: autoApprove ? 'active' : 'off',
     startup: 'idle',
     session: `fictional-session-${operation}`,
-    approved: null,
+    approved: autoApprove ? { conversation: 'newSpeechOnly', notes: [] } : null,
     scopeRevision: processing.scopeRevision + 1,
   });
 }
@@ -396,13 +418,27 @@ mockIPC(
       return providerKeysFixture.command(command, args);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
-    if (historyFixture.commands.includes(command))
-      return historyFixture.command(
+    if (historyFixture.commands.includes(command)) {
+      const hadPrompt = !!session.endPrompt;
+      const result = historyFixture.command(
         command,
         args,
         () => session,
         () => historySession,
       );
+      if (
+        command === 'keep_meeting_in_history' ||
+        command === 'delete_kept_meeting' ||
+        command === 'delete_all_kept_meetings'
+      ) {
+        if (hadPrompt) {
+          const updated = historyFixture.currentEndPrompt(historySession);
+          await publish({ endPrompt: updated ?? undefined });
+        }
+        await emit('meeting-history:changed');
+      }
+      return result;
+    }
     switch (command) {
       case 'platform_capabilities': {
         // The macOS build unless a test names Windows or Linux.
@@ -655,12 +691,21 @@ mockIPC(
         await emit('context:changed', await preview.contextItemsNow());
         return;
       case 'live_status': {
-        const provider =
-          providerKeysFixture.providerKeysTest.provider() === 'elevenlabs'
-            ? 'ElevenLabs'
-            : 'Deepgram';
-        const value: LiveStatus = liveAvailable
-          ? { available: true, reason: null, transcription: provider }
+        const stt = providerKeysFixture.providerKeysTest.provider();
+        const provider = stt === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
+        const keyStatus = providerKeysFixture.providerKeysTest.status();
+        const available =
+          liveAvailable ||
+          (liveFromKeys &&
+            keyStatus[stt]?.state === 'set' &&
+            keyStatus.anthropic.state === 'set');
+        const value: LiveStatus = available
+          ? {
+              available: true,
+              reason: null,
+              transcription: provider,
+              cueProvider: 'Anthropic',
+            }
           : {
               available: false,
               reason: 'This build has no live transcription.',
@@ -697,16 +742,49 @@ mockIPC(
       case 'reset_settings':
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
-        callPrompt = { enabled: false, notFor: [] };
+        callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        historyFixture.resetAfterSessionKeep();
         return;
+      case 'respond_to_end_prompt': {
+        const { session: targetSession, action } =
+          args as Commands['respond_to_end_prompt'];
+        const res = historyFixture.respondToEndPrompt(
+          action,
+          targetSession,
+          session,
+          historySession,
+        );
+        await publish({ endPrompt: res.endPrompt ?? undefined });
+        if (res.changed) await emit('meeting-history:changed');
+        if (res.writeNotes) await emit('end-prompt:write-notes');
+        if (res.openId)
+          await emit('end-prompt:open-meeting', { id: res.openId });
+        return;
+      }
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
-      case 'set_call_prompt':
+      case 'set_call_prompt': {
+        const update = args as { enabled?: boolean; autoStart?: boolean };
         callPrompt = {
           ...callPrompt,
-          enabled: (args as { enabled: boolean }).enabled,
+          ...(typeof update.enabled === 'boolean'
+            ? { enabled: update.enabled }
+            : {}),
+          ...(typeof update.autoStart === 'boolean'
+            ? { autoStart: update.autoStart }
+            : {}),
         };
         return structuredClone(callPrompt);
+      }
+      case 'turn_off_processing': {
+        await sendProcessing({
+          phase: 'off',
+          approved: null,
+          scopeRevision: processing.scopeRevision + 1,
+        });
+        await publish({ model: undefined, cue: null });
+        return;
+      }
       case 'clear_call_prompt_apps':
         callPrompt = { ...callPrompt, notFor: [] };
         return structuredClone(callPrompt);
@@ -774,6 +852,14 @@ mockIPC(
           });
         }
         return;
+      case 'save_notes':
+        if (session && session.revision >= 1_000) {
+          session = { ...session, notes: (args as { notes: string }).notes };
+        }
+        return preview.command(
+          command as keyof Commands,
+          args as Commands[keyof Commands],
+        );
       default:
         return preview.command(
           command as keyof Commands,
@@ -826,7 +912,11 @@ declare global {
       applicationAudio: unknown[];
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
-      callPrompt: () => { enabled: boolean; notFor: string[] };
+      callPrompt: () => {
+        enabled: boolean;
+        autoStart: boolean;
+        notFor: string[];
+      };
       savedSettings: () => typeof savedSettings;
       presence: () => typeof presence;
       /** The menu bar's Start session…, as the native side relays it. */

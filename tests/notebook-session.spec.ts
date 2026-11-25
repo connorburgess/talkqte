@@ -161,7 +161,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
   await expect(session(page)).toContainText(
-    'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.',
+    'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.',
   );
   await expect(page.getByRole('heading', { name: firstCue })).toHaveCount(0);
   await expect(
@@ -186,7 +186,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(review).not.toContainText('first draft');
   await page.keyboard.press('Escape');
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.',
+    'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.',
   );
   // A new session can be started.
   await expect(
@@ -317,7 +317,7 @@ test('with cloud transcription, the notebook names the service, and says plainly
     'Your microphone · not saved by TalkQTE',
   );
   await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
-    'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed.',
+    'Your microphone is sent to Deepgram for transcription. TalkQTE does not record audio.',
   );
   await expect(page.locator('body')).not.toContainText('on this device');
   await publish({
@@ -407,10 +407,10 @@ test('a live launch says where audio goes in Settings, offers no speech model, a
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.locator('#live-transcription').locator('..');
   await expect(settings).toContainText(
-    'TalkQTE does not transcribe on this device: the session’s audio is sent to Deepgram with your key once you enable cue processing for that session.',
+    'TalkQTE does not transcribe on this device: pressing Start live session immediately sends the session’s audio to Deepgram and recent lines to Anthropic with your keys until you press Stop or turn off processing.',
   );
   await expect(settings.getByRole('status')).toHaveText(
-    'Ready. Audio goes to Deepgram only after you enable cue processing for a session.',
+    'Ready. Pressing Start live session sends audio to Deepgram and recent lines to Anthropic until you stop.',
   );
   await expect(page.locator('body')).not.toContainText('Ready on this device');
   await expect(
@@ -493,7 +493,7 @@ test('ElevenLabs transcription names ElevenLabs in active, stop, and failure mes
     transcription: { provider: 'ElevenLabs' },
   });
   await expect(page.getByRole('region', { name: 'Microphone' })).toContainText(
-    'Your microphone is sent to ElevenLabs for transcription once you enable cue processing for this session; until then nothing is transcribed.',
+    'Your microphone is sent to ElevenLabs for transcription. TalkQTE does not record audio.',
   );
   await publish({
     transcription: { provider: 'ElevenLabs', reconnects: 1, lostMs: 1_500 },
