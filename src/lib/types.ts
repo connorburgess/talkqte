@@ -60,6 +60,8 @@ export interface CueSnapshot {
   /** A call seems to be starting: the offer, when the person turned the
    * prompt on. */
   callPrompt?: import('../components/CallPrompt').CallPromptOffer;
+  /** A previously active call went inactive while a live session is running. */
+  callEndPrompt?: import('../components/CallEndPrompt').CallEndPromptOffer;
   /** An ended non-empty live session prompt: counts and keep status only. */
   endPrompt?: EndPrompt;
   cuesPaused: boolean;
@@ -135,6 +137,10 @@ export type Commands = {
   respond_to_call_prompt: {
     id: number;
     answer: import('../components/CallPrompt').CallPromptAnswer;
+  };
+  respond_to_call_end_prompt: {
+    id: number;
+    answer: import('../components/CallEndPrompt').CallEndPromptAnswer;
   };
   respond_to_end_prompt: {
     session: number;

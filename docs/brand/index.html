@@ -5906,6 +5906,36 @@
               <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
               runs and <code>off</code> attach no prompt.
             </div>
+            <div class="dock-prompt-spec">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >7 · Call-Ended Dock Prompt (320 × 232px standard · 320 ×
+                  276px large)</span
+                >
+                <code>CallEndPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">Call ended</div>
+                  <p class="dock-prompt-copy">Camera and mic look inactive.</p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary">Stop &amp; save</span>
+                    <span class="dock-prompt-btn">Keep recording</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CallEndPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> while a live session is running
+              when macOS call-end detection attaches <code>callEndPrompt</code>
+              after a previously active call’s camera and non-TalkQTE mic go
+              inactive for 18 seconds. Two controls: <code>Stop &amp; save</code>
+              (stops and saves the session) and <code>Keep recording</code>
+              (dismisses the prompt and continues recording).
+            </div>
           </div>
         </div>
       </section>

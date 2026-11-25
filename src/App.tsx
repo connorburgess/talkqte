@@ -70,6 +70,7 @@ import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
+import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { SavedSettings } from './components/SavedSettings';
@@ -470,29 +471,44 @@ function FloatingQuestion() {
                 <EyeOff size={16} aria-hidden="true" />
               </button>
             </header>
-            {state && (
-              <CueCard
-                cue={state.cue}
-                size={state.questionSize}
-                announce={false}
-                compact
-                busy={busy}
-                onHold={() =>
-                  void run(() =>
-                    bridge.command('inspect_cue', { id: state.cue!.id }),
-                  )
-                }
-                onDismiss={() => {
-                  dismissed.current = true;
-                  void run(() =>
-                    bridge.command('respond_to_cue', {
-                      id: state.cue!.id,
-                      response: 'dismiss',
-                    }),
-                  );
-                }}
-              />
-            )}
+            {state &&
+              (state.callEndPrompt ? (
+                <CallEndPrompt
+                  prompt={state.callEndPrompt}
+                  busy={busy}
+                  large={state.questionSize === 'large'}
+                  onAnswer={(answer) =>
+                    void run(() =>
+                      bridge.command('respond_to_call_end_prompt', {
+                        id: state.callEndPrompt!.id,
+                        answer,
+                      }),
+                    )
+                  }
+                />
+              ) : (
+                <CueCard
+                  cue={state.cue}
+                  size={state.questionSize}
+                  announce={false}
+                  compact
+                  busy={busy}
+                  onHold={() =>
+                    void run(() =>
+                      bridge.command('inspect_cue', { id: state.cue!.id }),
+                    )
+                  }
+                  onDismiss={() => {
+                    dismissed.current = true;
+                    void run(() =>
+                      bridge.command('respond_to_cue', {
+                        id: state.cue!.id,
+                        response: 'dismiss',
+                      }),
+                    );
+                  }}
+                />
+              ))}
           </>
         ) : state?.endPrompt && state.overlayEnabled ? (
           <EndPrompt

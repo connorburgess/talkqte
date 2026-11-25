@@ -296,6 +296,7 @@ impl Runtime {
         let mut snapshot = self.engine.cue_snapshot();
         snapshot.source_session = self.source_session_running();
         snapshot.call_prompt = self.call_prompt.prompt().cloned();
+        snapshot.call_end_prompt = self.call_prompt.call_end_prompt().cloned();
         snapshot.end_prompt = self
             .end_prompt
             .as_ref()
@@ -402,6 +403,7 @@ impl Runtime {
         drop(ticket);
         self.export = None;
         self.end_prompt = None;
+        self.call_prompt.clear_live();
         self.ended_source_session = None;
         self.source_session = Some(SourceSession {
             session,
