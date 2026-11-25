@@ -89,6 +89,8 @@ mod meeting_notes_commands;
 mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
+mod microphone_macos_aec;
+#[cfg(target_os = "macos")]
 mod native_session_clock;
 #[cfg(target_os = "macos")]
 mod native_source;
