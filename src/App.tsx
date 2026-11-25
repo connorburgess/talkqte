@@ -1032,6 +1032,8 @@ function Notebook() {
       initialKeys.deepgram.state === 'notSet' &&
       (!initialKeys.elevenlabs || initialKeys.elevenlabs.state === 'notSet') &&
       initialKeys.anthropic.state === 'notSet' &&
+      (!initialKeys.openai || initialKeys.openai.state === 'notSet') &&
+      (!initialKeys.gemini || initialKeys.gemini.state === 'notSet') &&
       !preparing &&
       !finishing &&
       !state.live
@@ -1105,13 +1107,15 @@ function Notebook() {
   const refreshLiveStatus = useCallback(() => {
     bridge
       .liveStatus()
-      .then((status) => setLiveStatus(status))
-      .catch(() =>
+      .then((status) => {
+        setLiveStatus(status);
+      })
+      .catch(() => {
         setLiveStatus({
           available: false,
           reason: 'Live transcription status is unavailable.',
-        }),
-      );
+        });
+      });
   }, []);
   useEffect(() => {
     let current = true;
@@ -1128,20 +1132,20 @@ function Notebook() {
             reason: 'Live transcription status is unavailable.',
           });
       });
-    let stopWatch: (() => void) | undefined;
+    let stopKeys: (() => void) | undefined;
     if (bridge.desktop) {
-      void watchKeys(() => {
+      watchKeys(() => {
         if (current) refreshLiveStatus();
-      }).then((unlisten) => {
-        if (current) stopWatch = unlisten;
-        else unlisten();
-      });
+      }).then(
+        (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
+        () => {},
+      );
     }
     return () => {
       current = false;
-      stopWatch?.();
+      stopKeys?.();
     };
-  }, [refreshLiveStatus]);
+  }, [refreshLiveStatus, settingsEpoch]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -2228,7 +2232,7 @@ function Notebook() {
             </p>
             <ProviderKeys
               key={settingsEpoch}
-              onLiveChange={refreshLiveStatus}
+              onPreferencesChange={refreshLiveStatus}
             />
             {keysAvailable && (
               <section className="setting">

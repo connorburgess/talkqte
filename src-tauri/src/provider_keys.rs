@@ -1,5 +1,5 @@
-//! The person's own provider keys: Deepgram or ElevenLabs for transcription
-//! and Anthropic for cue decisions.
+//! The person's own provider keys: Deepgram or ElevenLabs for transcription,
+//! and API keys for cue decisions and meeting notes (Anthropic, OpenAI, or Gemini).
 //!
 //! Keys live only in the system's secret store under the service
 //! [`SERVICE`]: the login Keychain on macOS (generic passwords), Windows
@@ -35,10 +35,18 @@ pub enum Provider {
     Deepgram,
     ElevenLabs,
     Anthropic,
+    OpenAi,
+    Gemini,
 }
 
 impl Provider {
-    pub const ALL: [Self; 3] = [Self::Deepgram, Self::ElevenLabs, Self::Anthropic];
+    pub const ALL: [Self; 5] = [
+        Self::Deepgram,
+        Self::ElevenLabs,
+        Self::Anthropic,
+        Self::OpenAi,
+        Self::Gemini,
+    ];
 
     /// The Keychain account name for this provider's key.
     pub fn account(self) -> &'static str {
@@ -46,6 +54,8 @@ impl Provider {
             Self::Deepgram => "deepgram",
             Self::ElevenLabs => "elevenlabs",
             Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
         }
     }
 
@@ -54,6 +64,8 @@ impl Provider {
             Self::Deepgram => "Deepgram",
             Self::ElevenLabs => "ElevenLabs",
             Self::Anthropic => "Anthropic",
+            Self::OpenAi => "OpenAI",
+            Self::Gemini => "Gemini",
         }
     }
 
@@ -62,6 +74,8 @@ impl Provider {
             Self::Deepgram => 0,
             Self::ElevenLabs => 1,
             Self::Anthropic => 2,
+            Self::OpenAi => 3,
+            Self::Gemini => 4,
         }
     }
 }
@@ -120,6 +134,24 @@ pub fn validate(provider: Provider, text: &str) -> Result<Secret, KeyError> {
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')))
                 || ((32..=64).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_hexdigit()))
         }
+        // Standard OpenAI API keys start with `sk-` (including `sk-proj-`, etc.).
+        // Reject `sk-ant-` so Anthropic keys are refused here.
+        Provider::OpenAi => {
+            key.starts_with("sk-")
+                && !key.starts_with("sk-ant-")
+                && (20..=256).contains(&key.len())
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }
+        // Google AI Studio API keys start with `AIza`.
+        Provider::Gemini => {
+            key.starts_with("AIza")
+                && (30..=128).contains(&key.len())
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }
     };
     if ok {
         Ok(Secret(Zeroizing::new(key.to_string())))
@@ -151,6 +183,12 @@ impl KeyError {
             Self::Shape(Provider::ElevenLabs) => {
                 "That does not look like an ElevenLabs API key. It starts with sk_ (or is a 32-character hex key)."
             }
+            Self::Shape(Provider::OpenAi) => {
+                "That does not look like an OpenAI API key. It starts with sk-."
+            }
+            Self::Shape(Provider::Gemini) => {
+                "That does not look like a Gemini API key. It starts with AIza."
+            }
             Self::Store => store_failure_message(),
             Self::NoStore => {
                 "This system has no keyring TalkQTE can use, so keys cannot be saved here yet. Nothing was changed."
@@ -158,6 +196,8 @@ impl KeyError {
             Self::NotSet(Provider::Anthropic) => "No Anthropic key is set.",
             Self::NotSet(Provider::Deepgram) => "No Deepgram key is set.",
             Self::NotSet(Provider::ElevenLabs) => "No ElevenLabs key is set.",
+            Self::NotSet(Provider::OpenAi) => "No OpenAI key is set.",
+            Self::NotSet(Provider::Gemini) => "No Gemini key is set.",
             Self::Unreachable(Provider::Anthropic) => {
                 "Anthropic could not be reached to check the key. Nothing was changed."
             }
@@ -166,6 +206,12 @@ impl KeyError {
             }
             Self::Unreachable(Provider::ElevenLabs) => {
                 "ElevenLabs could not be reached to check the key. Nothing was changed."
+            }
+            Self::Unreachable(Provider::OpenAi) => {
+                "OpenAI could not be reached to check the key. Nothing was changed."
+            }
+            Self::Unreachable(Provider::Gemini) => {
+                "Gemini could not be reached to check the key. Nothing was changed."
             }
         }
     }
@@ -234,6 +280,21 @@ impl SecretStore for Keychain {
         StoreKind::Keychain
     }
 
+    fn contains(&self, account: &str) -> Result<bool, StoreError> {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(SERVICE)
+            .account(account)
+            .load_attributes(true)
+            .search()
+        {
+            Ok(results) => Ok(!results.is_empty()),
+            Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
+            Err(_) => Err(StoreError::Failed),
+        }
+    }
+
     fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
         use security_framework::passwords::get_generic_password;
         match get_generic_password(SERVICE, account) {
@@ -248,6 +309,10 @@ impl SecretStore for Keychain {
     }
 
     fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
+        // Delete any existing item first so saving replaces stale ACLs (for
+        // example from an earlier unsigned build or `/usr/bin/security`) with
+        // a fresh item owned by this binary.
+        self.delete(account)?;
         security_framework::passwords::set_generic_password(
             SERVICE,
             account,
@@ -330,15 +395,17 @@ pub struct StoreStatus {
     pub available: bool,
 }
 
-/// All keys' states, the whole payload the notebook receives.
+/// All provider keys' states, the whole payload the notebook receives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeysStatus {
     pub deepgram: KeyStatus,
     pub elevenlabs: KeyStatus,
     pub anthropic: KeyStatus,
-    /// No transcription key is set or Anthropic is not set: what a first-run
-    /// screen asks for.
+    pub openai: KeyStatus,
+    pub gemini: KeyStatus,
+    /// True when no transcription key is set or no cue provider key is set:
+    /// what a first-run screen asks for.
     pub any_missing: bool,
     pub store: StoreStatus,
 }
@@ -349,6 +416,8 @@ impl KeysStatus {
             Provider::Deepgram => self.deepgram,
             Provider::ElevenLabs => self.elevenlabs,
             Provider::Anthropic => self.anthropic,
+            Provider::OpenAi => self.openai,
+            Provider::Gemini => self.gemini,
         }
     }
 }
@@ -378,7 +447,7 @@ struct Memo {
 pub struct Keys {
     store: Box<dyn SecretStore>,
     probe: Box<dyn Probe>,
-    memo: Mutex<[Memo; 3]>,
+    memo: Mutex<[Memo; 5]>,
 }
 
 impl Keys {
@@ -386,11 +455,11 @@ impl Keys {
         Self {
             store,
             probe,
-            memo: Mutex::new([Memo::default(); 3]),
+            memo: Mutex::new([Memo::default(); 5]),
         }
     }
 
-    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 3]> {
+    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 5]> {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -433,16 +502,27 @@ impl Keys {
         let (deepgram, deepgram_no_store) = self.key_status(Provider::Deepgram);
         let (elevenlabs, elevenlabs_no_store) = self.key_status(Provider::ElevenLabs);
         let (anthropic, anthropic_no_store) = self.key_status(Provider::Anthropic);
+        let (openai, openai_no_store) = self.key_status(Provider::OpenAi);
+        let (gemini, gemini_no_store) = self.key_status(Provider::Gemini);
         let stt_missing =
             deepgram.state == KeyState::NotSet && elevenlabs.state == KeyState::NotSet;
+        let cue_missing = anthropic.state == KeyState::NotSet
+            && openai.state == KeyState::NotSet
+            && gemini.state == KeyState::NotSet;
         KeysStatus {
             deepgram,
             elevenlabs,
             anthropic,
-            any_missing: stt_missing || anthropic.state == KeyState::NotSet,
+            openai,
+            gemini,
+            any_missing: stt_missing || cue_missing,
             store: StoreStatus {
                 kind: self.store.kind(),
-                available: !(deepgram_no_store || elevenlabs_no_store || anthropic_no_store),
+                available: !(deepgram_no_store
+                    || elevenlabs_no_store
+                    || anthropic_no_store
+                    || openai_no_store
+                    || gemini_no_store),
             },
         }
     }
@@ -553,6 +633,18 @@ impl Probe for NetworkProbe {
                 .header("x-api-key", key.expose())
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .call(),
+            Provider::OpenAi => agent
+                .get("https://api.openai.com/v1/models")
+                .header(
+                    "Authorization",
+                    Zeroizing::new(format!("Bearer {}", key.expose())).as_str(),
+                )
+                .call(),
+            // Never pass the key in the query string so it cannot leak into URLs or logs.
+            Provider::Gemini => agent
+                .get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1")
+                .header("x-goog-api-key", key.expose())
+                .call(),
         };
         // The body is never read: only the status matters, and nothing the
         // provider says reaches a log or the notebook.
@@ -605,6 +697,8 @@ mod tests {
     const DEEPGRAM: &str = "0123456789abcdef0123456789abcdef01234567";
     const ELEVENLABS: &str = "sk_fictional0123456789abcdef0123456789abcdef01234567";
     const ELEVENLABS_HEX: &str = "0123456789abcdef0123456789abcdef";
+    const OPENAI: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
+    const GEMINI: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
 
     /// A store that records every call, so a test can see what was written.
     #[derive(Clone, Default)]
@@ -679,6 +773,8 @@ mod tests {
                 deepgram: not_set(),
                 elevenlabs: not_set(),
                 anthropic: not_set(),
+                openai: not_set(),
+                gemini: not_set(),
                 any_missing: true,
                 store: StoreStatus {
                     kind: StoreKind::Memory,
@@ -692,6 +788,8 @@ mod tests {
                 "deepgram": {"state": "notSet", "verified": false},
                 "elevenlabs": {"state": "notSet", "verified": false},
                 "anthropic": {"state": "notSet", "verified": false},
+                "openai": {"state": "notSet", "verified": false},
+                "gemini": {"state": "notSet", "verified": false},
                 "anyMissing": true,
                 "store": {"kind": "memory", "available": true},
             })
@@ -1035,5 +1133,71 @@ mod tests {
             NoNetwork.check(Provider::Deepgram, &Secret::for_test(DEEPGRAM)),
             ProbeResult::Unreachable
         );
+    }
+
+    #[test]
+    fn openai_and_gemini_keys_are_validated_stored_and_tested_like_anthropic() {
+        let (keys, store, probe) = keys(ProbeResult::Accepted);
+        for (provider, bad) in [
+            (Provider::OpenAi, ""),
+            (Provider::OpenAi, "sk-short"),
+            (Provider::OpenAi, ANTHROPIC),
+            (Provider::OpenAi, "sk-proj-with space 0123456789abcdef"),
+            (Provider::OpenAi, GEMINI),
+            (Provider::Gemini, ""),
+            (Provider::Gemini, "AIzaShort"),
+            (Provider::Gemini, "AIzaWithSpace 0123456789abcdefghijklm"),
+            (Provider::Gemini, OPENAI),
+            (Provider::Gemini, DEEPGRAM),
+        ] {
+            let err = keys.set(provider, bad).unwrap_err();
+            assert_eq!(err, KeyError::Shape(provider), "{provider:?}");
+            assert!(bad.is_empty() || !err.message().contains(bad));
+        }
+        assert!(store.writes.lock().unwrap().is_empty());
+
+        keys.set(Provider::OpenAi, &format!("  {OPENAI}\n"))
+            .unwrap();
+        keys.set(Provider::Gemini, &format!("  {GEMINI}\n"))
+            .unwrap();
+        assert_eq!(store.inner.get("openai").unwrap().unwrap().expose(), OPENAI);
+        assert_eq!(store.inner.get("gemini").unwrap().unwrap().expose(), GEMINI);
+        // Deepgram is still missing, so any_missing stays true.
+        assert!(keys.status().any_missing);
+        keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
+        // With Deepgram and OpenAI/Gemini set (and Anthropic still unset), nothing is missing.
+        assert!(!keys.status().any_missing);
+
+        let status = keys.test(Provider::OpenAi).unwrap();
+        assert_eq!(
+            status.openai,
+            KeyStatus {
+                state: KeyState::Set,
+                verified: true,
+            }
+        );
+        let status = keys.test(Provider::Gemini).unwrap();
+        assert_eq!(
+            status.gemini,
+            KeyStatus {
+                state: KeyState::Set,
+                verified: true,
+            }
+        );
+        assert_eq!(
+            *probe.0.lock().unwrap(),
+            [
+                (Provider::OpenAi, OPENAI.to_string()),
+                (Provider::Gemini, GEMINI.to_string()),
+            ]
+        );
+
+        keys.mark_rejected(Provider::OpenAi);
+        assert_eq!(keys.status().openai.state, KeyState::Rejected);
+        keys.remove(Provider::OpenAi).unwrap();
+        assert_eq!(keys.status().openai, not_set());
+        keys.remove(Provider::Gemini).unwrap();
+        assert_eq!(keys.status().gemini, not_set());
+        assert!(keys.status().any_missing);
     }
 }

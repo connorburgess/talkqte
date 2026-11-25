@@ -9,7 +9,9 @@ import type { ProcessingSnapshot } from './processing';
 import type { MicrophoneSnapshot } from './microphone';
 import type {
   CueUsage,
+  KeyProvider,
   KeysStatus,
+  ProviderPreferences,
   TranscriptionLanguage,
   TranscriptionProvider,
 } from './providerKeys';
@@ -25,6 +27,7 @@ export interface DiagnosticsInput {
   usage: CueUsage | null;
   transcriptionProvider: TranscriptionProvider | null;
   language: TranscriptionLanguage | null;
+  preferences?: ProviderPreferences | null;
   /** Whether a live session can start in this launch. */
   liveAvailable: boolean | null;
 }
@@ -51,14 +54,22 @@ function flag(value: unknown): string {
 
 /** The report as plain lines of `name: value`. */
 export function diagnosticsReport(input: DiagnosticsInput): string {
-  const { session, processing, microphone, keys, usage } = input;
+  const { session, processing, microphone, keys, usage, preferences } = input;
   const transcription = session?.transcription;
   const sources = session?.sources;
-  const key = (provider: 'deepgram' | 'elevenlabs' | 'anthropic') => {
+  const key = (provider: KeyProvider) => {
     const status = keys?.[provider];
     if (!status) return '-';
     return `${code(status.state)}${status.verified ? ', checked' : ''}`;
   };
+  const spend = !usage
+    ? '-'
+    : usage.spentMicroUsd !== null &&
+        usage.spentMicroUsd !== undefined &&
+        usage.spendCapMicroUsd !== null &&
+        usage.spendCapMicroUsd !== undefined
+      ? `${(usage.spentMicroUsd / 1e6).toFixed(3)} of ${(usage.spendCapMicroUsd / 1e6).toFixed(2)}`
+      : 'unavailable (custom model)';
   const lines: [string, string][] = [
     ['TalkQTE', APP_VERSION],
     ['Build', input.desktop ? 'desktop' : 'browser preview'],
@@ -66,7 +77,12 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Deepgram key', key('deepgram')],
     ['ElevenLabs key', key('elevenlabs')],
     ['Anthropic key', key('anthropic')],
+    ['OpenAI key', key('openai')],
+    ['Gemini key', key('gemini')],
     ['Transcription provider', code(input.transcriptionProvider)],
+    ['Cue provider', code(preferences?.cueProvider)],
+    ['Custom cue model', flag(preferences?.effectiveCueCustom)],
+    ['Custom notes model', flag(preferences?.effectiveNotesCustom)],
     ['Transcription language', code(input.language)],
     ['Companion shown', flag(session?.overlayEnabled)],
     ['Companion position', code(session?.companionPosition)],
@@ -133,12 +149,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
       'Cue requests',
       usage ? `${count(usage.requests)} of ${count(usage.requestCap)}` : '-',
     ],
-    [
-      'Estimated cue spend (USD)',
-      usage
-        ? `${(usage.spentMicroUsd / 1e6).toFixed(3)} of ${(usage.spendCapMicroUsd / 1e6).toFixed(2)}`
-        : '-',
-    ],
+    ['Estimated cue spend (USD)', spend],
     ['Meeting notes', code(session?.meetingNotes)],
   ];
   return lines.map(([name, value]) => `${name}: ${value}`).join('\n');

@@ -1,9 +1,15 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import {
+  CURATED_CUE_MODELS,
+  cueProviderName,
   cueUsage,
+  defaultCueModel,
   keyStoreName,
   keysStatus,
+  providerPreferences,
   removeKey,
+  setCueModelOverride,
+  setCueProvider,
   setKey,
   setTranscriptionLanguage,
   setTranscriptionProvider,
@@ -11,13 +17,16 @@ import {
   transcriptionLanguage,
   transcriptionProvider,
   watchKeys,
-  type TranscriptionLanguage,
-  type TranscriptionProvider,
+  watchPreviewPreferences,
+  type CueProvider,
   type CueUsage,
   type KeyProvider,
   type KeyStatus,
   type KeyStore,
   type KeysStatus,
+  type ProviderPreferences,
+  type TranscriptionLanguage,
+  type TranscriptionProvider,
 } from '../lib/providerKeys';
 import { MeetingNotesModel } from './MeetingNotesModel';
 import './provider-keys.css';
@@ -43,8 +52,20 @@ const providers: {
   {
     id: 'anthropic',
     name: 'Anthropic',
-    role: 'Decides when a cue would help, from recent lines. Billed by Anthropic per token.',
+    role: 'Decides when a cue would help, from recent lines, or writes meeting notes. Billed by Anthropic per token.',
     whereToGet: 'Anthropic Console (console.anthropic.com) → API Keys',
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    role: 'Decides when a cue would help or writes meeting notes, if selected. Billed by OpenAI per token.',
+    whereToGet: 'OpenAI Platform (platform.openai.com) → API keys',
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    role: 'Decides when a cue would help or writes meeting notes, if selected. Billed by Google per token.',
+    whereToGet: 'Google AI Studio (aistudio.google.com) → API keys',
   },
 ];
 
@@ -62,7 +83,9 @@ export function isKeysStatus(value: unknown): value is KeysStatus {
     typeof candidate === 'object' &&
     key(candidate.deepgram) &&
     (candidate.elevenlabs === undefined || key(candidate.elevenlabs)) &&
-    key(candidate.anthropic)
+    key(candidate.anthropic) &&
+    (!candidate.openai || key(candidate.openai)) &&
+    (!candidate.gemini || key(candidate.gemini))
   );
 }
 
@@ -163,14 +186,58 @@ function useProviderKeysData(includeUsage: boolean) {
   return { status, setStatus, unavailable, setUnavailable, usage };
 }
 
-/** The person's own provider keys, and this session's use of them. Keys go
- * to the Keychain through Rust and are never shown again; only their state
- * comes back. */
-export function ProviderKeys({ onLiveChange }: { onLiveChange?: () => void }) {
+/** The person's own provider keys, active transcription & cue/notes provider &
+ * model choices, and this session's use of them. Keys go to the secret store
+ * through Rust and are never shown again; only their state comes back. */
+export function ProviderKeys({
+  onPreferencesChange,
+}: {
+  onPreferencesChange?: () => void;
+}) {
   const { status, setStatus, unavailable, setUnavailable, usage } =
     useProviderKeysData(true);
-  const [selectedProvider, setSelectedProvider] =
+  const [selectedSttProvider, setSelectedSttProvider] =
     useState<TranscriptionProvider>('deepgram');
+  const [prefs, setPrefs] = useState<ProviderPreferences | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    providerPreferences().then(
+      (next) => live && setPrefs(next),
+      () => {},
+    );
+    const stopPreview = watchPreviewPreferences((next) => {
+      if (live) setPrefs(next);
+    });
+    return () => {
+      live = false;
+      stopPreview();
+    };
+  }, []);
+
+  const activeProvider: CueProvider = prefs?.cueProvider ?? 'anthropic';
+  const activeProviderName = cueProviderName(activeProvider);
+
+  const usageLine = () => {
+    if (!usage) {
+      return `No session has used your ${activeProviderName} key yet.`;
+    }
+    if (
+      usage.customModel ||
+      usage.spentMicroUsd === null ||
+      usage.spentMicroUsd === undefined ||
+      usage.spendCapMicroUsd === null ||
+      usage.spendCapMicroUsd === undefined
+    ) {
+      return `This session: ${usage.requests} of ${usage.requestCap} cue requests. Estimated spend unavailable for custom model ${usage.model}.`;
+    }
+    return `This session: ${usage.requests} of ${usage.requestCap} cue requests, about ${dollars(usage.spentMicroUsd)} of ${dollars(usage.spendCapMicroUsd)} (an estimate, not your bill), model ${usage.model}.`;
+  };
+
+  const applyPrefs = (next: ProviderPreferences) => {
+    setPrefs(next);
+    onPreferencesChange?.();
+  };
 
   return (
     <section className="provider-keys" aria-labelledby="provider-keys-title">
@@ -178,10 +245,10 @@ export function ProviderKeys({ onLiveChange }: { onLiveChange?: () => void }) {
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
           TalkQTE runs on your own accounts. Live sessions need a transcription
-          key (Deepgram or ElevenLabs) and an Anthropic key. Each is kept in{' '}
-          {keyStoreName(status?.store?.kind)} and is never shown again. Nothing
-          is sent to either provider until you approve a session's processing
-          review.
+          key (Deepgram or ElevenLabs) and a key for your chosen cue provider.
+          Each is kept in {keyStoreName(status?.store?.kind)} and is never shown
+          again. Nothing is sent to any provider until you approve a session's
+          processing review.
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (
@@ -200,25 +267,216 @@ export function ProviderKeys({ onLiveChange }: { onLiveChange?: () => void }) {
             onStatus={(next) => {
               setStatus(next);
               setUnavailable(false);
-              onLiveChange?.();
+              onPreferencesChange?.();
             }}
           />
         ))}
-        <p className="provider-key-usage" role="status">
-          {usage
-            ? `This session: ${usage.requests} of ${usage.requestCap} cue requests, about ${dollars(usage.spentMicroUsd)} of ${dollars(usage.spendCapMicroUsd)} (an estimate, not your bill), model ${usage.model}.`
-            : 'No session has used your Anthropic key yet.'}
+        <p className="provider-keys-usage" role="status">
+          {usageLine()}
         </p>
         <ProviderChoice
           onChanged={(next) => {
-            setSelectedProvider(next);
-            onLiveChange?.();
+            setSelectedSttProvider(next);
+            onPreferencesChange?.();
           }}
         />
-        <LanguageChoice provider={selectedProvider} />
-        <MeetingNotesModel />
+        <CueProviderAndModelChoice prefs={prefs} onChange={applyPrefs} />
+        <LanguageChoice provider={selectedSttProvider} />
+        <MeetingNotesModel
+          provider={activeProvider}
+          prefs={prefs}
+          onChange={applyPrefs}
+        />
       </div>
     </section>
+  );
+}
+
+function CueProviderAndModelChoice({
+  prefs,
+  onChange,
+}: {
+  prefs: ProviderPreferences | null;
+  onChange: (next: ProviderPreferences) => void;
+}) {
+  const id = useId();
+  const provider: CueProvider = prefs?.cueProvider ?? 'anthropic';
+  const testedDefault = defaultCueModel(provider);
+  const curated = CURATED_CUE_MODELS[provider];
+  const effectiveCue = prefs?.effectiveCueModel ?? testedDefault;
+  const isCuratedSelected = curated.some((m) => m.id === effectiveCue);
+  const [customDraft, setCustomDraft] = useState(
+    prefs?.effectiveCueCustom ? (prefs.cueModelOverride ?? '') : '',
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    setCustomDraft(
+      prefs?.effectiveCueCustom ? (prefs.cueModelOverride ?? '') : '',
+    );
+  }, [prefs?.cueProvider, prefs?.cueModelOverride, prefs?.effectiveCueCustom]);
+
+  const changeProvider = async (next: CueProvider) => {
+    setBusy(true);
+    setError('');
+    setNote('');
+    try {
+      const updated = await setCueProvider(next);
+      onChange(updated);
+      setNote(
+        `Cue and meeting notes provider set to ${cueProviderName(next)} (${updated.effectiveCueModel} for cues).`,
+      );
+    } catch (failure) {
+      setError(message(failure, 'The provider was not changed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeCuratedCue = async (modelId: string) => {
+    setBusy(true);
+    setError('');
+    setNote('');
+    try {
+      const override = modelId === testedDefault ? null : modelId;
+      const updated = await setCueModelOverride(override);
+      onChange(updated);
+      setNote(`Cue model set to ${updated.effectiveCueModel}.`);
+    } catch (failure) {
+      setError(message(failure, 'The cue model was not changed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveCustomCue = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setNote('');
+    try {
+      const trimmed = customDraft.trim();
+      const updated = await setCueModelOverride(trimmed || null);
+      onChange(updated);
+      setNote(
+        updated.effectiveCueCustom
+          ? `Custom cue model saved: ${updated.effectiveCueModel}.`
+          : `Using tested default cue model: ${updated.effectiveCueModel}.`,
+      );
+    } catch (failure) {
+      setError(message(failure, 'The custom model ID was not saved.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="provider-key provider-language">
+        <label htmlFor={`${id}-cue-provider`}>Cue &amp; notes provider</label>
+        <select
+          id={`${id}-cue-provider`}
+          value={provider}
+          disabled={!prefs || busy}
+          aria-describedby={`${id}-cue-provider-help${error ? ` ${id}-cue-error` : ''}`}
+          onChange={(event) =>
+            void changeProvider(event.target.value as CueProvider)
+          }
+        >
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini</option>
+        </select>
+        <p id={`${id}-cue-provider-help`} className="provider-key-role">
+          Applies to the next live session and next meeting notes request. Never
+          falls back to another service if a request fails.
+        </p>
+      </div>
+
+      <form className="provider-key provider-language" onSubmit={saveCustomCue}>
+        <label htmlFor={`${id}-cue-model`}>Cue model</label>
+        <select
+          id={`${id}-cue-model`}
+          value={isCuratedSelected ? effectiveCue : '__custom__'}
+          disabled={!prefs || busy}
+          onChange={(event) => {
+            if (event.target.value !== '__custom__') {
+              void changeCuratedCue(event.target.value);
+            }
+          }}
+        >
+          {curated.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+          {!isCuratedSelected && (
+            <option value="__custom__">Custom: {effectiveCue}</option>
+          )}
+        </select>
+
+        <label htmlFor={`${id}-custom-cue-model`}>
+          Custom cue model ID (optional)
+        </label>
+        <input
+          id={`${id}-custom-cue-model`}
+          type="text"
+          value={customDraft}
+          maxLength={96}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          disabled={!prefs || busy}
+          placeholder={`Leave blank for tested default (${testedDefault})`}
+          aria-describedby={`${id}-custom-cue-help${error ? ` ${id}-cue-error` : ''}`}
+          onChange={(event) => setCustomDraft(event.target.value)}
+        />
+        <p id={`${id}-custom-cue-help`} className="provider-key-role">
+          Leave blank to use the tested default ({testedDefault}). Custom model
+          IDs keep the 400-request cap; estimated dollar spend is unavailable
+          for models outside the built-in price table.
+        </p>
+        <div className="provider-key-actions">
+          <button
+            type="submit"
+            className="secondary-button provider-key-btn"
+            disabled={!prefs || busy}
+          >
+            Save cue model
+          </button>
+          {prefs?.cueModelOverride && (
+            <button
+              type="button"
+              className="secondary-button provider-key-btn"
+              disabled={busy}
+              onClick={() => {
+                setCustomDraft('');
+                void changeCuratedCue(testedDefault);
+              }}
+            >
+              Use tested default
+            </button>
+          )}
+        </div>
+        {error ? (
+          <p
+            id={`${id}-cue-error`}
+            className="provider-keys-error"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : (
+          note && (
+            <p className="provider-key-note" role="status">
+              {note}
+            </p>
+          )
+        )}
+      </form>
+    </>
   );
 }
 
