@@ -443,9 +443,16 @@ export function ProcessingControl({
   const approved = snapshot?.approved;
   const active = snapshot?.phase === 'active';
   const paused = snapshot?.phase === 'paused';
+  const destination =
+    snapshot?.processor?.name && /\bAPI key\b/i.test(snapshot.processor.name)
+      ? snapshot.processor.destination.replace(
+          /,\s*with your own API key$/i,
+          '',
+        )
+      : snapshot?.processor?.destination;
   const location =
     snapshot?.processor?.location === 'hosted'
-      ? `Hosted by ${snapshot.processor.destination}`
+      ? `Hosted by ${destination}`
       : 'On this device';
   const phase = status?.failed
     ? 'Connection status unknown'
