@@ -1415,7 +1415,8 @@ impl Engine {
             let correction = corrects(&segment.text);
             // The model is still asked while the cue is up, with it as the
             // cue on screen, so it can say the question was answered.
-            if self.ask_of_user(&segment, correction, now) {
+            let asked = self.ask_of_user(&segment, correction, now);
+            if asked {
                 if let Some(cue) = self
                     .state
                     .cue
@@ -1439,7 +1440,9 @@ impl Engine {
                     self.evaluated_cue = Some((cue.id.clone(), sources));
                 }
             }
-            self.submit_evaluation();
+            if !self.should_skip_filler_evaluation(&segment.text, asked) {
+                self.submit_evaluation();
+            }
             return;
         }
         // The conversation answered the open cue. Withdraw it before the
