@@ -144,6 +144,34 @@
   display: grid;
   gap: var(--space-8);
 }
+.history-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: var(--space-8);
+}
+.history-row.is-archived .history-item {
+  background: var(--band);
+}
+.history-archive-button {
+  min-height: 44px;
+  align-self: center;
+}
+@media (max-width: 520px) {
+  .history-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history-archive-button {
+    justify-self: start;
+  }
+}
 .history-item {
   width: 100%;
   text-align: left;

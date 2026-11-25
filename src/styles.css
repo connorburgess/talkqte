@@ -940,6 +940,36 @@ svg {
   font-size: 15px;
   font-weight: 600;
 }
+.context-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.context-auto-chip {
+  padding: 2px 6px;
+  background: var(--cue-asked-surface);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius-control);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.context-item-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.context-archive-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
 .context-list li .muted,
 .context-freshness {
   font-family: var(--font-mono);

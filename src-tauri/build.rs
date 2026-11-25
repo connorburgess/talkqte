@@ -51,6 +51,8 @@ fn main() {
             "kept_meetings",
             "open_kept_meeting",
             "rename_kept_meeting",
+            "set_kept_meeting_archived",
+            "set_auto_prior_context",
             "delete_kept_meeting",
             "delete_all_kept_meetings",
             "kept_meeting_export_preview",

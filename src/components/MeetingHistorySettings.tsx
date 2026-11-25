@@ -5,6 +5,7 @@ import {
   historyStatus,
   keptMeetings,
   setAfterSessionKeep,
+  setAutoPriorContext,
   type AfterSessionKeep,
   type HistoryStatus,
 } from '../lib/meetingHistory';
@@ -97,6 +98,34 @@ export function MeetingHistorySettings({
               Non-empty live sessions save to Meetings on stop (without the app
               name). Ask each time confirms first; Don’t save leaves ended
               sessions in memory until you quit or start another.
+            </p>
+            <label className="processing-option">
+              <input
+                type="checkbox"
+                checked={status.autoPriorContext}
+                disabled={busy}
+                aria-describedby={`${id}-auto-prior`}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setBusy(true);
+                  setError('');
+                  setAutoPriorContext(enabled)
+                    .then(refresh)
+                    .catch((problem) =>
+                      setError(
+                        failure(problem, 'The setting was not changed.'),
+                      ),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              />
+              <span>Auto-select relevant past meetings as prior context</span>
+            </label>
+            <p className="history-help" id={`${id}-auto-prior`}>
+              When on (default), up to 3 non-archived meetings with notes are
+              pre-selected for each session based on Focus and title—notes only,
+              never transcripts. You can remove any item for a session or
+              archive a meeting so it is never auto-selected.
             </p>
             <p className="history-help">
               Saves title, date, length, sources, transcript, notes, cues, and

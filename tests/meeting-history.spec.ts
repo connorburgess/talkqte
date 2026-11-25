@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
 import type {} from './fixtures/native-meeting-history';
@@ -299,7 +300,7 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
   ).toBeVisible();
 
   const list = page.getByRole('list', { name: 'Meetings' });
-  const items = list.getByRole('button');
+  const items = list.locator('.history-item');
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toContainText('Orchard rota planning');
   await expect(items.nth(0)).toContainText('Meeting notes');
@@ -357,7 +358,7 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
   });
 
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
-  await page.getByRole('button', { name: /Fictional planning/ }).click();
+  await page.getByRole('button', { name: /^Fictional planning/ }).click();
 
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
   await page
@@ -563,4 +564,183 @@ test('kept meetings can be selected into Prior context (notes only), approved in
     'Orchard supplier sync · Kept meeting · 2026-11-02 · prior note',
   );
   await expect(cue).toContainText('Legal needs two days for review.');
+});
+
+test('auto-selects relevant recent meetings on launch and Focus match, respects per-session Remove, Archive, and Settings toggle', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      standInMeetings: unknown[];
+    };
+    w.standInMeetings = [
+      {
+        title: 'Orchard gate supplier',
+        startedAtMs: Date.UTC(2026, 10, 1, 9),
+        durationMs: 900_000,
+        sources: 'microphone',
+        transcript: [
+          { atMs: 1_000, text: 'Secret transcript from orchard call.' },
+        ],
+        notes: 'Check south latch bolts.',
+        cues: [],
+        meetingNotes: '## Decisions\n\n- Confirm gate delivery.',
+      },
+      {
+        title: 'Archived orchard notes',
+        startedAtMs: Date.UTC(2026, 10, 5, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Archived transcript.' }],
+        notes: 'Archived orchard latch notes.',
+        cues: [],
+        archived: true,
+      },
+      {
+        title: 'Empty orchard sync',
+        startedAtMs: Date.UTC(2026, 10, 6, 9),
+        durationMs: 300_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Only transcript, no notes.' }],
+        notes: '   ',
+        cues: [],
+      },
+      {
+        title: 'Budget check',
+        startedAtMs: Date.UTC(2026, 10, 2, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret budget transcript.' }],
+        notes: 'Review Q4 seed invoices.',
+        cues: [],
+      },
+      {
+        title: 'Compost rota',
+        startedAtMs: Date.UTC(2026, 10, 3, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret compost transcript.' }],
+        notes: 'Priya keeps bin padlock.',
+        cues: [],
+      },
+      {
+        title: 'Tool shed review',
+        startedAtMs: Date.UTC(2026, 10, 4, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret shed transcript.' }],
+        notes: 'Oil the hinges.',
+        cues: [],
+      },
+    ];
+  });
+
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/?keys=set');
+  const context = page.getByRole('region', { name: 'Prior context' });
+  await expect(context.locator('summary')).toContainText('3 notes selected');
+
+  await context.locator('summary').click();
+  // On launch without Focus, picks 3 newest non-archived meetings with notes.
+  await expect(context).toContainText('Tool shed review');
+  await expect(context).toContainText('Compost rota');
+  await expect(context).toContainText('Budget check');
+  await expect(context).not.toContainText('Archived orchard notes');
+  await expect(context).not.toContainText('Empty orchard sync');
+  await expect(context).not.toContainText('Secret shed transcript.');
+  await expect(context.locator('.context-auto-chip')).toHaveCount(3);
+  const axeContext = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'])
+    .disableRules(['color-contrast'])
+    .analyze();
+  expect(axeContext.violations).toEqual([]);
+
+  // Typing Focus matching "orchard" promotes the older matching meeting.
+  const focusToggle = page
+    .getByRole('region', { name: 'This meeting' })
+    .locator('summary');
+  await focusToggle.click();
+  const focusInput = page.getByRole('textbox', { name: /Focus/ });
+  await focusInput.fill('Check orchard latch');
+  await focusInput.blur();
+
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).toContainText('Auto-selected from kept meetings');
+  await expect(context).not.toContainText('Secret transcript from orchard');
+
+  // Remove one auto-selected item for this session: it stays removed even when Focus changes again.
+  await context
+    .getByRole('button', { name: /Remove Tool shed review/ })
+    .click();
+  await expect(context).not.toContainText('Tool shed review');
+  await expect(context.locator('summary')).toContainText('2 notes selected');
+
+  await focusInput.fill('Check orchard south latch');
+  await focusInput.blur();
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).not.toContainText('Tool shed review');
+
+  // Archive an auto-selected item from Prior context: removes it now and excludes it permanently.
+  await context
+    .getByRole('button', { name: /Archive Orchard gate supplier/ })
+    .click();
+  await expect(context).not.toContainText('Orchard gate supplier');
+
+  // Meetings view hides archived meetings unless Show archived is toggled on, and supports Unarchive.
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  const list = page.getByRole('list', { name: 'Meetings' });
+  await expect(list).not.toContainText('Orchard gate supplier');
+  await expect(list).not.toContainText('Archived orchard notes');
+  const showArchived = page.getByRole('checkbox', {
+    name: /Show archived \(2\)/,
+  });
+  await showArchived.check();
+  await expect(list).toContainText('Orchard gate supplier');
+  await expect(list).toContainText('Archived orchard notes');
+
+  // Archive Compost rota from the Meetings list and unarchive Orchard gate supplier in detail view.
+  await page
+    .getByRole('button', { name: 'Archive Compost rota', exact: true })
+    .click();
+  await expect(
+    page.getByRole('checkbox', { name: /Show archived \(3\)/ }),
+  ).toBeVisible();
+  await list
+    .locator('.history-item', { hasText: 'Orchard gate supplier' })
+    .click();
+  await expect(page.locator('.history-detail-head')).toContainText('Archived');
+  await page.getByRole('button', { name: 'Unarchive', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Archive', exact: true }),
+  ).toBeVisible();
+
+  // Turning the Settings toggle off clears auto-selected items; turning it back on restores them.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const autoToggle = page
+    .getByRole('region', { name: 'Meetings' })
+    .getByRole('checkbox', {
+      name: 'Auto-select relevant past meetings as prior context',
+    });
+  await expect(autoToggle).toBeChecked();
+  await autoToggle.uncheck();
+
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(context.locator('summary')).toContainText('0 notes selected');
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await autoToggle.check();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).not.toContainText('Compost rota');
+  await expect(context).not.toContainText('Tool shed review');
 });
