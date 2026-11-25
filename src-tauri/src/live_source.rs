@@ -296,6 +296,11 @@ impl Runtime {
         let mut snapshot = self.engine.cue_snapshot();
         snapshot.source_session = self.source_session_running();
         snapshot.call_prompt = self.call_prompt.prompt().cloned();
+        snapshot.end_prompt = self
+            .end_prompt
+            .as_ref()
+            .filter(|prompt| prompt.session == self.engine.history_session())
+            .cloned();
         snapshot
     }
 
@@ -395,6 +400,9 @@ impl Runtime {
         // The ticket ends here, so startup reads idle; the operation it set
         // stays current for the source's attachment and for Stop.
         drop(ticket);
+        self.export = None;
+        self.end_prompt = None;
+        self.ended_source_session = None;
         self.source_session = Some(SourceSession {
             session,
             control: control.clone(),
@@ -442,7 +450,11 @@ impl Runtime {
                 drop(live);
             }
         }
-        self.engine.finish_live_stop(session)
+        let ended = self.engine.finish_live_stop(session);
+        if ended {
+            self.ended_source_session = Some(session);
+        }
+        ended
     }
 }
 

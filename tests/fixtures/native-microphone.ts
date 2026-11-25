@@ -263,15 +263,34 @@ async function send(value: Partial<MicrophoneSnapshot>) {
 /** Counts sessions, as Rust's session number does, for kept meetings. */
 let historySession = 0;
 async function publish(value: Partial<Snapshot>) {
-  if (value.status === 'running' && session?.status !== 'running')
+  const wasRunning = session?.status === 'running';
+  if (value.status === 'running' && session?.status !== 'running') {
     historySession += 1;
-  session = {
+    historyFixture.clearEndPrompt();
+  }
+  const next: Snapshot = {
     ...session,
     ...value,
     revision: Math.max(session.revision, 1_000) + 1,
   };
+  let historyChanged = false;
+  if (value.status === 'running') {
+    delete next.endPrompt;
+  } else if (
+    wasRunning &&
+    next.live &&
+    next.status === 'ended' &&
+    !('endPrompt' in value)
+  ) {
+    const ended = historyFixture.onSessionEnded(next, historySession);
+    if (ended.endPrompt) next.endPrompt = ended.endPrompt;
+    else delete next.endPrompt;
+    historyChanged = ended.changed;
+  }
+  session = next;
   await emit('session:changed', session);
   await emit('cue:changed', session);
+  if (historyChanged) await emit('meeting-history:changed');
 }
 /** A replay of a fictional conversation: no microphone, nothing captured.
  * The app labels it as simulated in its own words. Used by the lab recorder. */
@@ -378,13 +397,27 @@ mockIPC(
       return providerKeysFixture.command(command, args);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
-    if (historyFixture.commands.includes(command))
-      return historyFixture.command(
+    if (historyFixture.commands.includes(command)) {
+      const hadPrompt = !!session.endPrompt;
+      const result = historyFixture.command(
         command,
         args,
         () => session,
         () => historySession,
       );
+      if (
+        command === 'keep_meeting_in_history' ||
+        command === 'delete_kept_meeting' ||
+        command === 'delete_all_kept_meetings'
+      ) {
+        if (hadPrompt) {
+          const updated = historyFixture.currentEndPrompt(historySession);
+          await publish({ endPrompt: updated ?? undefined });
+        }
+        await emit('meeting-history:changed');
+      }
+      return result;
+    }
     switch (command) {
       case 'platform_capabilities': {
         // The macOS build unless a test names Windows or Linux.
@@ -638,7 +671,24 @@ mockIPC(
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
         callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        historyFixture.resetAfterSessionKeep();
         return;
+      case 'respond_to_end_prompt': {
+        const { session: targetSession, action } =
+          args as Commands['respond_to_end_prompt'];
+        const res = historyFixture.respondToEndPrompt(
+          action,
+          targetSession,
+          session,
+          historySession,
+        );
+        await publish({ endPrompt: res.endPrompt ?? undefined });
+        if (res.changed) await emit('meeting-history:changed');
+        if (res.writeNotes) await emit('end-prompt:write-notes');
+        if (res.openId)
+          await emit('end-prompt:open-meeting', { id: res.openId });
+        return;
+      }
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
       case 'set_call_prompt': {
@@ -730,6 +780,14 @@ mockIPC(
           });
         }
         return;
+      case 'save_notes':
+        if (session && session.revision >= 1_000) {
+          session = { ...session, notes: (args as { notes: string }).notes };
+        }
+        return preview.command(
+          command as keyof Commands,
+          args as Commands[keyof Commands],
+        );
       default:
         return preview.command(
           command as keyof Commands,

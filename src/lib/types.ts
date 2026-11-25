@@ -60,6 +60,8 @@ export interface CueSnapshot {
   /** A call seems to be starting: the offer, when the person turned the
    * prompt on. */
   callPrompt?: import('../components/CallPrompt').CallPromptOffer;
+  /** An ended non-empty live session prompt: counts and keep status only. */
+  endPrompt?: EndPrompt;
   cuesPaused: boolean;
   cue: Cue | null;
   overlayEnabled: boolean;
@@ -99,6 +101,16 @@ export interface Snapshot extends CueSnapshot {
   /** Session-only: where this session's model-written notes stand. */
   meetingNotes?: import('./meetingNotes').MeetingNotesPhase;
 }
+export type EndPromptState = 'ask' | 'saved' | 'kept';
+export type EndPromptAction =
+  'keep' | 'writeNotes' | 'open' | 'delete' | 'dismiss';
+export interface EndPrompt {
+  session: number;
+  state: EndPromptState;
+  transcriptLines: number;
+  hasNotes: boolean;
+  error?: string;
+}
 export type Commands = {
   set_live_cues_paused: { paused: boolean };
   respond_to_cue: { id: string; response: 'dismiss' };
@@ -123,6 +135,10 @@ export type Commands = {
   respond_to_call_prompt: {
     id: number;
     answer: import('../components/CallPrompt').CallPromptAnswer;
+  };
+  respond_to_end_prompt: {
+    session: number;
+    action: EndPromptAction;
   };
   cancel_context_import: undefined;
   remove_context_item: { provider: ContextItem['provider']; sourceId: string };

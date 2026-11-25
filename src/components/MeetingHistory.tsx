@@ -39,7 +39,13 @@ function sourceDescription(meeting: KeptMeeting) {
 /** Meetings page: list kept meetings newest first, search by title or text,
  * open read-only with notes/meeting notes/cues/transcript, rename, export,
  * and delete. */
-export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
+export function MeetingHistory({
+  refreshKey,
+  openRequest,
+}: {
+  refreshKey?: number;
+  openRequest?: { id: string; seq: number } | null;
+}) {
   const id = useId();
   const [query, setQuery] = useState('');
   const [listing, setListing] = useState<KeptListing | null>(null);
@@ -64,7 +70,8 @@ export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
   const exportButton = useRef<HTMLButtonElement>(null);
 
   const listRequest = useRef(0);
-  const openRequest = useRef(0);
+  const openRequestRef = useRef(0);
+  const handledOpenSeq = useRef(0);
   const backButton = useRef<HTMLButtonElement>(null);
 
   const loadList = async (search: string) => {
@@ -118,7 +125,7 @@ export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
   }, [renaming]);
 
   const openMeeting = async (meetingId: string) => {
-    const request = ++openRequest.current;
+    const request = ++openRequestRef.current;
     setBusy(true);
     setError('');
     setNotice('');
@@ -126,17 +133,23 @@ export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
     setConfirmDelete(false);
     try {
       const meeting = await openKeptMeeting(meetingId);
-      if (request !== openRequest.current) return;
+      if (request !== openRequestRef.current) return;
       setSelected(meeting);
       setDraftTitle(meeting.title);
       requestAnimationFrame(() => backButton.current?.focus());
     } catch (problem) {
-      if (request !== openRequest.current) return;
+      if (request !== openRequestRef.current) return;
       setError(failure(problem, 'That meeting could not be opened.'));
     } finally {
-      if (request === openRequest.current) setBusy(false);
+      if (request === openRequestRef.current) setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!openRequest || openRequest.seq <= handledOpenSeq.current) return;
+    handledOpenSeq.current = openRequest.seq;
+    void openMeeting(openRequest.id);
+  }, [openRequest]);
 
   const submitRename = async () => {
     if (!selected) return;
@@ -497,8 +510,9 @@ export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
     <div className="history">
       <h1>Kept meetings</h1>
       <p className="page-description">
-        Meetings you chose to keep on this Mac, newest first. Only meetings you
-        keep after they end appear here.
+        Kept meetings on this Mac, newest first. By default, non-empty live
+        sessions save here when they end; you can change this in Settings → Kept
+        meetings.
       </p>
 
       <p className="visually-hidden" role="status">
@@ -574,8 +588,8 @@ export function MeetingHistory({ refreshKey }: { refreshKey?: number }) {
                 </>
               ) : (
                 <p>
-                  No meetings kept yet. After a live session ends, choose Keep
-                  meeting to save it here.
+                  No meetings kept yet. Non-empty live sessions save here when
+                  they end unless you change Kept meetings in Settings.
                 </p>
               )}
             </div>

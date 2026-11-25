@@ -23,7 +23,7 @@ impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.cue.is_some() || state.call_prompt.is_some() {
+        } else if state.cue.is_some() || state.call_prompt.is_some() || state.end_prompt.is_some() {
             Self::Question
         } else if microphone == MicrophoneStatus::Off
             && matches!(state.status, Status::Ready | Status::Ended)
@@ -302,7 +302,7 @@ pub fn refresh(app: &tauri::AppHandle) {
         let cue = {
             let state = handle.state::<AppState>();
             let Ok(runtime) = state.0.lock() else { return };
-            runtime.engine.cue_snapshot()
+            runtime.cue_snapshot()
         }; // Release the engine lock before every native window operation.
         let Some(microphone) = handle.state::<Microphone>().try_status() else {
             return;
@@ -477,6 +477,34 @@ mod tests {
         hidden.call_prompt = snapshot.call_prompt.clone();
         assert_eq!(
             Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn an_end_prompt_keeps_the_companion_open_unless_hidden() {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        engine.end();
+        let mut snapshot = engine.cue_snapshot();
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+        snapshot.end_prompt = Some(crate::engine::EndPrompt {
+            session: 1,
+            state: crate::engine::EndPromptState::Saved,
+            transcript_lines: 3,
+            has_notes: true,
+            error: None,
+        });
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
+            Mode::Question
+        );
+        snapshot.overlay_enabled = false;
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
             Mode::Hidden
         );
     }

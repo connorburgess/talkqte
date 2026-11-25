@@ -1343,7 +1343,8 @@ svg {
   padding: 8px 20px;
   font-size: 14px;
 }
-.call-prompt {
+.call-prompt,
+.end-prompt {
   position: relative;
   color: var(--companion-fg);
   padding: 6px 10px;
@@ -1356,7 +1357,8 @@ svg {
   color: var(--companion-fg);
   padding-right: 36px;
 }
-.call-prompt.is-large .call-prompt-title {
+.call-prompt.is-large .call-prompt-title,
+.end-prompt.is-large .call-prompt-title {
   font-size: 17px;
   line-height: 1.24;
 }
@@ -1366,9 +1368,20 @@ svg {
   margin-top: 4px;
   color: var(--companion-muted);
 }
-.call-prompt.is-large .call-prompt-detail {
+.call-prompt.is-large .call-prompt-detail,
+.end-prompt.is-large .call-prompt-detail {
   font-size: 14px;
   line-height: 1.4;
+}
+.end-prompt-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #ff8e6b;
+  background: #261714;
+  color: #ff8e6b;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .call-prompt-actions {
   display: flex;
@@ -1377,7 +1390,8 @@ svg {
   gap: 6px;
   margin-top: 8px;
 }
-.call-prompt .primary-button {
+.call-prompt .primary-button,
+.end-prompt .primary-button {
   min-height: 44px;
   padding: 6px 12px;
   border-radius: 6px;
@@ -1387,11 +1401,13 @@ svg {
   font-size: 12.5px;
   font-weight: 700;
 }
-.call-prompt .primary-button:hover:not(:disabled) {
+.call-prompt .primary-button:hover:not(:disabled),
+.end-prompt .primary-button:hover:not(:disabled) {
   background: #f2c478;
   border-color: #f2c478;
 }
-.call-prompt .secondary-button {
+.call-prompt .secondary-button,
+.end-prompt .secondary-button {
   min-height: 44px;
   padding: 6px 10px;
   border-radius: 6px;
@@ -1401,11 +1417,13 @@ svg {
   font-size: 12px;
   font-weight: 500;
 }
-.call-prompt .secondary-button:hover:not(:disabled) {
+.call-prompt .secondary-button:hover:not(:disabled),
+.end-prompt .secondary-button:hover:not(:disabled) {
   background: var(--companion-hover);
   border-color: var(--companion-muted);
 }
-.call-prompt .companion-control {
+.call-prompt .companion-control,
+.end-prompt .companion-control {
   position: absolute;
   top: 0;
   right: 0;
@@ -1417,14 +1435,17 @@ svg {
   background: transparent;
   color: var(--companion-muted);
 }
-.call-prompt .companion-control:hover:not(:disabled) {
+.call-prompt .companion-control:hover:not(:disabled),
+.end-prompt .companion-control:hover:not(:disabled) {
   background: var(--companion-hover);
   color: var(--companion-fg);
 }
-.call-prompt.is-large .primary-button {
+.call-prompt.is-large .primary-button,
+.end-prompt.is-large .primary-button {
   font-size: 13.5px;
 }
-.call-prompt.is-large .secondary-button {
+.call-prompt.is-large .secondary-button,
+.end-prompt.is-large .secondary-button {
   font-size: 13px;
 }
 .call-prompt-setting-option {

@@ -421,6 +421,18 @@ fn has_controls(text: &str) -> bool {
         .any(|c| c.is_control() && c != '\n' && c != '\t')
 }
 
+/// The default title for an automatically kept or dock-kept meeting: the
+/// start date and time in UTC (since `chrono` omits `clock` by design).
+pub fn default_title(started_at_ms: u64) -> String {
+    let dt = i64::try_from(started_at_ms)
+        .ok()
+        .and_then(chrono::DateTime::from_timestamp_millis);
+    match dt {
+        Some(when) => when.format("Meeting, %-d %b %Y, %H:%M UTC").to_string(),
+        None => "Kept meeting".to_string(),
+    }
+}
+
 /// A title as the person typed it, or why it cannot be one.
 pub fn valid_title(title: &str) -> Result<String, Error> {
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");

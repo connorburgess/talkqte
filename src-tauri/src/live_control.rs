@@ -264,6 +264,8 @@ impl Runtime {
         ))]
         crate::dev_model::apply(&mut engine);
         self.export = None;
+        self.end_prompt = None;
+        self.ended_source_session = None;
         self.processing_reviews.clear();
         self.engine = engine;
         // One-click live session start for own-key provider builds (Anthropic,
