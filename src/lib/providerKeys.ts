@@ -2,8 +2,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { desktop } from './bridge';
 
-/** The two providers a person brings a key for. */
-export type KeyProvider = 'deepgram' | 'anthropic';
+/** The providers a person brings a key for. */
+export type KeyProvider = 'deepgram' | 'elevenlabs' | 'anthropic';
+
+/** Which cloud service transcribes live sessions with the person's own key. */
+export type TranscriptionProvider = 'deepgram' | 'elevenlabs';
 
 /** What the notebook may know about a key; never the key itself. */
 export interface KeyStatus {
@@ -25,8 +28,10 @@ export interface KeyStore {
 
 export interface KeysStatus {
   deepgram: KeyStatus;
+  elevenlabs?: KeyStatus;
   anthropic: KeyStatus;
-  /** Either key is not set: what a first-run screen asks for. */
+  /** No transcription key is set or Anthropic is not set: what a first-run
+   * screen asks for. */
   anyMissing: boolean;
   /** Absent only from a payload older than this field. */
   store?: KeyStore;
@@ -74,6 +79,7 @@ export interface CueUsage {
 // the desktop app always checks in Rust.
 const previewKeys: Record<KeyProvider, KeyStatus | null> = {
   deepgram: null,
+  elevenlabs: null,
   anthropic: null,
 };
 const previewListeners = new Set<(status: KeysStatus) => void>();
@@ -82,11 +88,15 @@ function previewStatus(): KeysStatus {
   const of = (provider: KeyProvider) =>
     previewKeys[provider] ?? { state: 'notSet' as const, verified: false };
   const deepgram = of('deepgram');
+  const elevenlabs = of('elevenlabs');
   const anthropic = of('anthropic');
   return {
     deepgram,
+    elevenlabs,
     anthropic,
-    anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    anyMissing:
+      (deepgram.state === 'notSet' && elevenlabs.state === 'notSet') ||
+      anthropic.state === 'notSet',
     store: { kind: 'keychain', available: true },
   };
 }
@@ -103,6 +113,17 @@ function previewShapeError(provider: KeyProvider, text: string) {
     return ok
       ? null
       : 'That does not look like an Anthropic API key. It starts with sk-ant-api.';
+  }
+  if (provider === 'elevenlabs') {
+    const ok =
+      (key.startsWith('sk_') &&
+        key.length >= 32 &&
+        key.length <= 256 &&
+        /^[A-Za-z0-9_-]+$/.test(key)) ||
+      (key.length >= 32 && key.length <= 64 && /^[0-9A-Fa-f]+$/.test(key));
+    return ok
+      ? null
+      : 'That does not look like an ElevenLabs API key. It starts with sk_ (or is a 32-character hex key).';
   }
   return key.length >= 32 && key.length <= 128 && /^[A-Za-z0-9]+$/.test(key)
     ? null
@@ -169,7 +190,28 @@ export async function watchKeys(receive: (status: KeysStatus) => void) {
   );
 }
 
-/** What Deepgram is asked to transcribe in the next live session. */
+/** Which cloud provider transcribes the next live session. */
+let previewProvider: TranscriptionProvider = 'deepgram';
+
+export async function transcriptionProvider(): Promise<TranscriptionProvider> {
+  if (!desktop) return previewProvider;
+  return invoke<TranscriptionProvider>('transcription_provider');
+}
+
+/** Applies to the next live session; refused while one is running. */
+export async function setTranscriptionProvider(
+  provider: TranscriptionProvider,
+): Promise<TranscriptionProvider> {
+  if (!desktop) {
+    previewProvider = provider;
+    return previewProvider;
+  }
+  return invoke<TranscriptionProvider>('set_transcription_provider', {
+    provider,
+  });
+}
+
+/** What the active provider is asked to transcribe in the next live session. */
 export type TranscriptionLanguage = 'en' | 'multi';
 
 // The browser preview keeps the choice in memory and sends nothing.

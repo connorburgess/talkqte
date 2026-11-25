@@ -71,8 +71,42 @@ pub fn cue_usage() -> Option<crate::anthropic_api::UsageSnapshot> {
     crate::anthropic_api::usage()
 }
 
+/// The transcription provider for the next live session with the person's
+/// own key: `"deepgram"` or `"elevenlabs"`.
+#[tauri::command]
+pub fn transcription_provider() -> crate::transcription::cloud::Provider {
+    crate::transcription::cloud::provider()
+}
+
+/// Chooses the transcription provider for the next live session. Refused
+/// while a live session is starting, running or finishing.
+#[tauri::command]
+pub fn set_transcription_provider(
+    app: tauri::AppHandle,
+    state: tauri::State<crate::AppState>,
+    provider: crate::transcription::cloud::Provider,
+) -> Result<crate::transcription::cloud::Provider, String> {
+    let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let provider = set_provider_when_closed(runtime.live_session_open(), provider)?;
+    crate::settings_commands::record(&app, |settings| {
+        settings.transcription_provider = provider;
+    });
+    Ok(provider)
+}
+
+fn set_provider_when_closed(
+    session_open: bool,
+    provider: crate::transcription::cloud::Provider,
+) -> Result<crate::transcription::cloud::Provider, String> {
+    if session_open {
+        return Err("Change the transcription provider when no live session is running.".into());
+    }
+    crate::transcription::cloud::set_provider(provider);
+    Ok(crate::transcription::cloud::provider())
+}
+
 /// The transcription language for the next live session with the person's
-/// own Deepgram key: `"en"` (English) or `"multi"` (Multilingual).
+/// own key: `"en"` (English) or `"multi"` (Multilingual).
 #[tauri::command]
 pub fn transcription_language() -> crate::transcription::cloud::Language {
     crate::transcription::cloud::language()
@@ -109,7 +143,24 @@ fn set_language_when_closed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription::cloud::{language, Language};
+    use crate::transcription::cloud::{language, provider, Language, Provider as SttProvider};
+
+    #[test]
+    fn the_provider_changes_only_between_sessions() {
+        assert_eq!(
+            set_provider_when_closed(true, SttProvider::ElevenLabs).unwrap_err(),
+            "Change the transcription provider when no live session is running."
+        );
+        assert_eq!(provider(), SttProvider::Deepgram);
+        assert_eq!(
+            set_provider_when_closed(false, SttProvider::ElevenLabs),
+            Ok(SttProvider::ElevenLabs)
+        );
+        assert_eq!(
+            set_provider_when_closed(false, SttProvider::Deepgram),
+            Ok(SttProvider::Deepgram)
+        );
+    }
 
     #[test]
     fn the_language_changes_only_between_sessions() {

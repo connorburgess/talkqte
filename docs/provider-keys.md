@@ -1,23 +1,26 @@
 # Provider keys
 
-TalkQTE runs on the person's own provider accounts: one Deepgram API key for
-transcription and one Anthropic API key for cue decisions. This page describes
-how the keys are stored and the commands the notebook uses. Live sessions use
-the Deepgram key for [transcription](cloud-transcription.md) and the
+TalkQTE runs on the person's own provider accounts: a transcription key (your
+**Deepgram** API key, the default, or your **ElevenLabs** API key) and one
+**Anthropic** API key for cue decisions. This page describes how the keys are
+stored and the commands the notebook uses. Live sessions use the chosen
+transcription provider's key for [transcription](cloud-transcription.md) and the
 Anthropic key for [cue decisions](own-key-cues.md). After a session, the
 Anthropic key can also write [meeting notes](meeting-notes.md), one confirmed
 request per meeting.
 
 ## In Settings
 
-**Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
-per provider: what the key is for and how it is billed, its state (**Not
-set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
-Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
-saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
-fixed messages below, announced as alerts. Below the forms, the current
-session's cue requests and estimated spend are shown as "This session: 12 of
-400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model
+**Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has the
+**Transcription provider** selector (**Deepgram**, default, or **ElevenLabs**)
+and one form per provider (`deepgram`, `elevenlabs`, `anthropic`): what the key
+is for and how it is billed, its state (**Not set**, **Set, not checked yet**,
+**Set and checked**, **Rejected by … Replace it with a new key.**, or **Could
+not be read from the Keychain**), a password field that is cleared after saving
+or after a refused save, and **Save key**, **Test key** and **Remove key**.
+Errors are the fixed messages below, announced as alerts. Below the forms, the
+current session's cue requests and estimated spend are shown as "This session:
+12 of 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model
 claude-haiku-5-5.", read when Settings opens. The browser preview keeps
 fictional keys in memory and cannot check one.
 
@@ -26,12 +29,14 @@ fictional keys in memory and cannot check one.
 ## Storage
 
 - Keys are kept only in the system's secret store, under the service
-  `app.talkqte.provider-key` with the accounts `deepgram` and `anthropic`
-  (`src-tauri/src/provider_keys.rs`). TalkQTE writes no key to a file.
+  `app.talkqte.provider-key` with the accounts `deepgram`, `elevenlabs`, and
+  `anthropic` (`src-tauri/src/provider_keys.rs`). TalkQTE writes no key to a
+  file.
   - **macOS:** the login Keychain, as generic passwords. The Keychain encrypts
     them.
   - **Windows:** Credential Manager, as generic credentials named
-    `app.talkqte.provider-key/deepgram` and `app.talkqte.provider-key/anthropic`,
+    `app.talkqte.provider-key/deepgram`, `app.talkqte.provider-key/elevenlabs`,
+    and `app.talkqte.provider-key/anthropic`,
     persisted for this user on this computer (not the roaming "enterprise"
     persistence). Windows protects them with the user's logon credentials
     (DPAPI). They are visible and removable in **Control Panel → Credential
@@ -55,8 +60,10 @@ fictional keys in memory and cannot check one.
 - A key's shape is checked before it is stored. Anthropic: a Console API key
   starting `sk-ant-api` or `sk-ant-usr-` (admin keys and other `sk-ant-`
   credentials are refused), 40 to 256 characters of letters, digits, `-` and
-  `_`. Deepgram: 32 to 128 letters and digits. Whitespace around a pasted key
-  is removed; anything else is refused without quoting what was pasted.
+  `_`. Deepgram: 32 to 128 letters and digits. ElevenLabs: a key starting with
+  `sk_` followed by letters, digits, `-` and `_` (32 to 256 characters total),
+  or a 32-to-64-character hexadecimal key. Whitespace around a pasted key is
+  removed; anything else is refused without quoting what was pasted.
 - Whether a key was checked or rejected is kept in memory for the app run.
 - Checking whether a key is set does not unlock the Linux keyring: it searches
   the items' attributes only. Reading a key for a session or a check may show
@@ -67,21 +74,24 @@ fictional keys in memory and cannot check one.
 
 ## Commands
 
-All four are main-window commands and return the same status payload. The
-first-run screen reads `provider_keys_status` at launch.
+These commands are main-window commands (`provider_keys_*` return the same
+status payload). The first-run screen reads `provider_keys_status` at launch.
 
 | Command                | Arguments           | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
 | ---------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `provider_keys_status` | none                | Reads which keys are stored. Sends nothing.                                                                                                                                                                                                                                                                                                                                                           |
 | `set_provider_key`     | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider.                                                                                                                                                                                                                                                                                                                     |
-| `test_provider_key`    | `{ provider }`      | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`) or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`). Neither is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
+| `test_provider_key`    | `{ provider }`      | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`), `GET https://api.elevenlabs.io/v1/user` (`xi-api-key: …`), or `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`). None is billed. HTTP 200 marks the key checked; 401 or 403 marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read. |
 | `remove_provider_key`  | `{ provider }`      | Deletes the key from the Keychain.                                                                                                                                                                                                                                                                                                                                                                    |
+| `transcription_provider` | none              | Returns the saved transcription provider (`"deepgram"` or `"elevenlabs"`).                                                                                                                                                                                                                                                                                                                            |
+| `set_transcription_provider` | `{ provider }` | Saves the transcription provider in `settings.json` when no live session is starting, running, or finishing.                                                                                                                                                                                                                                                                                          |
 
-`provider` is `"deepgram"` or `"anthropic"`. The payload:
+`provider` for key commands is `"deepgram"`, `"elevenlabs"`, or `"anthropic"`. The payload:
 
 ```json
 {
   "deepgram": { "state": "notSet", "verified": false },
+  "elevenlabs": { "state": "notSet", "verified": false },
   "anthropic": { "state": "set", "verified": true },
   "anyMissing": true,
   "store": { "kind": "keychain", "available": true }
@@ -95,7 +105,7 @@ exist on the system. `state` is `notSet`, `set`, `rejected` or `unreadable`
 it, and it does not count as missing). Each status call reads the Keychain
 again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
-rejected. `anyMissing` is true while either key is not set: the "no keys set"
+rejected. `anyMissing` is true while `anthropic` is not set or neither `deepgram` nor `elevenlabs` is set: the "no keys set"
 state a first-run screen asks for. A failed command returns one fixed message,
 for example "That does not look like an Anthropic API key. It starts with
 sk-ant-api." or "Deepgram could not be reached to check the key. Nothing was

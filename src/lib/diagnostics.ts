@@ -11,6 +11,7 @@ import type {
   CueUsage,
   KeysStatus,
   TranscriptionLanguage,
+  TranscriptionProvider,
 } from './providerKeys';
 
 export const APP_VERSION = '0.1 alpha';
@@ -22,6 +23,7 @@ export interface DiagnosticsInput {
   microphone: MicrophoneSnapshot | null;
   keys: KeysStatus | null;
   usage: CueUsage | null;
+  transcriptionProvider: TranscriptionProvider | null;
   language: TranscriptionLanguage | null;
   /** Whether a live session can start in this launch. */
   liveAvailable: boolean | null;
@@ -52,7 +54,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
   const { session, processing, microphone, keys, usage } = input;
   const transcription = session?.transcription;
   const sources = session?.sources;
-  const key = (provider: 'deepgram' | 'anthropic') => {
+  const key = (provider: 'deepgram' | 'elevenlabs' | 'anthropic') => {
     const status = keys?.[provider];
     if (!status) return '-';
     return `${code(status.state)}${status.verified ? ', checked' : ''}`;
@@ -62,7 +64,9 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Build', input.desktop ? 'desktop' : 'browser preview'],
     ['Live sessions available', flag(input.liveAvailable)],
     ['Deepgram key', key('deepgram')],
+    ['ElevenLabs key', key('elevenlabs')],
     ['Anthropic key', key('anthropic')],
+    ['Transcription provider', code(input.transcriptionProvider)],
     ['Transcription language', code(input.language)],
     ['Companion shown', flag(session?.overlayEnabled)],
     ['Companion position', code(session?.companionPosition)],

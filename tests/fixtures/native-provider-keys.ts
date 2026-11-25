@@ -14,9 +14,12 @@ export const commands = [
   'test_provider_key',
   'remove_provider_key',
   'cue_usage',
+  'transcription_provider',
+  'set_transcription_provider',
   'transcription_language',
   'set_transcription_language',
 ];
+let sttProvider: 'deepgram' | 'elevenlabs' = 'deepgram';
 let language: 'en' | 'multi' = 'en';
 /** Refuse a language change, as the app does while a session runs. */
 let sessionRunning = false;
@@ -42,6 +45,10 @@ const stored: Record<KeyProvider, string | null> = {
     keysParam === 'set' || keysParam === 'deepgram'
       ? 'fictional-initial-deepgram-key-0123456789'
       : null,
+  elevenlabs:
+    keysParam === 'set' || keysParam === 'elevenlabs'
+      ? 'sk_fictionalinitialelevenlabs0123456789abcdef0123'
+      : null,
   anthropic:
     keysParam === 'set' || keysParam === 'anthropic'
       ? 'sk-ant-api03-fictional-initial-anthropic-key-0123456789'
@@ -49,14 +56,17 @@ const stored: Record<KeyProvider, string | null> = {
 };
 const verified: Record<KeyProvider, boolean> = {
   deepgram: false,
+  elevenlabs: false,
   anthropic: false,
 };
 const rejected: Record<KeyProvider, boolean> = {
   deepgram: false,
+  elevenlabs: false,
   anthropic: false,
 };
 const unreadable: Record<KeyProvider, boolean> = {
   deepgram: keysParam === 'unreadable' || keysParam === 'unreadable-one',
+  elevenlabs: keysParam === 'unreadable',
   anthropic: keysParam === 'unreadable',
 };
 type TestOutcome = 'verified' | 'rejected' | { error: string };
@@ -82,11 +92,15 @@ function keyStatus(provider: KeyProvider): KeyStatus {
 
 function status(): KeysStatus {
   const deepgram = keyStatus('deepgram');
+  const elevenlabs = keyStatus('elevenlabs');
   const anthropic = keyStatus('anthropic');
   return {
     deepgram,
+    elevenlabs,
     anthropic,
-    anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    anyMissing:
+      (deepgram.state === 'notSet' && elevenlabs.state === 'notSet') ||
+      anthropic.state === 'notSet',
     store,
   };
 }
@@ -124,6 +138,19 @@ async function answer(name: string, args?: Record<string, string>) {
         throw new Error(
           'That does not look like a Deepgram API key. It is letters and digits only.',
         );
+      if (
+        provider === 'elevenlabs' &&
+        !(
+          (key.startsWith('sk_') &&
+            key.length >= 32 &&
+            key.length <= 256 &&
+            /^[A-Za-z0-9_-]+$/.test(key)) ||
+          (key.length >= 32 && key.length <= 64 && /^[0-9A-Fa-f]+$/.test(key))
+        )
+      )
+        throw new Error(
+          'That does not look like an ElevenLabs API key. It starts with sk_ (or is a 32-character hex key).',
+        );
       stored[provider] = key;
       verified[provider] = false;
       rejected[provider] = false;
@@ -147,8 +174,9 @@ async function answer(name: string, args?: Record<string, string>) {
         unreadable[provider] = false;
         return changed();
       }
-      // Fictional answers: Deepgram accepts, Anthropic refuses.
+      // Fictional answers: Deepgram and ElevenLabs accept, Anthropic refuses.
       if (provider === 'deepgram') verified.deepgram = true;
+      else if (provider === 'elevenlabs') verified.elevenlabs = true;
       else rejected.anthropic = true;
       return changed();
     }
@@ -160,6 +188,17 @@ async function answer(name: string, args?: Record<string, string>) {
       return changed();
     case 'cue_usage':
       return usage;
+    case 'transcription_provider':
+      return sttProvider;
+    case 'set_transcription_provider':
+      if (sessionRunning)
+        throw new Error(
+          'Change the transcription provider when no live session is running.',
+        );
+      if (args?.provider !== 'deepgram' && args?.provider !== 'elevenlabs')
+        throw new Error('invalid');
+      sttProvider = args.provider;
+      return sttProvider;
     case 'transcription_language':
       return language;
     case 'set_transcription_language':
@@ -185,6 +224,7 @@ export const providerKeysTest = {
   setSessionRunning(running: boolean) {
     sessionRunning = running;
   },
+  provider: () => sttProvider,
   language: () => language,
   setTestOutcome(provider: KeyProvider, outcome: TestOutcome) {
     testOverrides[provider] = structuredClone(outcome);
@@ -198,8 +238,9 @@ export const providerKeysTest = {
     release?.();
   },
   async emitStatus(next: KeysStatus) {
-    for (const provider of ['deepgram', 'anthropic'] as const) {
+    for (const provider of ['deepgram', 'elevenlabs', 'anthropic'] as const) {
       const entry = next[provider];
+      if (!entry) continue;
       unreadable[provider] = entry.state === 'unreadable';
       rejected[provider] = entry.state === 'rejected';
       verified[provider] = entry.state === 'set' && entry.verified;

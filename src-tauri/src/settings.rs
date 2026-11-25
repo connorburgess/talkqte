@@ -23,7 +23,7 @@
 use crate::{
     call_prompt,
     engine::{CompanionPosition, QuestionSize, Sensitivity},
-    transcription::cloud::Language,
+    transcription::cloud::{Language, Provider as TranscriptionProvider},
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -48,6 +48,7 @@ pub const NOTES_RATIO: (f64, f64) = (0.15, 0.85);
 /// Everything the file can hold, already validated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    pub transcription_provider: TranscriptionProvider,
     pub transcription_language: Language,
     /// One of `anthropic_api::MODELS`.
     pub notes_model: &'static str,
@@ -78,6 +79,7 @@ pub struct Panels {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            transcription_provider: TranscriptionProvider::Deepgram,
             transcription_language: Language::English,
             notes_model: crate::meeting_notes::DEFAULT_MODEL,
             question_size: QuestionSize::Standard,
@@ -174,6 +176,11 @@ pub fn parse(bytes: &[u8]) -> Settings {
         }
     }
     Settings {
+        transcription_provider: field(
+            &object,
+            "transcriptionProvider",
+            defaults.transcription_provider,
+        ),
         transcription_language: field(
             &object,
             "transcriptionLanguage",
@@ -200,6 +207,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
 pub fn render(settings: &Settings) -> Vec<u8> {
     let value = json!({
         "version": VERSION,
+        "transcriptionProvider": settings.transcription_provider,
         "transcriptionLanguage": settings.transcription_language,
         "notesModel": settings.notes_model,
         "questionSize": settings.question_size,
@@ -489,6 +497,7 @@ mod tests {
 
     fn chosen() -> Settings {
         Settings {
+            transcription_provider: TranscriptionProvider::ElevenLabs,
             transcription_language: Language::Multilingual,
             notes_model: "claude-haiku-5-5",
             question_size: QuestionSize::Large,
@@ -554,6 +563,7 @@ mod tests {
                 "questionSize",
                 "sensitivity",
                 "transcriptionLanguage",
+                "transcriptionProvider",
                 "userName",
                 "version"
             ]
@@ -649,6 +659,7 @@ mod tests {
         let parsed = parse(
             br#"{
                 "version": 1,
+                "transcriptionProvider": "other",
                 "transcriptionLanguage": "fr",
                 "notesModel": "some-other-model",
                 "questionSize": "large",

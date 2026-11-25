@@ -67,6 +67,8 @@ fn main() {
             "test_provider_key",
             "remove_provider_key",
             "cue_usage",
+            "transcription_provider",
+            "set_transcription_provider",
             "transcription_language",
             "set_transcription_language",
             "model_status",

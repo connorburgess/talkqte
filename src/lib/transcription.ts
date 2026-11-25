@@ -33,9 +33,9 @@ export function transcriptionLowText(
 const STOP_REASONS: Record<string, string> = {
   auth: 'the service refused the API key or credential. Replace the key in Settings',
   key_unavailable:
-    'your Deepgram key could not be read from the Keychain, or it was removed. Check it in Settings',
+    'your transcription key could not be read from the Keychain, or it was removed. Check it in Settings',
   quota:
-    'the account cannot pay for more audio. Add credit in your Deepgram account',
+    'the account cannot pay for more audio. Add credit in your transcription account',
   rate_limited: 'the service is limiting requests. Wait a minute',
   cap_reached: 'the transcription minute limit was reached',
   network: 'the connection failed or was lost. Check your internet connection',
@@ -86,12 +86,14 @@ export function transcriptionStopText(
   if (transcription.stopped === 'key_unavailable') {
     const os = knownPlatform()?.os;
     if (os === 'windows') {
-      reason =
-        'your Deepgram key could not be read from Windows Credential Manager, or it was removed. Check it in Settings';
+      reason = `your ${transcription.provider} key could not be read from Windows Credential Manager, or it was removed. Check it in Settings`;
     } else if (os === 'linux') {
-      reason =
-        'your Deepgram key could not be read from the keyring, or it was removed. Check it in Settings';
+      reason = `your ${transcription.provider} key could not be read from the keyring, or it was removed. Check it in Settings`;
+    } else {
+      reason = `your ${transcription.provider} key could not be read from the Keychain, or it was removed. Check it in Settings`;
     }
+  } else if (transcription.stopped === 'quota') {
+    reason = `the account cannot pay for more audio. Add credit in your ${transcription.provider} account`;
   }
   return `Transcription by ${transcription.provider} stopped: ${reason}. The live session ended; nothing fell back to another transcription service.`;
 }

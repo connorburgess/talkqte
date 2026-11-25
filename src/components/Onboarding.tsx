@@ -201,9 +201,10 @@ export function Onboarding({
                       <span className="ob-chip is-set">Alpha</span>
                     </div>
                     <p>
-                      With your own keys. Add your Deepgram and Anthropic keys
-                      in the next step; you pay them directly for what you use,
-                      and audio and text go from {device} to those providers.
+                      With your own keys. Add your Deepgram or ElevenLabs key
+                      and Anthropic key in the next step; you pay them directly
+                      for what you use, and audio and text go from {device} to
+                      those providers.
                     </p>
                   </div>
                   <div className="ob-way is-disabled" aria-disabled="true">
@@ -300,12 +301,13 @@ export function Onboarding({
                       Review processing → Review selected sources → Enable for
                       this session
                     </strong>{' '}
-                    names both services explicitly: <strong>Deepgram</strong>{' '}
-                    (session audio for transcription, up to 120 minutes per
-                    session) and <strong>Anthropic</strong> (up to six recent
-                    transcript lines, the cue on screen and earlier cues, and
-                    your session name if set, for cue decisions; never audio,
-                    your notes or focus lines).
+                    names both services explicitly:{' '}
+                    <strong>Deepgram or ElevenLabs</strong> (session audio for
+                    transcription, up to 120 minutes per session) and{' '}
+                    <strong>Anthropic</strong> (up to six recent transcript
+                    lines, the cue on screen and earlier cues, and your session
+                    name if set, for cue decisions; never audio, your notes or
+                    focus lines).
                   </li>
                   <li>
                     <strong>Stop</strong> ends the session, releases the

@@ -9,6 +9,7 @@ import type {} from './fixtures/native-microphone';
 // Fictional keys of the right shape; they reach no provider.
 const ANTHROPIC = 'sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
+const ELEVENLABS = 'sk_fictional0123456789abcdef0123456789abcdef01234567';
 
 async function openNative(page: Page) {
   await page.route('**/*', async (route) => {
@@ -37,7 +38,7 @@ test('browser preview fake: a new install shows both keys as not set, with what 
   const keys = page.getByRole('region', { name: 'Your API keys' });
   await expect(keys).toBeVisible();
   await expect(keys).toContainText("kept in your Mac's Keychain");
-  for (const name of ['Deepgram', 'Anthropic']) {
+  for (const name of ['Deepgram', 'ElevenLabs', 'Anthropic']) {
     await expect(row(page, name)).toContainText('Not set');
     await expect(
       row(page, name).getByRole('button', { name: 'Test key' }),
@@ -47,6 +48,7 @@ test('browser preview fake: a new install shows both keys as not set, with what 
     ).toBeDisabled();
   }
   await expect(row(page, 'Deepgram')).toContainText('per minute');
+  await expect(row(page, 'ElevenLabs')).toContainText('Scribe v2 Realtime');
   await expect(row(page, 'Anthropic')).toContainText('per token');
   await expect(keys).toContainText(
     'No session has used your Anthropic key yet.',
@@ -243,4 +245,44 @@ test('native fixture: the language is sent as en or multi, and a running session
     'Change the transcription language when no live session is running.',
   );
   await expect(choice).toHaveValue('multi');
+});
+
+test('native fixture: ElevenLabs key entry, test, removal, and Transcription provider selector work', async ({
+  page,
+}) => {
+  await openNative(page);
+  const elevenlabs = row(page, 'ElevenLabs');
+  await expect(elevenlabs).toContainText('Not set');
+  await elevenlabs.getByLabel('ElevenLabs API key').fill('not-an-el-key');
+  await elevenlabs.getByRole('button', { name: 'Save key' }).click();
+  await expect(elevenlabs.getByRole('alert')).toContainText(
+    'That does not look like an ElevenLabs API key.',
+  );
+  await elevenlabs.getByLabel('ElevenLabs API key').fill(ELEVENLABS);
+  await elevenlabs.getByRole('button', { name: 'Save key' }).click();
+  await expect(elevenlabs).toContainText('Set, not checked yet');
+  await expect(page.locator('body')).not.toContainText(ELEVENLABS);
+  await elevenlabs.getByRole('button', { name: 'Test key' }).click();
+  await expect(elevenlabs).toContainText('Set and checked');
+  await expect(elevenlabs).toContainText('ElevenLabs accepted the key.');
+
+  const providerChoice = page.getByLabel('Transcription provider');
+  await expect(providerChoice).toHaveValue('deepgram');
+  await providerChoice.selectOption('elevenlabs');
+  await expect
+    .poll(() => page.evaluate(() => window.providerKeysTest.provider()))
+    .toBe('elevenlabs');
+  await expect(page.locator('body')).toContainText(
+    'detect languages automatically',
+  );
+
+  await page.evaluate(() => window.providerKeysTest.setSessionRunning(true));
+  await providerChoice.selectOption('deepgram');
+  await expect(page.getByRole('alert')).toHaveText(
+    'Change the transcription provider when no live session is running.',
+  );
+  await expect(providerChoice).toHaveValue('elevenlabs');
+
+  await elevenlabs.getByRole('button', { name: 'Remove key' }).click();
+  await expect(elevenlabs).toContainText('Not set');
 });

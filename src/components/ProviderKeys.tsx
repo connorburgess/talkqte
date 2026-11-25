@@ -6,10 +6,13 @@ import {
   removeKey,
   setKey,
   setTranscriptionLanguage,
+  setTranscriptionProvider,
   testKey,
   transcriptionLanguage,
+  transcriptionProvider,
   watchKeys,
   type TranscriptionLanguage,
+  type TranscriptionProvider,
   type CueUsage,
   type KeyProvider,
   type KeyStatus,
@@ -32,6 +35,12 @@ const providers: {
     whereToGet: 'Deepgram Console (console.deepgram.com) → API Keys',
   },
   {
+    id: 'elevenlabs',
+    name: 'ElevenLabs',
+    role: "Alternative to Deepgram: transcribes a live session's audio using Scribe v2 Realtime. Billed by ElevenLabs per your account, at most 120 minutes per session.",
+    whereToGet: 'ElevenLabs (elevenlabs.io) → Developers → API Keys',
+  },
+  {
     id: 'anthropic',
     name: 'Anthropic',
     role: 'Decides when a cue would help, from recent lines. Billed by Anthropic per token.',
@@ -47,11 +56,13 @@ export function isKeysStatus(value: unknown): value is KeysStatus {
       (v as KeyStatus).state,
     ) &&
     typeof (v as KeyStatus).verified === 'boolean';
+  const candidate = value as KeysStatus | null;
   return (
-    !!value &&
-    typeof value === 'object' &&
-    key((value as KeysStatus).deepgram) &&
-    key((value as KeysStatus).anthropic)
+    !!candidate &&
+    typeof candidate === 'object' &&
+    key(candidate.deepgram) &&
+    (candidate.elevenlabs === undefined || key(candidate.elevenlabs)) &&
+    key(candidate.anthropic)
   );
 }
 
@@ -109,7 +120,8 @@ function NoKeyStore({ store }: { store: KeyStore | undefined }) {
       Keys cannot be saved on this system yet. TalkQTE keeps them only in{' '}
       {keyStoreName(store.kind)}, and none answered for this login. On Ubuntu,
       sign in to a desktop session with GNOME Keyring (Passwords and Keys)
-      unlocked, then reopen Settings. Live sessions need both keys.
+      unlocked, then reopen Settings. Live sessions need a transcription key and
+      an Anthropic key.
     </p>
   );
 }
@@ -154,19 +166,22 @@ function useProviderKeysData(includeUsage: boolean) {
 /** The person's own provider keys, and this session's use of them. Keys go
  * to the Keychain through Rust and are never shown again; only their state
  * comes back. */
-export function ProviderKeys() {
+export function ProviderKeys({ onLiveChange }: { onLiveChange?: () => void }) {
   const { status, setStatus, unavailable, setUnavailable, usage } =
     useProviderKeysData(true);
+  const [selectedProvider, setSelectedProvider] =
+    useState<TranscriptionProvider>('deepgram');
 
   return (
     <section className="provider-keys" aria-labelledby="provider-keys-title">
       <div className="provider-keys-intro">
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
-          TalkQTE runs on your own accounts. Live sessions need both keys. Each
-          is kept in {keyStoreName(status?.store?.kind)} and is never shown
-          again. Nothing is sent to either provider until you approve a
-          session's processing review.
+          TalkQTE runs on your own accounts. Live sessions need a transcription
+          key (Deepgram or ElevenLabs) and an Anthropic key. Each is kept in{' '}
+          {keyStoreName(status?.store?.kind)} and is never shown again. Nothing
+          is sent to either provider until you approve a session's processing
+          review.
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (
@@ -185,15 +200,22 @@ export function ProviderKeys() {
             onStatus={(next) => {
               setStatus(next);
               setUnavailable(false);
+              onLiveChange?.();
             }}
           />
         ))}
-        <p className="provider-keys-usage" role="status">
+        <p className="provider-key-usage" role="status">
           {usage
             ? `This session: ${usage.requests} of ${usage.requestCap} cue requests, about ${dollars(usage.spentMicroUsd)} of ${dollars(usage.spendCapMicroUsd)} (an estimate, not your bill), model ${usage.model}.`
             : 'No session has used your Anthropic key yet.'}
         </p>
-        <LanguageChoice />
+        <ProviderChoice
+          onChanged={(next) => {
+            setSelectedProvider(next);
+            onLiveChange?.();
+          }}
+        />
+        <LanguageChoice provider={selectedProvider} />
         <MeetingNotesModel />
       </div>
     </section>
@@ -354,7 +376,7 @@ function KeyRow({
               'test',
               () => testKey(provider.id),
               (next) =>
-                next[provider.id].state === 'rejected'
+                next[provider.id]?.state === 'rejected'
                   ? `${provider.name} rejected the key.`
                   : `${provider.name} accepted the key.`,
             )
@@ -391,10 +413,78 @@ function KeyRow({
   );
 }
 
-/** One plain control: which language Deepgram transcribes in the next live
- * session. Deepgram cannot switch by itself on a live stream, so the choice
- * is made before a session starts. */
-function LanguageChoice() {
+/** Which cloud service transcribes the next live session. */
+function ProviderChoice({
+  onChanged,
+}: {
+  onChanged: (provider: TranscriptionProvider) => void;
+}) {
+  const id = useId();
+  const [provider, setProvider] = useState<TranscriptionProvider>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    transcriptionProvider().then(
+      (value) => {
+        if (!live) return;
+        const normalized = value === 'elevenlabs' ? 'elevenlabs' : 'deepgram';
+        setProvider(normalized);
+        onChanged(normalized);
+      },
+      () => live && setProvider('deepgram'),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <div className="provider-key provider-language">
+      <label htmlFor={`${id}-provider`}>Transcription provider</label>
+      <select
+        id={`${id}-provider`}
+        value={provider ?? 'deepgram'}
+        disabled={provider === undefined}
+        aria-describedby={`${id}-provider-help${error ? ` ${id}-provider-error` : ''}`}
+        onChange={(event) => {
+          const next =
+            event.target.value === 'elevenlabs' ? 'elevenlabs' : 'deepgram';
+          setError('');
+          setTranscriptionProvider(next).then(
+            (value) => {
+              setProvider(value);
+              onChanged(value);
+            },
+            (failure) =>
+              setError(
+                message(failure, 'The transcription provider was not changed.'),
+              ),
+          );
+        }}
+      >
+        <option value="deepgram">Deepgram</option>
+        <option value="elevenlabs">ElevenLabs</option>
+      </select>
+      <p id={`${id}-provider-help`} className="provider-key-role">
+        Choose which service transcribes your audio (Deepgram Nova-3 or
+        ElevenLabs Scribe v2 Realtime); saved in Settings and used from the next
+        live session.
+      </p>
+      {error && (
+        <p
+          id={`${id}-provider-error`}
+          className="provider-keys-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One plain control: which language the active provider transcribes in the
+ * next live session. */
+function LanguageChoice({ provider }: { provider: TranscriptionProvider }) {
   const id = useId();
   const [language, setLanguage] = useState<TranscriptionLanguage>();
   const [error, setError] = useState('');
@@ -430,12 +520,13 @@ function LanguageChoice() {
         <option value="multi">Multilingual</option>
       </select>
       <p id={`${id}-language-help`} className="provider-key-role">
-        Applies to the next live session, never one already running.
-        Multilingual follows several languages and switches between them, and
-        Deepgram bills it at a higher rate than English. Phrase-rule cues
-        understand English only; a question that opens with your name and ends
-        in a question mark is noticed in any language; model cues work on what
-        the model understands.
+        Applies to the next live session, never one already running.{' '}
+        {provider === 'elevenlabs'
+          ? 'English sets language_code=en; Multilingual lets ElevenLabs Scribe v2 Realtime detect languages automatically.'
+          : 'Multilingual follows several languages and switches between them, and Deepgram bills it at a higher rate than English.'}{' '}
+        Phrase-rule cues understand English only; a question that opens with
+        your name and ends in a question mark is noticed in any language; model
+        cues work on what the model understands.
       </p>
       {error && (
         <p

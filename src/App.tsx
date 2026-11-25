@@ -51,7 +51,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { keysStatus, type KeysStatus } from './lib/providerKeys';
+import { keysStatus, watchKeys, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
@@ -1023,13 +1023,14 @@ function Notebook() {
       return;
     if (onboardingChecked.current) return;
     onboardingChecked.current = true;
-    // Auto-open once per launch only when both keys are notSet (an unreadable
+    // Auto-open once per launch only when all keys are notSet (an unreadable
     // key is not missing), live transcription is unavailable for that reason
     // (a development or lab launch with its own credentials stays on the
     // notebook) and no session is active.
     if (
       !liveStatus.available &&
       initialKeys.deepgram.state === 'notSet' &&
+      (!initialKeys.elevenlabs || initialKeys.elevenlabs.state === 'notSet') &&
       initialKeys.anthropic.state === 'notSet' &&
       !preparing &&
       !finishing &&
@@ -1101,6 +1102,17 @@ function Notebook() {
       confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
+  const refreshLiveStatus = useCallback(() => {
+    bridge
+      .liveStatus()
+      .then((status) => setLiveStatus(status))
+      .catch(() =>
+        setLiveStatus({
+          available: false,
+          reason: 'Live transcription status is unavailable.',
+        }),
+      );
+  }, []);
   useEffect(() => {
     let current = true;
     setLiveStatus(null);
@@ -1116,10 +1128,20 @@ function Notebook() {
             reason: 'Live transcription status is unavailable.',
           });
       });
+    let stopWatch: (() => void) | undefined;
+    if (bridge.desktop) {
+      void watchKeys(() => {
+        if (current) refreshLiveStatus();
+      }).then((unlisten) => {
+        if (current) stopWatch = unlisten;
+        else unlisten();
+      });
+    }
     return () => {
       current = false;
+      stopWatch?.();
     };
-  }, []);
+  }, [refreshLiveStatus]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -1492,6 +1514,9 @@ function Notebook() {
             }
           >
             <ProcessingControl
+              transcriptionProvider={
+                state?.transcription?.provider ?? liveStatus?.transcription
+              }
               status={{
                 snapshot: capture.state,
                 failed: capture.statusError,
@@ -2201,7 +2226,10 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
-            <ProviderKeys key={settingsEpoch} />
+            <ProviderKeys
+              key={settingsEpoch}
+              onLiveChange={refreshLiveStatus}
+            />
             {keysAvailable && (
               <section className="setting">
                 <div>
@@ -2428,11 +2456,13 @@ function Notebook() {
                   Start live session in the notebook to get questions from what
                   your microphone hears and, on a Mac, from one application you
                   choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: the session’s audio is sent to
-                  Deepgram with your key once you enable cue processing for that
-                  session. Audio is not recorded by TalkQTE. The transcript
-                  stays in memory until you start another session or close the
-                  app, unless you choose to keep the meeting and export it.
+                  transcribe on this device: the session’s audio is sent to{' '}
+                  {liveStatus?.transcription ??
+                    'your chosen provider (Deepgram or ElevenLabs)'}{' '}
+                  with your key once you enable cue processing for that session.
+                  Audio is not recorded by TalkQTE. The transcript stays in
+                  memory until you start another session or close the app,
+                  unless you choose to keep the meeting and export it.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus

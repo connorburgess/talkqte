@@ -909,7 +909,7 @@ impl Engine {
         self.state.cue = None;
         self.state.transcription = (self.state.live && crate::transcription::cloud::selected())
             .then(|| CloudTranscription {
-                provider: crate::transcription::cloud::PROVIDER.into(),
+                provider: crate::transcription::cloud::active_provider_name().into(),
                 stopped: None,
                 dropped_audio: false,
                 reconnects: 0,
@@ -2321,8 +2321,11 @@ impl Engine {
             out.push('\n');
         }
         out.push_str("\n## Transcript\n\n");
-        if self.state.transcription.is_some() {
-            out.push_str("Transcribed by Deepgram. Speakers are not identified.\n\n");
+        if let Some(transcription) = &self.state.transcription {
+            out.push_str(&format!(
+                "Transcribed by {}. Speakers are not identified.\n\n",
+                transcription.provider
+            ));
         }
         let two = self
             .sources()
