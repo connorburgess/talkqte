@@ -6,7 +6,7 @@ import {
   keepMeetingNotes,
   meetingNotesPlan,
   meetingNotesResult,
-  notesModels,
+  notesModelsByProvider,
   planChanged,
   writeMeetingNotes,
   type CheckItem,
@@ -161,13 +161,33 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
     }
   };
 
-  const care = (id: string) =>
-    notesModels.find((model) => model.id === id)?.label ?? 'Custom';
+  const care = (modelId: string, custom?: boolean) => {
+    if (custom) return 'Custom';
+    for (const list of Object.values(notesModelsByProvider)) {
+      const found = list.find((model) => model.id === modelId);
+      if (found) return found.label;
+    }
+    return 'Custom';
+  };
+  const providerConsole = (providerName?: string) => {
+    switch (providerName) {
+      case 'OpenAI':
+        return 'OpenAI Platform';
+      case 'Gemini':
+        return 'Google AI Studio';
+      default:
+        return 'Anthropic Console';
+    }
+  };
   if (!ended && phase === 'none') return null;
+  const resultProvider = result?.providerName ?? result?.draft?.providerName;
+  const resultCustom = result?.customModel ?? result?.draft?.customModel;
   const cost =
-    result?.spentMicroUsd !== undefined
+    result?.spentMicroUsd !== undefined && result?.spentMicroUsd !== null
       ? ` Estimated cost of this request: about ${dollars(result.spentMicroUsd)} (an estimate, not your bill).`
-      : ' The API did not report what this request cost; your Anthropic Console shows it.';
+      : resultCustom
+        ? ` Estimated cost unavailable for custom model; your ${providerConsole(resultProvider)} shows it.`
+        : ` The API did not report what this request cost; your ${providerConsole(resultProvider)} shows it.`;
 
   const chip =
     phase === 'writing'
@@ -202,7 +222,7 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
         <>
           <p className="meeting-notes-help">
             A model can write a short summary, decisions, action items and open
-            questions from this meeting's transcript, using your Anthropic key.
+            questions from this meeting's transcript, using your chosen API key.
             You see what will be sent and an estimated cost first; nothing is
             sent until you confirm. Each meeting gets one request.
           </p>
@@ -224,7 +244,7 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
           aria-labelledby={`${id}-confirm`}
         >
           <h3 id={`${id}-confirm`} ref={confirmHeading} tabIndex={-1}>
-            Send this meeting to Anthropic?
+            Send this meeting to {plan.providerName ?? 'Anthropic'}?
           </h3>
           <p>
             This sends this session's transcript: {plan.transcriptLines}{' '}
@@ -253,23 +273,41 @@ export function MeetingNotes({ snapshot }: { snapshot: Snapshot }) {
           <div className="meeting-notes-summary">
             <p>To: {plan.destination}.</p>
             <p>
-              Notes setting: {care(plan.model)}, model {plan.model}. Change it
-              in Settings before sending.
+              Notes setting: {care(plan.model, plan.customModel)}, model{' '}
+              {plan.model}. Change it in Settings before sending.
             </p>
             <p>
-              Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
-              {dollars(plan.worstMicroUsd)}
-              {plan.cueSpentMicroUsd
-                ? `, on top of about ${dollars(plan.cueSpentMicroUsd)} for this meeting's cues`
-                : ''}
-              . An estimate, not your bill; one meeting's notes may not be
-              estimated above {dollars(plan.spendCapMicroUsd)}.
+              {plan.likelyMicroUsd !== undefined &&
+              plan.likelyMicroUsd !== null &&
+              plan.worstMicroUsd !== undefined &&
+              plan.worstMicroUsd !== null &&
+              plan.spendCapMicroUsd !== undefined &&
+              plan.spendCapMicroUsd !== null &&
+              !plan.customModel ? (
+                <>
+                  Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
+                  {dollars(plan.worstMicroUsd)}
+                  {plan.cueSpentMicroUsd
+                    ? `, on top of about ${dollars(plan.cueSpentMicroUsd)} for this meeting's cues`
+                    : ''}
+                  . An estimate, not your bill; one meeting's notes may not be
+                  estimated above {dollars(plan.spendCapMicroUsd)}.
+                </>
+              ) : (
+                <>
+                  Estimated cost unavailable for custom model
+                  {plan.cueSpentMicroUsd
+                    ? ` (cues so far: about ${dollars(plan.cueSpentMicroUsd)})`
+                    : ''}
+                  . This model is outside TalkQTE's built-in price table.
+                </>
+              )}
             </p>
           </div>
           <p className="meeting-notes-help">
             One request, no retry: if it fails, nothing more is sent for this
-            meeting. Anthropic handles what is sent under your API account's
-            terms, and it cannot be recalled once sent.
+            meeting. {plan.providerName ?? 'Anthropic'} handles what is sent
+            under your API account's terms, and it cannot be recalled once sent.
           </p>
           <div className="meeting-notes-actions">
             <button

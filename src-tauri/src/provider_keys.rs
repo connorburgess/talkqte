@@ -1,5 +1,5 @@
-//! The person's own provider keys: one Deepgram key for transcription and one
-//! Anthropic API key for cue decisions.
+//! The person's own provider keys: one Deepgram key for transcription, and
+//! API keys for cue decisions and meeting notes (Anthropic, OpenAI, or Gemini).
 //!
 //! Keys live only in the system's secret store under the service
 //! [`SERVICE`]: the login Keychain on macOS (generic passwords), Windows
@@ -28,22 +28,26 @@ pub mod windows;
 /// The Keychain service every TalkQTE provider key is stored under.
 pub const SERVICE: &str = "app.talkqte.provider-key";
 
-/// The two providers a key can be entered for.
+/// The providers a key can be entered for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Deepgram,
     Anthropic,
+    OpenAi,
+    Gemini,
 }
 
 impl Provider {
-    pub const ALL: [Self; 2] = [Self::Deepgram, Self::Anthropic];
+    pub const ALL: [Self; 4] = [Self::Deepgram, Self::Anthropic, Self::OpenAi, Self::Gemini];
 
     /// The Keychain account name for this provider's key.
     pub fn account(self) -> &'static str {
         match self {
             Self::Deepgram => "deepgram",
             Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
         }
     }
 
@@ -51,6 +55,8 @@ impl Provider {
         match self {
             Self::Deepgram => "Deepgram",
             Self::Anthropic => "Anthropic",
+            Self::OpenAi => "OpenAI",
+            Self::Gemini => "Gemini",
         }
     }
 
@@ -58,6 +64,8 @@ impl Provider {
         match self {
             Self::Deepgram => 0,
             Self::Anthropic => 1,
+            Self::OpenAi => 2,
+            Self::Gemini => 3,
         }
     }
 }
@@ -106,6 +114,24 @@ pub fn validate(provider: Provider, text: &str) -> Result<Secret, KeyError> {
         Provider::Deepgram => {
             (32..=128).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_alphanumeric())
         }
+        // Standard OpenAI API keys start with `sk-` (including `sk-proj-`, etc.).
+        // Reject `sk-ant-` so Anthropic keys are refused here.
+        Provider::OpenAi => {
+            key.starts_with("sk-")
+                && !key.starts_with("sk-ant-")
+                && (20..=256).contains(&key.len())
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }
+        // Google AI Studio API keys start with `AIza`.
+        Provider::Gemini => {
+            key.starts_with("AIza")
+                && (30..=128).contains(&key.len())
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }
     };
     if ok {
         Ok(Secret(Zeroizing::new(key.to_string())))
@@ -134,17 +160,31 @@ impl KeyError {
             Self::Shape(Provider::Deepgram) => {
                 "That does not look like a Deepgram API key. It is letters and digits only."
             }
+            Self::Shape(Provider::OpenAi) => {
+                "That does not look like an OpenAI API key. It starts with sk-."
+            }
+            Self::Shape(Provider::Gemini) => {
+                "That does not look like a Gemini API key. It starts with AIza."
+            }
             Self::Store => store_failure_message(),
             Self::NoStore => {
                 "This system has no keyring TalkQTE can use, so keys cannot be saved here yet. Nothing was changed."
             }
             Self::NotSet(Provider::Anthropic) => "No Anthropic key is set.",
             Self::NotSet(Provider::Deepgram) => "No Deepgram key is set.",
+            Self::NotSet(Provider::OpenAi) => "No OpenAI key is set.",
+            Self::NotSet(Provider::Gemini) => "No Gemini key is set.",
             Self::Unreachable(Provider::Anthropic) => {
                 "Anthropic could not be reached to check the key. Nothing was changed."
             }
             Self::Unreachable(Provider::Deepgram) => {
                 "Deepgram could not be reached to check the key. Nothing was changed."
+            }
+            Self::Unreachable(Provider::OpenAi) => {
+                "OpenAI could not be reached to check the key. Nothing was changed."
+            }
+            Self::Unreachable(Provider::Gemini) => {
+                "Gemini could not be reached to check the key. Nothing was changed."
             }
         }
     }
@@ -328,13 +368,16 @@ pub struct StoreStatus {
     pub available: bool,
 }
 
-/// Both keys' states, the whole payload the notebook receives.
+/// All provider keys' states, the whole payload the notebook receives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeysStatus {
     pub deepgram: KeyStatus,
     pub anthropic: KeyStatus,
-    /// At least one key is not set: what a first-run screen asks for.
+    pub openai: KeyStatus,
+    pub gemini: KeyStatus,
+    /// True when Deepgram is not set or no cue provider key is set: what a
+    /// first-run screen asks for.
     pub any_missing: bool,
     pub store: StoreStatus,
 }
@@ -364,7 +407,7 @@ struct Memo {
 pub struct Keys {
     store: Box<dyn SecretStore>,
     probe: Box<dyn Probe>,
-    memo: Mutex<[Memo; 2]>,
+    memo: Mutex<[Memo; 4]>,
 }
 
 impl Keys {
@@ -372,11 +415,11 @@ impl Keys {
         Self {
             store,
             probe,
-            memo: Mutex::new([Memo::default(); 2]),
+            memo: Mutex::new([Memo::default(); 4]),
         }
     }
 
-    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 2]> {
+    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 4]> {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -410,7 +453,7 @@ impl Keys {
         (status, no_store)
     }
 
-    /// Both keys' states, read from the store again, so a key deleted or
+    /// All keys' states, read from the store again, so a key deleted or
     /// added outside TalkQTE is seen.
     pub fn status(&self) -> KeysStatus {
         for memo in self.memo().iter_mut() {
@@ -418,13 +461,23 @@ impl Keys {
         }
         let (deepgram, deepgram_no_store) = self.key_status(Provider::Deepgram);
         let (anthropic, anthropic_no_store) = self.key_status(Provider::Anthropic);
+        let (openai, openai_no_store) = self.key_status(Provider::OpenAi);
+        let (gemini, gemini_no_store) = self.key_status(Provider::Gemini);
+        let cue_missing = anthropic.state == KeyState::NotSet
+            && openai.state == KeyState::NotSet
+            && gemini.state == KeyState::NotSet;
         KeysStatus {
             deepgram,
             anthropic,
-            any_missing: deepgram.state == KeyState::NotSet || anthropic.state == KeyState::NotSet,
+            openai,
+            gemini,
+            any_missing: deepgram.state == KeyState::NotSet || cue_missing,
             store: StoreStatus {
                 kind: self.store.kind(),
-                available: !(deepgram_no_store || anthropic_no_store),
+                available: !(deepgram_no_store
+                    || anthropic_no_store
+                    || openai_no_store
+                    || gemini_no_store),
             },
         }
     }
@@ -531,6 +584,18 @@ impl Probe for NetworkProbe {
                 .header("x-api-key", key.expose())
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .call(),
+            Provider::OpenAi => agent
+                .get("https://api.openai.com/v1/models")
+                .header(
+                    "Authorization",
+                    Zeroizing::new(format!("Bearer {}", key.expose())).as_str(),
+                )
+                .call(),
+            // Never pass the key in the query string so it cannot leak into URLs or logs.
+            Provider::Gemini => agent
+                .get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1")
+                .header("x-goog-api-key", key.expose())
+                .call(),
         };
         // The body is never read: only the status matters, and nothing the
         // provider says reaches a log or the notebook.
@@ -581,6 +646,8 @@ mod tests {
 
     const ANTHROPIC: &str = "sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ";
     const DEEPGRAM: &str = "0123456789abcdef0123456789abcdef01234567";
+    const OPENAI: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
+    const GEMINI: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
 
     /// A store that records every call, so a test can see what was written.
     #[derive(Clone, Default)]
@@ -654,6 +721,8 @@ mod tests {
             KeysStatus {
                 deepgram: not_set(),
                 anthropic: not_set(),
+                openai: not_set(),
+                gemini: not_set(),
                 any_missing: true,
                 store: StoreStatus {
                     kind: StoreKind::Memory,
@@ -666,6 +735,8 @@ mod tests {
             serde_json::json!({
                 "deepgram": {"state": "notSet", "verified": false},
                 "anthropic": {"state": "notSet", "verified": false},
+                "openai": {"state": "notSet", "verified": false},
+                "gemini": {"state": "notSet", "verified": false},
                 "anyMissing": true,
                 "store": {"kind": "memory", "available": true},
             })
@@ -952,5 +1023,71 @@ mod tests {
             NoNetwork.check(Provider::Deepgram, &Secret::for_test(DEEPGRAM)),
             ProbeResult::Unreachable
         );
+    }
+
+    #[test]
+    fn openai_and_gemini_keys_are_validated_stored_and_tested_like_anthropic() {
+        let (keys, store, probe) = keys(ProbeResult::Accepted);
+        for (provider, bad) in [
+            (Provider::OpenAi, ""),
+            (Provider::OpenAi, "sk-short"),
+            (Provider::OpenAi, ANTHROPIC),
+            (Provider::OpenAi, "sk-proj-with space 0123456789abcdef"),
+            (Provider::OpenAi, GEMINI),
+            (Provider::Gemini, ""),
+            (Provider::Gemini, "AIzaShort"),
+            (Provider::Gemini, "AIzaWithSpace 0123456789abcdefghijklm"),
+            (Provider::Gemini, OPENAI),
+            (Provider::Gemini, DEEPGRAM),
+        ] {
+            let err = keys.set(provider, bad).unwrap_err();
+            assert_eq!(err, KeyError::Shape(provider), "{provider:?}");
+            assert!(bad.is_empty() || !err.message().contains(bad));
+        }
+        assert!(store.writes.lock().unwrap().is_empty());
+
+        keys.set(Provider::OpenAi, &format!("  {OPENAI}\n"))
+            .unwrap();
+        keys.set(Provider::Gemini, &format!("  {GEMINI}\n"))
+            .unwrap();
+        assert_eq!(store.inner.get("openai").unwrap().unwrap().expose(), OPENAI);
+        assert_eq!(store.inner.get("gemini").unwrap().unwrap().expose(), GEMINI);
+        // Deepgram is still missing, so any_missing stays true.
+        assert!(keys.status().any_missing);
+        keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
+        // With Deepgram and OpenAI/Gemini set (and Anthropic still unset), nothing is missing.
+        assert!(!keys.status().any_missing);
+
+        let status = keys.test(Provider::OpenAi).unwrap();
+        assert_eq!(
+            status.openai,
+            KeyStatus {
+                state: KeyState::Set,
+                verified: true,
+            }
+        );
+        let status = keys.test(Provider::Gemini).unwrap();
+        assert_eq!(
+            status.gemini,
+            KeyStatus {
+                state: KeyState::Set,
+                verified: true,
+            }
+        );
+        assert_eq!(
+            *probe.0.lock().unwrap(),
+            [
+                (Provider::OpenAi, OPENAI.to_string()),
+                (Provider::Gemini, GEMINI.to_string()),
+            ]
+        );
+
+        keys.mark_rejected(Provider::OpenAi);
+        assert_eq!(keys.status().openai.state, KeyState::Rejected);
+        keys.remove(Provider::OpenAi).unwrap();
+        assert_eq!(keys.status().openai, not_set());
+        keys.remove(Provider::Gemini).unwrap();
+        assert_eq!(keys.status().gemini, not_set());
+        assert!(keys.status().any_missing);
     }
 }

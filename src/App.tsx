@@ -51,7 +51,7 @@ import {
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { keysStatus, type KeysStatus } from './lib/providerKeys';
+import { keysStatus, watchKeys, type KeysStatus } from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
@@ -1031,6 +1031,8 @@ function Notebook() {
       !liveStatus.available &&
       initialKeys.deepgram.state === 'notSet' &&
       initialKeys.anthropic.state === 'notSet' &&
+      (!initialKeys.openai || initialKeys.openai.state === 'notSet') &&
+      (!initialKeys.gemini || initialKeys.gemini.state === 'notSet') &&
       !preparing &&
       !finishing &&
       !state.live
@@ -1101,6 +1103,19 @@ function Notebook() {
       confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
+  const refreshLiveStatus = () => {
+    bridge
+      .liveStatus()
+      .then((status) => {
+        setLiveStatus(status);
+      })
+      .catch(() => {
+        setLiveStatus({
+          available: false,
+          reason: 'Live transcription status is unavailable.',
+        });
+      });
+  };
   useEffect(() => {
     let current = true;
     setLiveStatus(null);
@@ -1116,10 +1131,18 @@ function Notebook() {
             reason: 'Live transcription status is unavailable.',
           });
       });
+    let stopKeys: (() => void) | undefined;
+    watchKeys(() => {
+      if (current) refreshLiveStatus();
+    }).then(
+      (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
+      () => {},
+    );
     return () => {
       current = false;
+      stopKeys?.();
     };
-  }, []);
+  }, [settingsEpoch]);
   const returnToExport = useRef(false);
   useEffect(() => {
     if (preview !== null) modal.current?.showModal();
@@ -2201,7 +2224,10 @@ function Notebook() {
             <p className="page-description">
               A few controls to keep questions on your terms.
             </p>
-            <ProviderKeys key={settingsEpoch} />
+            <ProviderKeys
+              key={settingsEpoch}
+              onPreferencesChange={refreshLiveStatus}
+            />
             {keysAvailable && (
               <section className="setting">
                 <div>
