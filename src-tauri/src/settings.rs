@@ -88,6 +88,9 @@ pub struct Settings {
     pub keep_running_in_menu_bar: bool,
     /// What to do with a non-empty live session when it ends.
     pub after_session_keep: AfterSessionKeep,
+    /// Check for signed app updates when TalkQTE launches (ignored in lab
+    /// runs and in builds without an update-signing public key).
+    pub check_for_updates_at_launch: bool,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -118,6 +121,7 @@ impl Default for Settings {
             call_prompt_not_for: Vec::new(),
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
+            check_for_updates_at_launch: true,
         }
     }
 }
@@ -244,6 +248,11 @@ pub fn parse(bytes: &[u8]) -> Settings {
             defaults.keep_running_in_menu_bar,
         ),
         after_session_keep: field(&object, "afterSessionKeep", defaults.after_session_keep),
+        check_for_updates_at_launch: field(
+            &object,
+            "checkForUpdatesAtLaunch",
+            defaults.check_for_updates_at_launch,
+        ),
     }
 }
 
@@ -270,6 +279,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
         },
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
+        "checkForUpdatesAtLaunch": settings.check_for_updates_at_launch,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -566,6 +576,7 @@ mod tests {
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
+            check_for_updates_at_launch: false,
         }
     }
 
@@ -610,6 +621,7 @@ mod tests {
             [
                 "afterSessionKeep",
                 "callPrompt",
+                "checkForUpdatesAtLaunch",
                 "companionPosition",
                 "cueModelOverride",
                 "cueProvider",
@@ -734,7 +746,8 @@ mod tests {
                     "notFor": ["us.zoom.xos", "com.example.unknown", 4, "us.zoom.xos"]
                 },
                 "transcript": "an unknown field is ignored",
-                "keys": { "anthropic": "never read" }
+                "keys": { "anthropic": "never read" },
+                "checkForUpdatesAtLaunch": "yes"
             }"#,
         );
         assert_eq!(

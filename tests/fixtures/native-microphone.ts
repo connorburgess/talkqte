@@ -16,6 +16,12 @@ import type {
 } from '../../src/lib/dictation';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type {
+  AvailableUpdate,
+  UpdateHoldReason,
+  UpdatePhase,
+  UpdateStatus,
+} from '../../src/lib/updates';
+import type {
   ApplicationAudioAction,
   ApplicationAudioStatus,
   ProcessingSnapshot,
@@ -131,6 +137,101 @@ const presenceReply = () => ({
   keepRunning: presence.keepRunning,
   openAtLogin: presence.openAtLogin,
 });
+
+type StandInUpdatesConfig = {
+  currentVersion?: string;
+  configured?: boolean;
+  labRun?: boolean;
+  checkAtLaunch?: boolean;
+  available?: AvailableUpdate | null;
+  phase?: UpdatePhase;
+  nextCheck?: 'upToDate' | { available: AvailableUpdate } | { error: string };
+  nextInstall?: 'ok' | { error: string };
+};
+
+const initialUpdates = (
+  window as typeof window & { standInUpdates?: StandInUpdatesConfig }
+).standInUpdates;
+
+const updatesState = {
+  currentVersion: initialUpdates?.currentVersion ?? '0.1.0',
+  configured: initialUpdates?.configured ?? true,
+  labRun:
+    initialUpdates?.labRun ?? new URLSearchParams(location.search).has('lab'),
+  checkAtLaunch: initialUpdates?.checkAtLaunch ?? true,
+  phase: (initialUpdates?.phase ??
+    (initialUpdates?.available ? 'available' : 'idle')) as UpdatePhase,
+  available: (initialUpdates?.available ?? null) as AvailableUpdate | null,
+  downloadedBytes: undefined as number | undefined,
+  totalBytes: undefined as number | undefined,
+  error: undefined as string | undefined,
+  nextCheck: (initialUpdates?.nextCheck ?? 'upToDate') as
+    'upToDate' | { available: AvailableUpdate } | { error: string },
+  nextInstall: (initialUpdates?.nextInstall ?? 'ok') as
+    'ok' | { error: string },
+  restarts: 0,
+  checks: 0,
+};
+
+function currentUpdateHold(): UpdateHoldReason | null {
+  if (
+    session?.live &&
+    (session.status === 'running' || session.status === 'paused')
+  ) {
+    return 'liveSession';
+  }
+  if (
+    dictation.status === 'starting' ||
+    dictation.status === 'listening' ||
+    dictation.status === 'stopping'
+  ) {
+    return 'dictation';
+  }
+  if (
+    microphone.status === 'starting' ||
+    microphone.status === 'listening' ||
+    microphone.status === 'stopping'
+  ) {
+    return 'microphone';
+  }
+  return null;
+}
+
+function currentUpdateStatus(): UpdateStatus {
+  const hold = currentUpdateHold();
+  if (hold) {
+    return {
+      currentVersion: updatesState.currentVersion,
+      configured: updatesState.configured,
+      checkAtLaunch: updatesState.labRun ? false : updatesState.checkAtLaunch,
+      labRun: updatesState.labRun,
+      phase: updatesState.available ? 'deferred' : 'idle',
+      hold,
+      available: null,
+    };
+  }
+  const phase =
+    updatesState.available && updatesState.phase === 'deferred'
+      ? 'available'
+      : updatesState.phase;
+  return {
+    currentVersion: updatesState.currentVersion,
+    configured: updatesState.configured,
+    checkAtLaunch: updatesState.labRun ? false : updatesState.checkAtLaunch,
+    labRun: updatesState.labRun,
+    phase,
+    hold: null,
+    available: updatesState.available,
+    downloadedBytes: updatesState.downloadedBytes,
+    totalBytes: updatesState.totalBytes,
+    error: updatesState.error,
+  };
+}
+
+let lastEmittedUpdateHold: UpdateHoldReason | null = null;
+async function emitUpdates() {
+  await emit('updates:changed', structuredClone(currentUpdateStatus()));
+}
 
 const callPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
@@ -273,11 +374,21 @@ Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 async function send(value: Partial<MicrophoneSnapshot>) {
   microphone = { ...microphone, revision: microphone.revision + 1, ...value };
   await emit('microphone:changed', microphone);
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 
 async function sendDictation(value: Partial<DictationSnapshot>) {
   dictation = { ...dictation, revision: dictation.revision + 1, ...value };
   await emit('dictation:changed', structuredClone(dictation));
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 
 // Stands in for the Rust live session: no device, stream, or transcription.
@@ -312,6 +423,11 @@ async function publish(value: Partial<Snapshot>) {
   await emit('session:changed', session);
   await emit('cue:changed', session);
   if (historyChanged) await emit('meeting-history:changed');
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 /** A replay of a fictional conversation: no microphone, nothing captured.
  * The app labels it as simulated in its own words. Used by the lab recorder. */
@@ -743,8 +859,108 @@ mockIPC(
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
         callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        updatesState.checkAtLaunch = true;
         historyFixture.resetAfterSessionKeep();
+        await emitUpdates();
         return;
+      case 'update_status':
+        return structuredClone(currentUpdateStatus());
+      case 'set_check_for_updates_at_launch': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not save update settings.');
+        }
+        const { enabled } = args as { enabled: boolean };
+        updatesState.checkAtLaunch = enabled;
+        const reply = currentUpdateStatus();
+        await emitUpdates();
+        return structuredClone(reply);
+      }
+      case 'check_for_updates': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not check for updates.');
+        }
+        if (!updatesState.configured) {
+          throw new Error('Updates are not configured in this build');
+        }
+        if (currentUpdateHold() !== null) {
+          throw new Error('Update paused until this session ends.');
+        }
+        updatesState.checks += 1;
+        updatesState.phase = 'checking';
+        updatesState.error = undefined;
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 20));
+        if (currentUpdateHold() !== null) {
+          if (
+            typeof updatesState.nextCheck === 'object' &&
+            'available' in updatesState.nextCheck
+          ) {
+            updatesState.available = updatesState.nextCheck.available;
+            updatesState.phase = 'deferred';
+          }
+          await emitUpdates();
+          return structuredClone(currentUpdateStatus());
+        }
+        if (updatesState.nextCheck === 'upToDate') {
+          updatesState.available = null;
+          updatesState.phase = 'upToDate';
+          updatesState.error = undefined;
+        } else if ('available' in updatesState.nextCheck) {
+          updatesState.available = updatesState.nextCheck.available;
+          updatesState.phase = 'available';
+          updatesState.error = undefined;
+        } else {
+          updatesState.phase = 'error';
+          updatesState.error = updatesState.nextCheck.error;
+          await emitUpdates();
+          throw new Error(updatesState.nextCheck.error);
+        }
+        await emitUpdates();
+        return structuredClone(currentUpdateStatus());
+      }
+      case 'download_and_install_update': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not install updates.');
+        }
+        if (!updatesState.configured) {
+          throw new Error('Updates are not configured in this build');
+        }
+        if (currentUpdateHold() !== null) {
+          throw new Error('Update paused until this session ends.');
+        }
+        if (!updatesState.available) {
+          throw new Error('No update is ready to install.');
+        }
+        updatesState.phase = 'downloading';
+        updatesState.downloadedBytes = 500;
+        updatesState.totalBytes = 1000;
+        updatesState.error = undefined;
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 30));
+        if (typeof updatesState.nextInstall === 'object') {
+          updatesState.phase = 'error';
+          updatesState.downloadedBytes = undefined;
+          updatesState.totalBytes = undefined;
+          updatesState.error = updatesState.nextInstall.error;
+          await emitUpdates();
+          throw new Error(updatesState.nextInstall.error);
+        }
+        if (currentUpdateHold() !== null) {
+          updatesState.phase = 'deferred';
+          updatesState.downloadedBytes = undefined;
+          updatesState.totalBytes = undefined;
+          await emitUpdates();
+          throw new Error('Update paused until this session ends.');
+        }
+        updatesState.downloadedBytes = 1000;
+        updatesState.phase = 'installing';
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 20));
+        updatesState.phase = 'restarting';
+        updatesState.restarts += 1;
+        await emitUpdates();
+        return structuredClone(currentUpdateStatus());
+      }
       case 'respond_to_end_prompt': {
         const { session: targetSession, action } =
           args as Commands['respond_to_end_prompt'];
@@ -991,6 +1207,14 @@ declare global {
       rejectNextStart: (message: string) => void;
       rejectNextStop: (message: string) => void;
     };
+    updatesTest: {
+      state: () => typeof updatesState;
+      setNextCheck: (
+        next: 'upToDate' | { available: AvailableUpdate } | { error: string },
+      ) => void;
+      setNextInstall: (next: 'ok' | { error: string }) => void;
+      setAvailable: (offer: AvailableUpdate | null) => Promise<void>;
+    };
   }
 }
 window.permissionTest = permissionFixture;
@@ -1138,6 +1362,20 @@ window.dictationTest = {
   },
   rejectNextStop: (message) => {
     dictationRejectStop = message;
+  },
+};
+window.updatesTest = {
+  state: () => structuredClone(updatesState),
+  setNextCheck: (next) => {
+    updatesState.nextCheck = next;
+  },
+  setNextInstall: (next) => {
+    updatesState.nextInstall = next;
+  },
+  setAvailable: async (offer) => {
+    updatesState.available = offer;
+    updatesState.phase = offer ? 'available' : 'idle';
+    await emitUpdates();
   },
 };
 await import('../../src/main');

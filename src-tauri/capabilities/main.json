@@ -102,6 +102,10 @@
     "allow-presence-settings",
     "allow-set-keep-running-in-menu-bar",
     "allow-set-open-at-login",
-    "allow-open-login-items"
+    "allow-open-login-items",
+    "allow-update-status",
+    "allow-set-check-for-updates-at-launch",
+    "allow-check-for-updates",
+    "allow-download-and-install-update"
   ]
 }

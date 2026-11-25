@@ -113,6 +113,7 @@ pub mod settings;
 mod settings_commands;
 pub mod timing_log;
 pub mod transcription;
+mod update_commands;
 mod updates;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
@@ -1928,8 +1929,14 @@ pub fn run() {
     let context = application_context();
     #[cfg(target_os = "macos")]
     let context = companion_macos::configure(context);
+    let mut updater_builder = tauri_plugin_updater::Builder::new();
+    if let Some(pubkey) = updates::compile_time_pubkey() {
+        updater_builder = updater_builder.pubkey(pubkey);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(updater_builder.build())
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
@@ -2033,12 +2040,18 @@ pub fn run() {
             settings_commands::presence_settings,
             settings_commands::set_keep_running_in_menu_bar,
             settings_commands::set_open_at_login,
-            settings_commands::open_login_items
+            settings_commands::open_login_items,
+            update_commands::update_status,
+            update_commands::set_check_for_updates_at_launch,
+            update_commands::check_for_updates,
+            update_commands::download_and_install_update
         ])
         .setup(|app| {
             // The person's saved settings, before anything is published. A
             // lab run reads none (settings.rs).
             settings_commands::load(app.handle());
+            app.manage(update_commands::Controller::for_app(app.handle()));
+            update_commands::schedule_launch_check(app.handle());
             // Kept meetings: off in a lab run, read only when asked.
             meeting_history_commands::manage(app);
             // A lab launch may give the user's name; it is set before the
@@ -2127,12 +2140,15 @@ pub fn run() {
                     let cue = runtime.cue_snapshot();
                     publish_processing(&handle, &mut runtime);
                     let menu = menu_bar::state_of(&runtime);
+                    let mic_snapshot = handle.state::<microphone::Controller>().try_status();
+                    let dictation_active = handle.state::<dictation::Controller>().is_active();
+                    let update_hold = runtime.update_hold(mic_snapshot, dictation_active);
                     drop(runtime);
                     menu_bar::update(&handle, menu);
                     microphone::refresh(&handle);
                     dictation::refresh(&handle);
-                    let Some(microphone) = handle.state::<microphone::Controller>().try_status()
-                    else {
+                    update_commands::refresh_with_hold(&handle, update_hold);
+                    let Some(microphone) = mic_snapshot else {
                         continue;
                     };
                     let mode = companion::Mode::for_snapshot(&cue, microphone);
@@ -3173,6 +3189,248 @@ mod dictation_ipc_tests {
         assert_eq!(
             err.as_str().unwrap(),
             "Stop the live session before dictating."
+        );
+    }
+}
+
+#[cfg(test)]
+mod update_ipc_tests {
+    use super::*;
+
+    #[test]
+    fn updater_commands_are_restricted_to_main_and_defer_when_busy_or_unconfigured() {
+        use tauri::Manager;
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let (store, _) = settings::Store::open(None, false);
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(store)
+            .manage(update_commands::Controller::new(
+                "0.1.0".into(),
+                false,
+                false,
+            ))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::set_check_for_updates_at_launch,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+                      cmd: &str,
+                      body: serde_json::Value,
+                      url: &str| {
+            tauri::test::get_ipc_response(
+                window,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: url.parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+        let local = "http://127.0.0.1:1420";
+
+        // Main window reads unconfigured status safely without panic or network call.
+        let status: serde_json::Value =
+            invoke(&main, "update_status", serde_json::json!({}), local)
+                .unwrap()
+                .deserialize()
+                .unwrap();
+        assert_eq!(status["currentVersion"], "0.1.0");
+        assert_eq!(status["configured"], false);
+        assert_eq!(status["checkAtLaunch"], true);
+        assert_eq!(status["phase"], "idle");
+
+        // Unconfigured build reports clean error without touching network.
+        let err = invoke(&main, "check_for_updates", serde_json::json!({}), local).unwrap_err();
+        assert_eq!(err.as_str().unwrap(), updates::NOT_CONFIGURED_MESSAGE);
+        let err = invoke(
+            &main,
+            "download_and_install_update",
+            serde_json::json!({}),
+            local,
+        )
+        .unwrap_err();
+        assert_eq!(err.as_str().unwrap(), updates::NOT_CONFIGURED_MESSAGE);
+
+        // Toggle check_for_updates_at_launch persists to settings store.
+        let updated: serde_json::Value = invoke(
+            &main,
+            "set_check_for_updates_at_launch",
+            serde_json::json!({ "enabled": false }),
+            local,
+        )
+        .unwrap()
+        .deserialize()
+        .unwrap();
+        assert_eq!(updated["checkAtLaunch"], false);
+        assert!(
+            !app.state::<settings::Store>()
+                .saved()
+                .check_for_updates_at_launch
+        );
+
+        // Companion window and untrusted origins are denied by capability boundaries.
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            for (cmd, body) in [
+                ("update_status", serde_json::json!({})),
+                (
+                    "set_check_for_updates_at_launch",
+                    serde_json::json!({ "enabled": true }),
+                ),
+                ("check_for_updates", serde_json::json!({})),
+                ("download_and_install_update", serde_json::json!({})),
+            ] {
+                let denied = invoke(window, cmd, body, url).unwrap_err();
+                assert!(
+                    denied.as_str().unwrap().contains("not allowed"),
+                    "{cmd}: {denied}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn configured_updater_refuses_checks_and_installs_during_live_session_and_lab_runs() {
+        use tauri::Manager;
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let (store, _) = settings::Store::open(None, false);
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(store)
+            .manage(update_commands::Controller::new(
+                "0.1.0".into(),
+                true,
+                false,
+            ))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |cmd: &str| {
+            tauri::test::get_ipc_response(
+                &main,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://127.0.0.1:1420".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state.0.lock().unwrap();
+            runtime.engine = Engine::live();
+            runtime.engine.start().unwrap();
+        }
+        let status: serde_json::Value = invoke("update_status").unwrap().deserialize().unwrap();
+        assert_eq!(status["hold"], "liveSession");
+        assert_eq!(status["available"], serde_json::Value::Null);
+
+        for cmd in ["check_for_updates", "download_and_install_update"] {
+            let err = invoke(cmd).unwrap_err();
+            assert_eq!(
+                err.as_str().unwrap(),
+                "Update paused until this session ends."
+            );
+        }
+
+        // Lab run refuses checks, installs, and preference writes.
+        let mut lab_context = application_context();
+        lab_context.config_mut().app.windows.clear();
+        let (lab_store, _) = settings::Store::open(None, true);
+        let lab_app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(lab_store)
+            .manage(update_commands::Controller::new("0.1.0".into(), true, true))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::set_check_for_updates_at_launch,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(lab_context)
+            .unwrap();
+        let lab_main = tauri::WebviewWindowBuilder::new(&lab_app, "main", Default::default())
+            .build()
+            .unwrap();
+        let lab_invoke = |cmd: &str, body: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &lab_main,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://127.0.0.1:1420".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+        let lab_status: serde_json::Value = lab_invoke("update_status", serde_json::json!({}))
+            .unwrap()
+            .deserialize()
+            .unwrap();
+        assert_eq!(lab_status["labRun"], true);
+        assert_eq!(lab_status["checkAtLaunch"], false);
+        assert_eq!(
+            lab_invoke("check_for_updates", serde_json::json!({}))
+                .unwrap_err()
+                .as_str()
+                .unwrap(),
+            "Lab runs do not check for updates."
+        );
+        assert_eq!(
+            lab_invoke("download_and_install_update", serde_json::json!({}))
+                .unwrap_err()
+                .as_str()
+                .unwrap(),
+            "Lab runs do not install updates."
+        );
+        assert_eq!(
+            lab_invoke(
+                "set_check_for_updates_at_launch",
+                serde_json::json!({ "enabled": true })
+            )
+            .unwrap_err()
+            .as_str()
+            .unwrap(),
+            "Lab runs do not save update settings."
         );
     }
 }

@@ -1,33 +1,37 @@
 //! Updates: what a feed offers, and the rule that no update is offered or
-//! applied while a call is being listened to. Off in every build: there is no
-//! feed, no update-signing key and no installer yet, so nothing here fetches,
-//! downloads or replaces anything. The design, and what turning it on needs,
-//! is in docs/release-path.md#updates.
+//! applied while a call, microphone check, or voice dictation is active.
+//! The design, and what turning signed updates on needs, is in
+//! docs/release-path.md#updates.
 //!
-//! The feed is Tauri's updater format (`latest.json`), so the planned
-//! `tauri-plugin-updater` can read the same file: a version, notes, a date
-//! and, per platform, the download and its minisign signature.
-
-// Nothing outside the tests calls this until an update feed exists.
-#![cfg_attr(not(test), allow(dead_code))]
+//! The feed is Tauri's updater format (`latest.json`), so
+//! `tauri-plugin-updater` reads the same file: a version, notes, a date and,
+//! per platform, the download and its minisign signature.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-/// The update setting. Off, with no feed, until the owner publishes one; the
-/// settings file will hold the person's choice once both exist.
+/// Returned when a build has no minisign public key or HTTPS endpoint configured.
+pub const NOT_CONFIGURED_MESSAGE: &str = "Updates are not configured in this build";
+
+/// Maximum length of release notes shown in Settings.
+const MAX_NOTES_CHARS: usize = 1_000;
+
+/// The update setting. Kept for offline feed-reader unit tests.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateSettings {
     pub enabled: bool,
     pub feed: Option<&'static str>,
 }
 
-/// Every build today: no checks.
+/// Every build today: no checks until configured.
+#[cfg_attr(not(test), allow(dead_code))]
 pub const SETTINGS: UpdateSettings = UpdateSettings {
     enabled: false,
     feed: None,
 };
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl UpdateSettings {
     /// The feed to ask, only when the setting is on and the feed is https.
     pub fn feed_to_check(&self) -> Option<&'static str> {
@@ -36,6 +40,7 @@ impl UpdateSettings {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Deserialize)]
 struct RawFeed {
     version: String,
@@ -46,6 +51,7 @@ struct RawFeed {
     platforms: BTreeMap<String, RawPlatform>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Deserialize)]
 struct RawPlatform {
     signature: String,
@@ -62,6 +68,7 @@ pub struct Offer {
     pub signature: String,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 pub enum FeedError {
     Unreadable(String),
@@ -84,6 +91,7 @@ impl std::fmt::Display for FeedError {
 }
 
 /// The Tauri updater's name for the platform this copy was built for.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn platform() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "darwin-aarch64"
@@ -99,6 +107,7 @@ pub fn platform() -> &'static str {
 }
 
 /// `MAJOR.MINOR.PATCH`, the only form the release pre-flight allows.
+#[cfg_attr(not(test), allow(dead_code))]
 fn version(text: &str) -> Option<(u64, u64, u64)> {
     let mut parts = text.strip_prefix('v').unwrap_or(text).split('.');
     let mut next = || parts.next()?.parse::<u64>().ok();
@@ -108,6 +117,7 @@ fn version(text: &str) -> Option<(u64, u64, u64)> {
 
 /// What a feed offers this copy: `None` when it is not newer or lists no
 /// download for `platform`; an error when the feed itself is unusable.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn offer(feed: &str, current: &str, platform: &str) -> Result<Option<Offer>, FeedError> {
     let raw: RawFeed =
         serde_json::from_str(feed).map_err(|error| FeedError::Unreadable(error.to_string()))?;
@@ -145,6 +155,8 @@ pub enum Hold {
     Microphone,
     /// An application's audio is being captured.
     ApplicationAudio,
+    /// Voice dictation in Notes or Focus is starting, listening, or stopping.
+    Dictation,
 }
 
 /// What to do with an offer now.
@@ -199,6 +211,7 @@ pub(crate) fn hold_for(
     live_session_open: bool,
     microphone: Option<crate::microphone::Status>,
     application_audio: bool,
+    dictation_active: bool,
 ) -> Option<Hold> {
     use crate::microphone::Status;
     if live_session_open {
@@ -206,6 +219,9 @@ pub(crate) fn hold_for(
     }
     if application_audio {
         return Some(Hold::ApplicationAudio);
+    }
+    if dictation_active {
+        return Some(Hold::Dictation);
     }
     match microphone {
         Some(Status::Off | Status::Error) => None,
@@ -216,16 +232,118 @@ pub(crate) fn hold_for(
 }
 
 impl crate::Runtime {
-    /// Why an update must wait, given the microphone controller's snapshot.
+    /// Why an update must wait, given the microphone and dictation state.
     pub(crate) fn update_hold(
         &self,
-        microphone: Option<crate::microphone::Snapshot>,
+        microphone: Option<crate::microphone::Status>,
+        dictation_active: bool,
     ) -> Option<Hold> {
         hold_for(
             self.live_session_open(),
-            microphone.map(|snapshot| snapshot.status),
+            microphone,
             self.live_source.is_some() || self.source_session.is_some(),
+            dictation_active,
         )
+    }
+}
+
+/// Optional minisign public key injected at compile time for signed releases.
+pub fn compile_time_pubkey() -> Option<&'static str> {
+    option_env!("TALKQTE_UPDATER_PUBKEY")
+        .or(option_env!("TAURI_UPDATER_PUBKEY"))
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+}
+
+/// Effective minisign public key for this build, from compile-time env or `tauri.conf.json`.
+pub fn effective_pubkey(config: &tauri::Config) -> Option<String> {
+    if let Some(key) = compile_time_pubkey() {
+        return Some(key.to_owned());
+    }
+    config
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+}
+
+/// Whether `tauri.conf.json` configures at least one HTTPS updater endpoint.
+pub fn has_https_endpoint(config: &tauri::Config) -> bool {
+    config
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("endpoints"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|endpoints| {
+            !endpoints.is_empty()
+                && endpoints.iter().all(|entry| {
+                    entry
+                        .as_str()
+                        .is_some_and(|url| url.starts_with("https://"))
+                })
+        })
+}
+
+/// Whether this build can verify and fetch updates from HTTPS endpoints.
+pub fn is_configured(config: &tauri::Config) -> bool {
+    effective_pubkey(config).is_some() && has_https_endpoint(config)
+}
+
+/// Sanitizes and bounds release notes before exposing them to the notebook UI.
+pub fn sanitize_notes(notes: Option<&str>) -> Option<String> {
+    let raw = notes?;
+    let mut cleaned = String::with_capacity(raw.len().min(MAX_NOTES_CHARS));
+    for ch in raw.chars() {
+        if ch == '\n'
+            || ch == '\t'
+            || (!ch.is_control() && !('\u{202a}'..='\u{202e}').contains(&ch))
+        {
+            if cleaned.chars().count() >= MAX_NOTES_CHARS {
+                cleaned.push('…');
+                break;
+            }
+            cleaned.push(ch);
+        }
+    }
+    let trimmed = cleaned.trim().to_owned();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+/// Maps `tauri-plugin-updater` errors to plain-language UI messages without paths or URLs.
+pub fn map_updater_error(error: &tauri_plugin_updater::Error) -> String {
+    use tauri_plugin_updater::Error;
+    match error {
+        Error::EmptyEndpoints | Error::InsecureTransportProtocol => NOT_CONFIGURED_MESSAGE.into(),
+        Error::Minisign(_)
+        | Error::Base64(_)
+        | Error::SignatureUtf8(_)
+        | Error::SignedVersionMismatch { .. }
+        | Error::MissingSignedVersion => {
+            "The update signature could not be verified. The current version was kept.".into()
+        }
+        Error::ReleaseNotFound => "No published release was found yet.".into(),
+        Error::TargetNotFound(_)
+        | Error::TargetsNotFound(_)
+        | Error::UnsupportedArch
+        | Error::UnsupportedOs => "No update package is available for this platform.".into(),
+        Error::Reqwest(_) | Error::Network(_) => {
+            "Could not reach the update server. Check your connection and try again.".into()
+        }
+        Error::AuthenticationFailed => {
+            "Administrator permission is required to replace TalkQTE.".into()
+        }
+        Error::TempDirNotOnSameMountPoint | Error::PreviousAppNotRestored(_) => {
+            "Could not install the update safely. The current version was kept.".into()
+        }
+        Error::InvalidUpdaterFormat | Error::BinaryNotFoundInArchive => {
+            "The downloaded update package could not be used. The current version was kept.".into()
+        }
+        _ => "Could not complete the update. Try again later.".into(),
     }
 }
 
@@ -337,20 +455,27 @@ mod tests {
 
     #[test]
     fn anything_listening_holds_an_update() {
-        assert_eq!(hold_for(false, Some(Status::Off), false), None);
-        assert_eq!(hold_for(false, Some(Status::Error), false), None);
+        assert_eq!(hold_for(false, Some(Status::Off), false, false), None);
+        assert_eq!(hold_for(false, Some(Status::Error), false, false), None);
         assert_eq!(
-            hold_for(true, Some(Status::Off), false),
+            hold_for(true, Some(Status::Off), false, false),
             Some(Hold::LiveSession)
         );
         for status in [Status::Starting, Status::Listening, Status::Stopping] {
-            assert_eq!(hold_for(false, Some(status), false), Some(Hold::Microphone));
+            assert_eq!(
+                hold_for(false, Some(status), false, false),
+                Some(Hold::Microphone)
+            );
         }
         // A microphone whose state cannot be read without waiting is busy.
-        assert_eq!(hold_for(false, None, false), Some(Hold::Microphone));
+        assert_eq!(hold_for(false, None, false, false), Some(Hold::Microphone));
         assert_eq!(
-            hold_for(false, Some(Status::Off), true),
+            hold_for(false, Some(Status::Off), true, false),
             Some(Hold::ApplicationAudio)
+        );
+        assert_eq!(
+            hold_for(false, Some(Status::Off), false, true),
+            Some(Hold::Dictation)
         );
     }
 
@@ -404,32 +529,69 @@ mod tests {
     #[test]
     fn the_runtime_holds_while_a_live_session_is_open() {
         let mut runtime = crate::Runtime::default();
-        let off = crate::microphone::Snapshot {
-            revision: 0,
-            status: Status::Off,
-            can_start: true,
-            activity: crate::microphone::Activity::Quiet,
-            message: None,
-            device_name: None,
-        };
-        assert_eq!(runtime.update_hold(Some(off.clone())), None);
-        let listening = crate::microphone::Snapshot {
-            status: Status::Listening,
-            ..off.clone()
-        };
-        assert_eq!(runtime.update_hold(Some(listening)), Some(Hold::Microphone));
+        assert_eq!(runtime.update_hold(Some(Status::Off), false), None);
+        assert_eq!(
+            runtime.update_hold(Some(Status::Listening), false),
+            Some(Hold::Microphone)
+        );
+        assert_eq!(
+            runtime.update_hold(Some(Status::Off), true),
+            Some(Hold::Dictation)
+        );
         runtime.engine.state.live = true;
         runtime.engine.state.status = crate::engine::Status::Running;
         assert_eq!(
-            runtime.update_hold(Some(off.clone())),
+            runtime.update_hold(Some(Status::Off), false),
             Some(Hold::LiveSession)
         );
         runtime.engine.state.status = crate::engine::Status::Paused;
         assert_eq!(
-            runtime.update_hold(Some(off.clone())),
+            runtime.update_hold(Some(Status::Off), false),
             Some(Hold::LiveSession)
         );
         runtime.engine.state.status = crate::engine::Status::Ended;
-        assert_eq!(runtime.update_hold(Some(off)), None);
+        assert_eq!(runtime.update_hold(Some(Status::Off), false), None);
+    }
+
+    #[test]
+    fn unconfigured_pubkey_and_notes_sanitization_are_safe() {
+        let mut config = tauri::Config::default();
+        assert!(!is_configured(&config));
+        config.plugins.0.insert(
+            "updater".into(),
+            serde_json::json!({
+                "endpoints": ["https://github.com/connorburgess/talkqte/releases/latest/download/latest.json"],
+                "pubkey": ""
+            }),
+        );
+        assert_eq!(effective_pubkey(&config), None);
+        assert!(has_https_endpoint(&config));
+        assert!(!is_configured(&config));
+
+        config.plugins.0.insert(
+            "updater".into(),
+            serde_json::json!({
+                "endpoints": ["https://github.com/connorburgess/talkqte/releases/latest/download/latest.json"],
+                "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBwdWJrZXk="
+            }),
+        );
+        assert!(is_configured(&config));
+
+        config.plugins.0.insert(
+            "updater".into(),
+            serde_json::json!({
+                "endpoints": ["http://insecure.example.invalid/latest.json"],
+                "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBwdWJrZXk="
+            }),
+        );
+        assert!(!has_https_endpoint(&config));
+        assert!(!is_configured(&config));
+
+        assert_eq!(sanitize_notes(None), None);
+        assert_eq!(sanitize_notes(Some("   \x00\u{202e}  ")), None);
+        assert_eq!(
+            sanitize_notes(Some("  Bug fixes\u{202e} and stability.\x07  ")),
+            Some("Bug fixes and stability.".into())
+        );
     }
 }

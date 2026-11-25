@@ -191,6 +191,10 @@ function fakeTools({ submit = 'Accepted', preflightPasses = true, fail } = {}) {
       fs: {
         reset: () => {},
         write: (path, text) => (written[path] = text),
+        read: (path) =>
+          path.endsWith('.sig')
+            ? 'dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBzaWduYXR1cmUK'
+            : '',
         sha256: (path) => `digest-of-${path.split('/').pop()}`,
         size: () => 1,
       },
@@ -427,4 +431,50 @@ test('the downloads are verified as they come out of the zip and the image', () 
   assert.ok(
     failing.calls.some((call) => call[0] === 'hdiutil' && call[1] === 'detach'),
   );
+});
+
+test('updater archive, signature, and latest.json are generated when TAURI_SIGNING_PRIVATE_KEY is set', () => {
+  const { tools, calls, written } = fakeTools();
+  release(
+    {
+      ...base,
+      mode: 'notarized',
+      env: {
+        ...signing,
+        ...apiKey,
+        TAURI_SIGNING_PRIVATE_KEY: 'fictional-private-key',
+      },
+    },
+    tools,
+  );
+  assert.ok(
+    calls.some(
+      (call) =>
+        call[0] === 'tar' &&
+        call[1] === '-czf' &&
+        call[2].endsWith('TalkQTE_0.1.0_aarch64.app.tar.gz'),
+    ),
+  );
+  assert.ok(
+    calls.some(
+      (call) =>
+        call[0] === 'npx' &&
+        call[1] === 'tauri' &&
+        call[2] === 'signer' &&
+        call[3] === 'sign' &&
+        call[4].endsWith('TalkQTE_0.1.0_aarch64.app.tar.gz'),
+    ),
+  );
+  const latest = JSON.parse(written['/fictional/out/latest.json']);
+  assert.equal(latest.version, '0.1.0');
+  assert.equal(
+    latest.platforms['darwin-aarch64'].url,
+    'https://github.com/connorburgess/talkqte/releases/download/v0.1.0/TalkQTE_0.1.0_aarch64.app.tar.gz',
+  );
+  assert.equal(
+    latest.platforms['darwin-aarch64'].signature,
+    'dW50cnVzdGVkIGNvbW1lbnQ6IGZpY3Rpb25hbCBzaWduYXR1cmUK',
+  );
+  assert.match(written['/fictional/out/SHA256SUMS'], /latest\.json/);
+  assert.match(written['/fictional/out/SHA256SUMS'], /\.app\.tar\.gz\.sig/);
 });

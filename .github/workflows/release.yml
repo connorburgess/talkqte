@@ -1,11 +1,13 @@
 name: Release build
 
 # Builds the macOS download with `npm run release` and uploads it as a
-# workflow artifact. It never creates a GitHub Release or a tag and publishes
-# nothing. Without signing secrets (and always on pull requests) it uploads an
-# unsigned build whose file names say it is not for release. With the
-# secrets below it signs with Developer ID; with the notary secrets too it
-# notarizes and staples. docs/release-path.md#ci names each secret.
+# workflow artifact. On tagged releases (`v*`), publishes the artifacts
+# (including `.app.tar.gz`, `.sig`, and `latest.json` when
+# `TAURI_SIGNING_PRIVATE_KEY` is configured) to the GitHub Release. Without
+# signing secrets (and always on pull requests) it uploads an unsigned build
+# whose file names say it is not for release. With the secrets below it signs
+# with Developer ID; with the notary secrets too it notarizes and staples.
+# docs/release-path.md#ci names each secret.
 on:
   push:
     tags: ['v*']
@@ -90,6 +92,9 @@ jobs:
           APPLE_TEAM_ID: ${{ env.CAN_SIGN == 'true' && secrets.APPLE_TEAM_ID || '' }}
           APPLE_API_KEY: ${{ env.CAN_NOTARIZE == 'true' && secrets.APPLE_API_KEY || '' }}
           APPLE_API_ISSUER: ${{ env.CAN_NOTARIZE == 'true' && secrets.APPLE_API_ISSUER || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.event_name != 'pull_request' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          TALKQTE_UPDATER_PUBKEY: ${{ github.event_name != 'pull_request' && secrets.TALKQTE_UPDATER_PUBKEY || '' }}
         run: |
           set -euo pipefail
           if [ "$CAN_SIGN" = true ] && [ "$CAN_NOTARIZE" = true ]; then mode=
@@ -105,6 +110,9 @@ jobs:
           path: |
             ${{ runner.temp }}/release-artifacts/*.dmg
             ${{ runner.temp }}/release-artifacts/*.zip
+            ${{ runner.temp }}/release-artifacts/*.app.tar.gz
+            ${{ runner.temp }}/release-artifacts/*.app.tar.gz.sig
+            ${{ runner.temp }}/release-artifacts/latest.json
             ${{ runner.temp }}/release-artifacts/*.manifest.json
             ${{ runner.temp }}/release-artifacts/SHA256SUMS
           if-no-files-found: error
@@ -124,3 +132,28 @@ jobs:
         run: |
           if [ -n "${APPLE_KEYCHAIN:-}" ]; then security delete-keychain "$APPLE_KEYCHAIN" || true; fi
           rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  publish:
+    name: Publish GitHub Release
+    needs: [macos]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b975a6288c6c904e5c4877e4 # v4
+        with:
+          name: talkqte-macos-${{ github.sha }}-${{ github.run_attempt }}
+          path: release-artifacts
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-artifacts/* --clobber
+          else
+            gh release create "$TAG" release-artifacts/* --title "TalkQTE $TAG" --generate-notes
+          fi
