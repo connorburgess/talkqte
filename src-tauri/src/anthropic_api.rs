@@ -385,10 +385,12 @@ type OnRejected = Box<dyn FnMut() + Send>;
 /// The adapter the cue worker runs.
 pub struct AnthropicApi<T: Transport> {
     model: Model,
+    resolved: Option<crate::llm_provider::ResolvedModel>,
     transport: T,
     key: KeySource,
     on_rejected: OnRejected,
     usage: Arc<Usage>,
+    tracker: Option<Arc<crate::llm_provider::CueUsageTracker>>,
     spend_cap: u64,
     invalid_in_a_row: u32,
 }
@@ -403,10 +405,33 @@ impl<T: Transport> AnthropicApi<T> {
     ) -> Self {
         Self {
             model,
+            resolved: None,
             transport,
             key,
             on_rejected,
             usage,
+            tracker: None,
+            spend_cap: SPEND_CAP_MICRO_USD,
+            invalid_in_a_row: 0,
+        }
+    }
+
+    pub(crate) fn for_resolved(
+        resolved: crate::llm_provider::ResolvedModel,
+        transport: T,
+        key: KeySource,
+        on_rejected: OnRejected,
+        usage: Arc<Usage>,
+        tracker: Arc<crate::llm_provider::CueUsageTracker>,
+    ) -> Self {
+        Self {
+            model: model(MODEL).expect("default model"),
+            resolved: Some(resolved),
+            transport,
+            key,
+            on_rejected,
+            usage,
+            tracker: Some(tracker),
             spend_cap: SPEND_CAP_MICRO_USD,
             invalid_in_a_row: 0,
         }
@@ -416,6 +441,35 @@ impl<T: Transport> AnthropicApi<T> {
     fn with_spend_cap(mut self, cap: u64) -> Self {
         self.spend_cap = cap;
         self
+    }
+
+    fn effective_model_id(&self) -> &str {
+        self.resolved
+            .as_ref()
+            .map_or(self.model.id, |r| r.id.as_str())
+    }
+
+    fn effective_price(&self) -> Option<[f64; 4]> {
+        match &self.resolved {
+            Some(r) => r.price,
+            None => Some(self.model.price),
+        }
+    }
+
+    fn effective_thinking(&self) -> Option<&'static str> {
+        match &self.resolved {
+            Some(r) => r.thinking,
+            None => self.model.thinking,
+        }
+    }
+
+    fn charge(&self, micro_usd: u64) {
+        if self.effective_price().is_some() {
+            self.usage.charge(micro_usd);
+            if let Some(tracker) = &self.tracker {
+                tracker.charge(micro_usd);
+            }
+        }
     }
 }
 
@@ -439,16 +493,47 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         // Prior notes are never sent on this route; such input fails closed.
         let input = request.prompt_input()?;
         let on_screen = OnScreen::of(request);
-        let body = body(self.model, &input, on_screen).to_string();
+        let model_id = self.effective_model_id().to_string();
+        let thinking = self.effective_thinking();
+        let price = self.effective_price();
+        let mut req_body = json!({
+            "model": model_id,
+            "max_tokens": MAX_TOKENS,
+            "system": [{
+                "type": "text",
+                "text": system_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }],
+            "messages": [{"role": "user", "content": input}],
+            "output_config": {
+                "effort": EFFORT,
+                "format": {"type": "json_schema", "schema": schema(on_screen)},
+            },
+            "stream": true,
+        });
+        if let Some(thinking) = thinking {
+            req_body["thinking"] = json!({"type": thinking});
+        }
+        let body = req_body.to_string();
         if body.len() > MAX_REQUEST_BYTES {
             return Err(Failure::InvalidInput);
         }
         // Refuse before sending if this call's worst case could pass the
-        // session's estimate cap; that stops cues for the session.
-        let worst = worst_case_micro_usd(self.model, &input, on_screen);
-        if self.usage.spent_micro_usd.load(Ordering::Acquire) + worst > self.spend_cap {
-            return Err(Failure::SpendLimit);
-        }
+        // session's estimate cap (for built-in models); custom models enforce
+        // the 400-request cap without fabricating dollar spend.
+        let worst = if let Some(p) = price {
+            let bytes = system_prompt().len() + input.len() + schema(on_screen).to_string().len();
+            let tokens = bytes.div_ceil(2) as f64 + 1_500.0;
+            let [input_price, write_price, _, output_price] = p;
+            let w = (tokens * input_price.max(write_price) + MAX_TOKENS as f64 * output_price)
+                .ceil() as u64;
+            if self.usage.spent_micro_usd.load(Ordering::Acquire) + w > self.spend_cap {
+                return Err(Failure::SpendLimit);
+            }
+            w
+        } else {
+            0
+        };
         let key = match (self.key)() {
             Ok(key) => key,
             // Removed from the Keychain, or the Keychain could not be read:
@@ -460,6 +545,9 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
             return Err(Failure::Cancelled);
         }
         self.usage.requests.fetch_add(1, Ordering::AcqRel);
+        if let Some(tracker) = &self.tracker {
+            tracker.record_request();
+        }
         let reply = self.transport.post(&key, body.as_bytes(), timeout);
         drop(key);
         let reply = match reply {
@@ -468,7 +556,7 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
                 // Whatever reached the provider may still be billed; nothing
                 // that never left is.
                 if no_reply == NoReply::Lost {
-                    self.usage.charge(worst);
+                    self.charge(worst);
                 }
                 return Err(if cancel.is_cancelled() {
                     Failure::Cancelled
@@ -484,25 +572,40 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
                 return Err(Failure::SignIn);
             }
             429 => {
-                self.usage.charge(worst);
+                self.charge(worst);
                 return Err(Failure::UsageLimit);
             }
             // Nothing was generated, so nothing is charged.
             402 => return Err(Failure::Billing),
             400 if refused_for_credit(reply.body) => return Err(Failure::Billing),
             _ => {
-                self.usage.charge(worst);
+                self.charge(worst);
                 return Err(Failure::Unreachable);
             }
         }
-        let (outcome, usage, complete) = read_stream(reply.body, self.model, cancel);
+        let (outcome, usage, complete) = if self.resolved.is_some() {
+            read_bounded_stream_for_id(reply.body, &model_id, true, MAX_TEXT_BYTES, &|| {
+                cancel.is_cancelled()
+            })
+        } else {
+            read_stream(reply.body, self.model, cancel)
+        };
         // Only a reply that reached message_stop with its usage is charged
         // what it reported; anything else is charged the worst case.
-        self.usage.charge(if complete {
-            usage.cost_micro_usd(self.model)
-        } else {
-            worst
-        });
+        if let Some(p) = price {
+            let cost = if complete {
+                crate::llm_provider::token_cost_micro_usd(
+                    p,
+                    usage.input,
+                    usage.cache_write,
+                    usage.cache_read,
+                    usage.output,
+                )
+            } else {
+                worst
+            };
+            self.charge(cost);
+        }
         match outcome {
             Outcome::Decision(text) => self.checked(text, request, on_screen),
             Outcome::Cancelled => Err(Failure::Cancelled),
@@ -639,6 +742,16 @@ pub(crate) fn read_bounded_stream(
     max_text_bytes: usize,
     cancelled: &dyn Fn() -> bool,
 ) -> (Outcome, TokenUsage, bool) {
+    read_bounded_stream_for_id(body, model.id, false, max_text_bytes, cancelled)
+}
+
+pub(crate) fn read_bounded_stream_for_id(
+    body: Box<dyn Read + Send>,
+    model_id: &str,
+    allow_snapshot_echo: bool,
+    max_text_bytes: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> (Outcome, TokenUsage, bool) {
     let mut reader = BufReader::new(body);
     let mut usage = TokenUsage::default();
     let mut text = String::new();
@@ -700,7 +813,12 @@ pub(crate) fn read_bounded_stream(
         }
     };
     let outcome = outcome.unwrap_or_else(|| {
-        if echo.as_deref() != Some(model.id) {
+        let model_matches = if allow_snapshot_echo {
+            crate::llm_provider::model_echo_matches(model_id, echo.as_deref())
+        } else {
+            echo.as_deref() == Some(model_id)
+        };
+        if !model_matches {
             Outcome::ConfigurationMismatch
         } else if stop_reason.as_deref() == Some("refusal") {
             Outcome::Refusal
@@ -753,26 +871,54 @@ fn data_policy(model: Model) -> String {
 /// nothing until the person reviews and approves the session.
 pub fn connected_engine(sources: &crate::engine::SessionSources) -> crate::engine::Engine {
     let model = model(MODEL).expect("the default model is known");
+    let resolved = crate::llm_provider::ResolvedModel::resolve(
+        crate::llm_provider::CueProvider::Anthropic,
+        Some(model.id),
+        crate::llm_provider::default_cue_model(crate::llm_provider::CueProvider::Anthropic),
+    );
+    connected_engine_for(resolved, sources)
+}
+
+/// The engine for a live session with an explicit Anthropic model (curated or custom).
+pub fn connected_engine_for(
+    resolved: crate::llm_provider::ResolvedModel,
+    sources: &crate::engine::SessionSources,
+) -> crate::engine::Engine {
     let usage = Arc::new(Usage::default());
-    if let Ok(mut current) = current().lock() {
-        *current = Some(usage.clone());
+    if !resolved.custom {
+        if let Ok(mut current) = current().lock() {
+            *current = Some(usage.clone());
+        }
     }
-    let adapter = AnthropicApi::new(
-        model,
+    let tracker = Arc::new(crate::llm_provider::CueUsageTracker::new(
+        crate::llm_provider::CueProvider::Anthropic,
+        &resolved.id,
+        resolved.custom,
+    ));
+    crate::llm_provider::register_usage(tracker.clone());
+    let model_id = resolved.id.clone();
+    let custom = resolved.custom;
+    let adapter = AnthropicApi::for_resolved(
+        resolved,
         Network,
         Box::new(|| crate::provider_keys::global().get(Provider::Anthropic)),
         Box::new(|| crate::provider_keys::global().mark_rejected(Provider::Anthropic)),
         usage,
+        tracker,
     );
-    registered(
+    crate::llm_provider::register_cue_engine(
         adapter,
-        model,
+        crate::llm_provider::CueProvider::Anthropic,
+        &model_id,
+        custom,
+        Some(EFFORT),
         crate::transcription::cloud::review_sentence(sources),
     )
 }
 
 /// The engine with an adapter registered under this connection's reviewed
-/// configuration, request cap, gap and settlement rules.
+/// configuration, request cap, gap and settlement rules (kept for existing tests).
+#[cfg(test)]
 fn registered<T: Transport>(
     adapter: AnthropicApi<T>,
     model: Model,

@@ -8,6 +8,8 @@ import type {} from './fixtures/native-microphone';
 // covered by the `provider_keys` Rust tests.
 // Fictional keys of the right shape; they reach no provider.
 const ANTHROPIC = 'sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ';
+const OPENAI = 'sk-proj-FICTIONALfictional0123456789abcdef';
+const GEMINI = 'AIzaFictionalGeminiKey0123456789abcdefXYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
 
 async function openNative(page: Page) {
@@ -243,4 +245,138 @@ test('native fixture: the language is sent as en or multi, and a running session
     'Change the transcription language when no live session is running.',
   );
   await expect(choice).toHaveValue('multi');
+});
+
+test('native fixture: openai and gemini keys validate, cross IPC once, and remove cleanly', async ({
+  page,
+}) => {
+  await openNative(page);
+  const openai = row(page, 'OpenAI');
+  const gemini = row(page, 'Gemini');
+  await expect(openai).toContainText('Not set');
+  await expect(gemini).toContainText('Not set');
+
+  await openai.getByLabel('OpenAI API key').fill('sk-ant-not-openai-key');
+  await openai.getByLabel('OpenAI API key').press('Enter');
+  await expect(openai.getByRole('alert')).toHaveText(
+    'That does not look like an OpenAI API key. It starts with sk-.',
+  );
+  await openai.getByLabel('OpenAI API key').fill(OPENAI);
+  await openai.getByRole('button', { name: 'Save key' }).click();
+  await expect(openai).toContainText('Set, not checked yet');
+  await openai.getByRole('button', { name: 'Test key' }).click();
+  await expect(openai).toContainText(
+    'Rejected by OpenAI. Replace it with a new key.',
+  );
+
+  await gemini.getByLabel('Gemini API key').fill('not-a-gemini-key');
+  await gemini.getByLabel('Gemini API key').press('Enter');
+  await expect(gemini.getByRole('alert')).toHaveText(
+    'That does not look like a Google AI Studio Gemini API key. It starts with AIza.',
+  );
+  await page.evaluate(() =>
+    window.providerKeysTest.setTestOutcome('gemini', 'verified'),
+  );
+  await gemini.getByLabel('Gemini API key').fill(GEMINI);
+  await gemini.getByRole('button', { name: 'Save key' }).click();
+  await gemini.getByRole('button', { name: 'Test key' }).click();
+  await expect(gemini).toContainText('Set and checked');
+  await expect(gemini).toContainText('Gemini accepted the key.');
+
+  const { sent, replies } = await page.evaluate(() => ({
+    sent: window.providerKeysTest.sent,
+    replies: window.providerKeysTest.replies,
+  }));
+  expect(sent.filter((a) => JSON.stringify(a).includes(OPENAI))).toEqual([
+    { provider: 'openai', key: OPENAI },
+  ]);
+  expect(sent.filter((a) => JSON.stringify(a).includes(GEMINI))).toEqual([
+    { provider: 'gemini', key: GEMINI },
+  ]);
+  for (const reply of replies) {
+    expect(JSON.stringify(reply)).not.toContain(OPENAI);
+    expect(JSON.stringify(reply)).not.toContain(GEMINI);
+  }
+  await gemini.getByRole('button', { name: 'Remove key' }).click();
+  await expect(gemini).toContainText('Not set');
+});
+
+test('native fixture: cue provider switching, custom model validation, and honest custom spend', async ({
+  page,
+}) => {
+  await openNative(page);
+  const providerSelect = page.getByLabel('Cue & notes provider');
+  const cueSelect = page.getByLabel('Cue model', { exact: true });
+  const customCueInput = page.getByLabel('Custom cue model ID (optional)');
+  const notesSelect = page.getByLabel('Model for meeting notes');
+
+  await expect(providerSelect).toHaveValue('anthropic');
+  await expect(cueSelect).toHaveValue('claude-haiku-5-5');
+  await expect(notesSelect).toHaveValue('claude-opus-5-5');
+
+  await providerSelect.selectOption('openai');
+  await expect(providerSelect).toHaveValue('openai');
+  await expect(cueSelect).toHaveValue('gpt-5-mini');
+  await expect(notesSelect).toHaveValue('gpt-5');
+
+  // Invalid custom ID is rejected with an inline error and keeps the curated default.
+  await customCueInput.fill('gpt 5 invalid');
+  await page.getByRole('button', { name: 'Save cue model' }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Model ID must be up to 96 ASCII characters',
+  );
+  await expect(cueSelect).toHaveValue('gpt-5-mini');
+
+  // Valid custom ID updates the selector and survives until cleared.
+  await customCueInput.fill('gpt-5.4-codex');
+  await page.getByRole('button', { name: 'Save cue model' }).click();
+  await expect(cueSelect).toHaveValue('__custom__');
+  await expect(
+    page.getByText('Custom cue model saved: gpt-5.4-codex.'),
+  ).toBeVisible();
+
+  // Usage for custom model omits fabricated dollar spend.
+  await page.evaluate(() =>
+    window.providerKeysTest.setUsage({
+      provider: 'openai',
+      model: 'gpt-5.4-codex',
+      requests: 7,
+      requestCap: 400,
+      spentMicroUsd: null,
+      spendCapMicroUsd: null,
+      customModel: true,
+    }),
+  );
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    page.getByText(
+      'This session: 7 of 400 cue requests. Estimated spend unavailable for custom model gpt-5.4-codex.',
+    ),
+  ).toBeVisible();
+
+  // Reset back to tested default, then switch to Gemini.
+  await page.getByRole('button', { name: 'Use tested default' }).click();
+  await expect(cueSelect).toHaveValue('gpt-5-mini');
+  await providerSelect.selectOption('gemini');
+  await expect(cueSelect).toHaveValue('gemini-2.5-flash');
+  await expect(notesSelect).toHaveValue('gemini-2.5-pro');
+});
+
+test('browser preview fake: narrow 390px viewport fits all four providers and custom model controls', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 740 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  for (const name of ['Deepgram', 'Anthropic', 'OpenAI', 'Gemini']) {
+    await expect(row(page, name)).toBeVisible();
+  }
+  await expect(page.getByLabel('Cue & notes provider')).toBeVisible();
+  await expect(page.getByLabel('Custom cue model ID (optional)')).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  );
+  expect(overflow).toBe(false);
 });

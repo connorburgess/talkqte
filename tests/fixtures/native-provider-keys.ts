@@ -2,11 +2,60 @@
 // Keychain commands. It records what the notebook sent and contacts nothing.
 import { emit } from '@tauri-apps/api/event';
 import type {
+  CueProvider,
   CueUsage,
   KeyProvider,
   KeysStatus,
   KeyStatus,
+  ProviderPreferences,
 } from '../../src/lib/providerKeys';
+
+// Pure local stand-in constants (do not runtime-import src/lib/* before mockIPC runs).
+const CURATED_CUE_MODELS: Record<CueProvider, readonly string[]> = {
+  anthropic: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'],
+  openai: ['gpt-5-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-5'],
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'],
+};
+
+const CURATED_NOTES_MODELS: Record<CueProvider, readonly string[]> = {
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+  openai: ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'gpt-4.1-mini'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+};
+
+export function providerName(provider: CueProvider): string {
+  switch (provider) {
+    case 'openai':
+      return 'OpenAI';
+    case 'gemini':
+      return 'Gemini';
+    default:
+      return 'Anthropic';
+  }
+}
+
+function defaultCueModel(provider: CueProvider): string {
+  return CURATED_CUE_MODELS[provider][0];
+}
+
+function defaultNotesModel(provider: CueProvider): string {
+  return CURATED_NOTES_MODELS[provider][0];
+}
+
+function validateModelId(raw: string): string | null {
+  if (!raw.trim()) return null;
+  const trimmed = raw.replace(/^ +| +$/g, '');
+  if (
+    trimmed.length > 96 ||
+    trimmed.includes('..') ||
+    !/^[A-Za-z0-9._:/-]+$/.test(trimmed)
+  ) {
+    throw new Error(
+      'Model ID must be up to 96 ASCII characters (letters, digits, ., _, :, /, -).',
+    );
+  }
+  return trimmed;
+}
 
 export const commands = [
   'provider_keys_status',
@@ -16,10 +65,56 @@ export const commands = [
   'cue_usage',
   'transcription_language',
   'set_transcription_language',
+  'provider_preferences',
+  'set_cue_provider',
+  'set_cue_model_override',
+  'set_notes_model_override',
 ];
 let language: 'en' | 'multi' = 'en';
-/** Refuse a language change, as the app does while a session runs. */
+/** Refuse a language or provider/model change, as the app does while a session runs. */
 let sessionRunning = false;
+
+let cueProvider: CueProvider = 'anthropic';
+let cueModelOverride: string | null = null;
+let anthropicNotesModel = 'claude-opus-5-5';
+let notesModelOverride: string | null = null;
+
+export function currentPreferences(): ProviderPreferences {
+  const effectiveCueModel = cueModelOverride ?? defaultCueModel(cueProvider);
+  const fallbackNotes =
+    cueProvider === 'anthropic'
+      ? anthropicNotesModel
+      : defaultNotesModel(cueProvider);
+  const effectiveNotesModel = notesModelOverride ?? fallbackNotes;
+  const isCuratedCue =
+    CURATED_CUE_MODELS[cueProvider].includes(effectiveCueModel);
+  const isCuratedNotes =
+    CURATED_NOTES_MODELS[cueProvider].includes(effectiveNotesModel);
+  return {
+    cueProvider,
+    cueModelOverride,
+    notesModel: effectiveNotesModel,
+    notesModelOverride,
+    effectiveCueModel,
+    effectiveCueCustom: !isCuratedCue,
+    effectiveNotesModel,
+    effectiveNotesCustom: !isCuratedNotes,
+  };
+}
+
+export function setCuratedNotesModel(model: string): string {
+  const found = CURATED_NOTES_MODELS[cueProvider].includes(model);
+  if (!found) throw new Error('That model is not offered.');
+  if (cueProvider === 'anthropic') {
+    anthropicNotesModel = model;
+    notesModelOverride = null;
+  } else if (model === defaultNotesModel(cueProvider)) {
+    notesModelOverride = null;
+  } else {
+    notesModelOverride = model;
+  }
+  return model;
+}
 
 const keysParam = new URLSearchParams(location.search).get('keys');
 const unavailable = keysParam === 'unavailable';
@@ -46,18 +141,32 @@ const stored: Record<KeyProvider, string | null> = {
     keysParam === 'set' || keysParam === 'anthropic'
       ? 'sk-ant-api03-fictional-initial-anthropic-key-0123456789'
       : null,
+  openai:
+    keysParam === 'openai'
+      ? 'sk-proj-fictional-initial-openai-key-0123456789'
+      : null,
+  gemini:
+    keysParam === 'gemini'
+      ? 'AIzaFictionalInitialGeminiKey0123456789abcdef'
+      : null,
 };
 const verified: Record<KeyProvider, boolean> = {
   deepgram: false,
   anthropic: false,
+  openai: false,
+  gemini: false,
 };
 const rejected: Record<KeyProvider, boolean> = {
   deepgram: false,
   anthropic: false,
+  openai: false,
+  gemini: false,
 };
 const unreadable: Record<KeyProvider, boolean> = {
   deepgram: keysParam === 'unreadable' || keysParam === 'unreadable-one',
   anthropic: keysParam === 'unreadable',
+  openai: false,
+  gemini: false,
 };
 type TestOutcome = 'verified' | 'rejected' | { error: string };
 const testOverrides: Partial<Record<KeyProvider, TestOutcome>> = {};
@@ -83,10 +192,18 @@ function keyStatus(provider: KeyProvider): KeyStatus {
 function status(): KeysStatus {
   const deepgram = keyStatus('deepgram');
   const anthropic = keyStatus('anthropic');
+  const openai = keyStatus('openai');
+  const gemini = keyStatus('gemini');
+  const cueMissing =
+    anthropic.state === 'notSet' &&
+    openai.state === 'notSet' &&
+    gemini.state === 'notSet';
   return {
     deepgram,
     anthropic,
-    anyMissing: deepgram.state === 'notSet' || anthropic.state === 'notSet',
+    openai,
+    gemini,
+    anyMissing: deepgram.state === 'notSet' || cueMissing,
     store,
   };
 }
@@ -116,9 +233,40 @@ async function answer(name: string, args?: Record<string, string>) {
     case 'set_provider_key': {
       if (!store.available) throw new Error(NO_STORE);
       const key = (args?.key ?? '').trim();
-      if (provider === 'anthropic' && !key.startsWith('sk-ant-api'))
+      if (
+        provider === 'anthropic' &&
+        !(
+          (key.startsWith('sk-ant-api') || key.startsWith('sk-ant-usr-')) &&
+          !key.startsWith('sk-ant-admin') &&
+          key.length >= 40 &&
+          /^[A-Za-z0-9_-]+$/.test(key)
+        )
+      )
         throw new Error(
           'That does not look like an Anthropic API key. It starts with sk-ant-api.',
+        );
+      if (
+        provider === 'openai' &&
+        !(
+          key.startsWith('sk-') &&
+          !key.startsWith('sk-ant-') &&
+          key.length >= 20 &&
+          /^[A-Za-z0-9_-]+$/.test(key)
+        )
+      )
+        throw new Error(
+          'That does not look like an OpenAI API key. It starts with sk-.',
+        );
+      if (
+        provider === 'gemini' &&
+        !(
+          key.startsWith('AIza') &&
+          key.length >= 30 &&
+          /^[A-Za-z0-9_-]+$/.test(key)
+        )
+      )
+        throw new Error(
+          'That does not look like a Google AI Studio Gemini API key. It starts with AIza.',
         );
       if (provider === 'deepgram' && !/^[A-Za-z0-9]{32,128}$/.test(key))
         throw new Error(
@@ -147,9 +295,9 @@ async function answer(name: string, args?: Record<string, string>) {
         unreadable[provider] = false;
         return changed();
       }
-      // Fictional answers: Deepgram accepts, Anthropic refuses.
+      // Fictional answers: Deepgram accepts, cue keys refuse unless overridden.
       if (provider === 'deepgram') verified.deepgram = true;
-      else rejected.anthropic = true;
+      else rejected[provider] = true;
       return changed();
     }
     case 'remove_provider_key':
@@ -171,14 +319,48 @@ async function answer(name: string, args?: Record<string, string>) {
         throw new Error('invalid');
       language = args.language;
       return language;
+    case 'provider_preferences':
+      return currentPreferences();
+    case 'set_cue_provider': {
+      if (sessionRunning)
+        throw new Error(
+          'Change the cue provider when no live session is running.',
+        );
+      const next = args?.provider as CueProvider;
+      if (next !== 'anthropic' && next !== 'openai' && next !== 'gemini')
+        throw new Error(`Unsupported cue provider ${String(args?.provider)}.`);
+      if (cueProvider !== next) {
+        cueProvider = next;
+        cueModelOverride = null;
+        notesModelOverride = null;
+      }
+      return currentPreferences();
+    }
+    case 'set_cue_model_override': {
+      if (sessionRunning)
+        throw new Error(
+          'Change the cue model when no live session is running.',
+        );
+      cueModelOverride = validateModelId(args?.model ?? '');
+      return currentPreferences();
+    }
+    case 'set_notes_model_override': {
+      notesModelOverride = validateModelId(args?.model ?? '');
+      return currentPreferences();
+    }
   }
 }
+
+export type PartialKeysStatus = Partial<KeysStatus> &
+  Pick<KeysStatus, 'deepgram' | 'anthropic' | 'anyMissing'>;
 
 export const providerKeysTest = {
   sent,
   replies,
   calls,
   status,
+  preferences: currentPreferences,
+  providerName,
   setUsage(next: CueUsage | null) {
     usage = next;
   },
@@ -197,9 +379,14 @@ export const providerKeysTest = {
     releasePendingTest = undefined;
     release?.();
   },
-  async emitStatus(next: KeysStatus) {
-    for (const provider of ['deepgram', 'anthropic'] as const) {
-      const entry = next[provider];
+  async emitStatus(next: PartialKeysStatus) {
+    for (const provider of [
+      'deepgram',
+      'anthropic',
+      'openai',
+      'gemini',
+    ] as const) {
+      const entry = next[provider] ?? { state: 'notSet', verified: false };
       unreadable[provider] = entry.state === 'unreadable';
       rejected[provider] = entry.state === 'rejected';
       verified[provider] = entry.state === 'set' && entry.verified;
