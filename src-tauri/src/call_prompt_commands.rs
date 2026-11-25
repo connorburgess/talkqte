@@ -108,9 +108,8 @@ pub(crate) fn respond_to_call_prompt(
     Ok(())
 }
 
-/// Read the two signals once a second while the prompt or auto-start is on;
-/// nothing at all while both are off. The reads happen without the runtime
-/// lock.
+/// Read the local call metadata signals while the prompt or auto-start is on;
+/// nothing at all while both are off. The reads happen without the runtime lock.
 #[cfg(target_os = "macos")]
 pub(crate) fn install(app: &tauri::AppHandle) {
     let app = app.clone();
