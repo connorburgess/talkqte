@@ -67,6 +67,7 @@ mod dev_stop;
 mod dev_user_name;
 pub mod engine;
 mod export_file;
+pub mod gemini_api;
 pub mod granola;
 #[cfg(all(
     debug_assertions,
@@ -78,6 +79,7 @@ mod lab_evaluator;
 pub mod live;
 mod live_control;
 mod live_source;
+pub mod llm_provider;
 mod login_item;
 pub mod meeting_history;
 mod meeting_history_commands;
@@ -90,6 +92,7 @@ mod native_session_clock;
 #[cfg(target_os = "macos")]
 mod native_source;
 pub mod notes_file;
+pub mod openai_api;
 pub mod platform;
 mod processing_commands;
 pub mod processing_reviews;
@@ -476,13 +479,23 @@ pub(crate) fn live_engine(sources: &engine::SessionSources) -> Engine {
     #[cfg(feature = "claude-cli")]
     return claude_cli::connected_engine(sources);
     #[cfg(not(feature = "claude-cli"))]
-    if provider_keys::global().is_set(provider_keys::Provider::Anthropic) {
-        // The person's own key: sends nothing until the session review is
-        // approved, and never falls back to another service.
-        anthropic_api::connected_engine(sources)
-    } else {
-        let _ = sources;
-        Engine::live()
+    {
+        let model = llm_provider::resolved_cue_model();
+        let key_provider = model.provider.key_provider();
+        if provider_keys::global().is_set(key_provider) {
+            // The person's own key: sends nothing until the session review is
+            // approved, and never falls back to another service.
+            match model.provider {
+                llm_provider::CueProvider::Anthropic => {
+                    anthropic_api::connected_engine_for(model, sources)
+                }
+                llm_provider::CueProvider::OpenAi => openai_api::connected_engine(model, sources),
+                llm_provider::CueProvider::Gemini => gemini_api::connected_engine(model, sources),
+            }
+        } else {
+            let _ = sources;
+            Engine::live()
+        }
     }
 }
 
@@ -740,12 +753,36 @@ pub(crate) enum LiveUnavailable {
 }
 
 impl LiveUnavailable {
+    #[cfg(test)]
     fn message(self) -> &'static str {
+        self.message_for(llm_provider::CueProvider::Anthropic)
+    }
+
+    fn message_for(self, provider: llm_provider::CueProvider) -> &'static str {
+        use llm_provider::CueProvider;
         match self {
-            Self::Build => "Add your Anthropic API key in Settings to start a live session.",
-            Self::CueKeyRejected => {
-                "Anthropic rejected your API key. Replace it in Settings to start a live session."
-            }
+            Self::Build => match provider {
+                CueProvider::Anthropic => {
+                    "Add your Anthropic API key in Settings to start a live session."
+                }
+                CueProvider::OpenAi => {
+                    "Add your OpenAI API key in Settings to start a live session."
+                }
+                CueProvider::Gemini => {
+                    "Add your Gemini API key in Settings to start a live session."
+                }
+            },
+            Self::CueKeyRejected => match provider {
+                CueProvider::Anthropic => {
+                    "Anthropic rejected your API key. Replace it in Settings to start a live session."
+                }
+                CueProvider::OpenAi => {
+                    "OpenAI rejected your API key. Replace it in Settings to start a live session."
+                }
+                CueProvider::Gemini => {
+                    "Gemini rejected your API key. Replace it in Settings to start a live session."
+                }
+            },
             Self::Selection => "Add your Deepgram API key in Settings to start a live session.",
             Self::Settings | Self::TokenMetadata => {
                 "The cloud transcription settings are not usable."
@@ -756,28 +793,52 @@ impl LiveUnavailable {
             Self::KeyUnreadable if cfg!(windows) => {
                 "Your Deepgram key could not be read from Windows Credential Manager. Check it in Settings."
             }
-            Self::CueKeyUnreadable if cfg!(windows) => {
-                "Your Anthropic key could not be read from Windows Credential Manager. Check it in Settings."
-            }
+            Self::CueKeyUnreadable if cfg!(windows) => match provider {
+                CueProvider::Anthropic => {
+                    "Your Anthropic key could not be read from Windows Credential Manager. Check it in Settings."
+                }
+                CueProvider::OpenAi => {
+                    "Your OpenAI key could not be read from Windows Credential Manager. Check it in Settings."
+                }
+                CueProvider::Gemini => {
+                    "Your Gemini key could not be read from Windows Credential Manager. Check it in Settings."
+                }
+            },
             Self::KeyUnreadable if cfg!(target_os = "linux") => {
                 "Your Deepgram key could not be read from the keyring. Check it in Settings."
             }
-            Self::CueKeyUnreadable if cfg!(target_os = "linux") => {
-                "Your Anthropic key could not be read from the keyring. Check it in Settings."
-            }
+            Self::CueKeyUnreadable if cfg!(target_os = "linux") => match provider {
+                CueProvider::Anthropic => {
+                    "Your Anthropic key could not be read from the keyring. Check it in Settings."
+                }
+                CueProvider::OpenAi => {
+                    "Your OpenAI key could not be read from the keyring. Check it in Settings."
+                }
+                CueProvider::Gemini => {
+                    "Your Gemini key could not be read from the keyring. Check it in Settings."
+                }
+            },
             Self::KeyUnreadable => {
                 "Your Deepgram key could not be read from the Keychain. Check it in Settings."
             }
-            Self::CueKeyUnreadable => {
-                "Your Anthropic key could not be read from the Keychain. Check it in Settings."
-            }
+            Self::CueKeyUnreadable => match provider {
+                CueProvider::Anthropic => {
+                    "Your Anthropic key could not be read from the Keychain. Check it in Settings."
+                }
+                CueProvider::OpenAi => {
+                    "Your OpenAI key could not be read from the Keychain. Check it in Settings."
+                }
+                CueProvider::Gemini => {
+                    "Your Gemini key could not be read from the Keychain. Check it in Settings."
+                }
+            },
         }
     }
 }
 
 /// Whether this build registers a cue connection for live sessions: the
 /// lab's, the development Claude Code connection, or the person's own
-/// Anthropic key.
+/// chosen cue provider key.
 fn cue_connection() -> Result<(), LiveUnavailable> {
     #[cfg(all(
         debug_assertions,
@@ -791,7 +852,13 @@ fn cue_connection() -> Result<(), LiveUnavailable> {
     if cfg!(feature = "claude-cli") {
         return Ok(());
     }
-    match provider_keys::global().status().anthropic.state {
+    let status = provider_keys::global().status();
+    let key_status = match llm_provider::cue_provider() {
+        llm_provider::CueProvider::Anthropic => status.anthropic,
+        llm_provider::CueProvider::OpenAi => status.openai,
+        llm_provider::CueProvider::Gemini => status.gemini,
+    };
+    match key_status.state {
         provider_keys::KeyState::Set => Ok(()),
         provider_keys::KeyState::Rejected => Err(LiveUnavailable::CueKeyRejected),
         provider_keys::KeyState::NotSet => Err(LiveUnavailable::Build),
@@ -826,7 +893,10 @@ fn classify_live_availability(
 }
 
 pub(crate) fn live_unavailable() -> Option<&'static str> {
-    live_availability().err().map(LiveUnavailable::message)
+    let provider = llm_provider::cue_provider();
+    live_availability()
+        .err()
+        .map(|err| err.message_for(provider))
 }
 
 #[tauri::command]
@@ -1844,6 +1914,10 @@ pub fn run() {
             provider_key_commands::test_provider_key,
             provider_key_commands::remove_provider_key,
             provider_key_commands::cue_usage,
+            provider_key_commands::provider_preferences,
+            provider_key_commands::set_cue_provider,
+            provider_key_commands::set_cue_model_override,
+            provider_key_commands::set_notes_model_override,
             provider_key_commands::transcription_language,
             provider_key_commands::set_transcription_language,
             companion::companion_anchor,
