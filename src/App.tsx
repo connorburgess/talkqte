@@ -467,7 +467,7 @@ function FloatingQuestion() {
           <p className="floating-empty">
             {state?.overlayEnabled === false
               ? 'Companion hidden. Show it again in Settings.'
-              : 'Start a live session or the microphone check in your notebook.'}
+              : 'Start a live session in your notebook, or check your microphone in Settings.'}
           </p>
         )}
         {(error || microphone.error) && (
@@ -563,12 +563,18 @@ function Notebook() {
   }, [startPending, state?.live, state?.status]);
   const startButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement | null>(null);
+  const stopButton = useRef<HTMLButtonElement | null>(null);
   const restoreStartFocus = useRef(false);
   const focusCancel = useRef(false);
   const rememberCancel = useCallback((node: HTMLButtonElement | null) => {
     if (!node && cancelButton.current === document.activeElement)
       restoreStartFocus.current = true;
     cancelButton.current = node;
+  }, []);
+  const rememberStop = useCallback((node: HTMLButtonElement | null) => {
+    if (!node && stopButton.current === document.activeElement)
+      restoreStartFocus.current = true;
+    stopButton.current = node;
   }, []);
   const preparing =
     capture.state?.startup === 'loading' ||
@@ -691,30 +697,6 @@ function Notebook() {
     focusCancel.current = false;
     if (document.activeElement === document.body) cancelButton.current?.focus();
   }, [preparing, capture.state?.startup]);
-  useEffect(() => {
-    if (!restoreStartFocus.current || capture.busy) return;
-    if (preparing) {
-      if (
-        !cancelling &&
-        capture.state?.startup === 'loading' &&
-        document.activeElement === document.body
-      )
-        cancelButton.current?.focus();
-      return;
-    }
-    if (busy || finishing) return;
-    restoreStartFocus.current = false;
-    if (view === 'notebook' && document.activeElement === document.body)
-      startButton.current?.focus();
-  }, [
-    preparing,
-    cancelling,
-    capture.busy,
-    capture.state?.startup,
-    busy,
-    finishing,
-    view,
-  ]);
   const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
@@ -1152,6 +1134,48 @@ function Notebook() {
     }
   }, [preview, busy]);
 
+  const live = !!state?.live && state.status === 'running';
+  // Browser preview and tests only: a replay of a fictional conversation.
+  // The flag comes from the browser tests' stand-in (liveTest.simulate in
+  // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
+  // so every `simulated` branch is unreachable in the app.
+  const simulated = !!state?.simulated && state.status === 'running';
+  const liveCaptureBar = live || preparing || finishing;
+  const micCheckActive =
+    (microphone.active && !microphoneNotCapturing(microphone.state)) ||
+    microphone.stopPending ||
+    (!!microphone.error && !microphone.state);
+  const micCheckBar = !liveCaptureBar && view !== 'settings' && micCheckActive;
+  useEffect(() => {
+    if (!restoreStartFocus.current || capture.busy) return;
+    if (preparing) {
+      if (
+        !cancelling &&
+        capture.state?.startup === 'loading' &&
+        document.activeElement === document.body
+      )
+        cancelButton.current?.focus();
+      return;
+    }
+    if (busy || live || finishing || micCheckBar) return;
+    restoreStartFocus.current = false;
+    if (document.activeElement !== document.body) return;
+    if (view === 'notebook' && !showOnboarding)
+      (startButton.current ?? sessionHeading.current)?.focus();
+    else if (view !== 'settings') notebookNav.current?.focus();
+  }, [
+    preparing,
+    cancelling,
+    capture.busy,
+    capture.state?.startup,
+    busy,
+    live,
+    finishing,
+    micCheckBar,
+    view,
+    showOnboarding,
+  ]);
+
   if (!state)
     return (
       <main className="loading">
@@ -1163,12 +1187,6 @@ function Notebook() {
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </main>
     );
-  const live = state.live && state.status === 'running';
-  // Browser preview and tests only: a replay of a fictional conversation.
-  // The flag comes from the browser tests' stand-in (liveTest.simulate in
-  // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
-  // so every `simulated` branch is unreachable in the app.
-  const simulated = !!state.simulated && state.status === 'running';
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -1435,16 +1453,14 @@ function Notebook() {
             <span className="prototype-label">Browser preview</span>
           )}
         </header>
-        {(!showOnboarding ||
-          live ||
-          preparing ||
-          finishing ||
-          microphone.active) && (
+        {(liveCaptureBar || micCheckBar) && (
           <MicrophoneControl
             microphone={microphone}
             live={live || finishing}
             preparing={preparing}
             cancelling={cancelling}
+            compact={!liveCaptureBar}
+            stopActionRef={rememberStop}
             processingConfigured={!!capture.state?.processor}
             sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
             sourceSession={sourceApp}
@@ -1469,6 +1485,7 @@ function Notebook() {
                 </button>
               ) : live || finishing ? (
                 <button
+                  ref={rememberStop}
                   className="secondary-button"
                   disabled={capture.busy || !capture.state}
                   onClick={() => void capture.stop()}
@@ -1534,7 +1551,7 @@ function Notebook() {
               !!liveStatus?.available &&
               !busy &&
               !startPending &&
-              !microphone.active
+              !micCheckActive
             }
             onSkip={skipOnboarding}
             onFinish={finishOnboarding}
@@ -1704,11 +1721,11 @@ function Notebook() {
                         disabled={
                           busy ||
                           startPending ||
-                          microphone.active ||
+                          micCheckActive ||
                           (canChooseSources && !ready(sources))
                         }
                         title={
-                          microphone.active
+                          micCheckActive
                             ? 'Stop the microphone check first.'
                             : canChooseSources && !ready(sources)
                               ? 'Choose the application first.'
@@ -2439,6 +2456,13 @@ function Notebook() {
             </section>
             <CallPromptSetting key={settingsEpoch} />
             <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
+            {!liveCaptureBar && (
+              <MicrophoneControl
+                microphone={microphone}
+                inSettings
+                sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+              />
+            )}
             <section className="setting">
               <div>
                 <h2 id="live-transcription" tabIndex={-1}>

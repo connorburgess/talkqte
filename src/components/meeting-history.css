@@ -86,6 +86,8 @@
 .history-settings {
   display: grid;
   gap: var(--space-12);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .history-confirm {
   display: grid;

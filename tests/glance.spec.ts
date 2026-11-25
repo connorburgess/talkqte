@@ -177,7 +177,7 @@ for (const size of ['standard', 'large'] as const) {
     await standIn(page, '/?window=cue');
     await expect(
       page.getByText(
-        'Start a live session or the microphone check in your notebook.',
+        'Start a live session in your notebook, or check your microphone in Settings.',
       ),
     ).toBeVisible();
     await liveCue(page);
