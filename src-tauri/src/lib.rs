@@ -3515,7 +3515,7 @@ mod dictation_ipc_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod update_ipc_tests {
     use super::*;
 
