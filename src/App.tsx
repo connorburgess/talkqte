@@ -1757,7 +1757,10 @@ function Notebook() {
         {bridge.desktop && (
           <div
             className="notebook-processing"
-            hidden={!state.live && !capture.state?.source?.mayBeCapturing}
+            hidden={
+              view === 'meetings' ||
+              (!state.live && !capture.state?.source?.mayBeCapturing)
+            }
           >
             <ProcessingControl
               transcriptionProvider={

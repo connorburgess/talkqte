@@ -113,11 +113,16 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  padding: 4px 8px 4px 12px;
+  padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--muted);
+}
+.history-search:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-color: var(--ink);
 }
 .history-search input {
   flex: 1 1 auto;
@@ -128,8 +133,9 @@
   color: var(--ink);
   font: inherit;
 }
+.history-search input:focus,
 .history-search input:focus-visible {
-  outline-offset: 2px;
+  outline: none;
 }
 .history-list {
   list-style: none;
