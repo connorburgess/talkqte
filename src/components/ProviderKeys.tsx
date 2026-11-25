@@ -1,9 +1,11 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Check, TriangleAlert } from 'lucide-react';
 import {
   CURATED_CUE_MODELS,
   cueProviderName,
   cueUsage,
   defaultCueModel,
+  keyStoreLabel,
   keyStoreName,
   keysStatus,
   providerPreferences,
@@ -101,20 +103,28 @@ function unreadableText(store: KeyStore | undefined) {
   }
 }
 
+const SAVED_KEY_MASK = '••••••••••••••••••••••••';
+const SAVED_KEY_PLACEHOLDER = 'Paste a new key to replace the saved one';
+const REJECTED_KEY_PLACEHOLDER = 'Paste a new key to replace the rejected one';
+const UNREADABLE_KEY_PLACEHOLDER = 'Paste a key to save it again';
+
 function stateText(
   name: string,
   status: KeyStatus | undefined,
   store: KeyStore | undefined,
+  unavailable = false,
 ) {
+  if (unavailable) return 'Unavailable';
   if (!status) return 'Checking…';
   if (status.state === 'notSet') return 'Not set';
   if (status.state === 'unreadable') return unreadableText(store);
   if (status.state === 'rejected')
     return `Rejected by ${name}. Replace it with a new key.`;
-  return status.verified ? 'Set and checked' : 'Set, not checked yet';
+  return status.verified ? 'Saved · checked' : 'Saved · not checked yet';
 }
 
-function stateClass(status: KeyStatus | undefined) {
+function stateClass(status: KeyStatus | undefined, unavailable = false) {
+  if (unavailable) return 'is-unreadable';
   if (!status) return 'is-checking';
   if (status.state === 'notSet') return 'is-not-set';
   if (status.state === 'set') return 'is-set';
@@ -151,29 +161,38 @@ function NoKeyStore({ store }: { store: KeyStore | undefined }) {
 
 const dollars = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 
-function useProviderKeysData(includeUsage: boolean) {
+function useProviderKeysData(
+  includeUsage: boolean,
+  onKeysChanged?: () => void,
+) {
   const [status, setStatus] = useState<KeysStatus>();
   const [unavailable, setUnavailable] = useState(false);
   const [usage, setUsage] = useState<CueUsage | null>(null);
+  const onKeysChangedRef = useRef(onKeysChanged);
+  onKeysChangedRef.current = onKeysChanged;
 
   useEffect(() => {
     let live = true;
     let stop: (() => void) | undefined;
-    const receive = (next: unknown) => {
+    const receive = (next: unknown, fromWatch: boolean) => {
       if (!live) return;
       if (isKeysStatus(next)) {
         setStatus(next);
         setUnavailable(false);
+        if (fromWatch) onKeysChangedRef.current?.();
       } else setUnavailable(true);
     };
-    keysStatus().then(receive, () => live && setUnavailable(true));
+    keysStatus().then(
+      (next) => receive(next, false),
+      () => live && setUnavailable(true),
+    );
     if (includeUsage) {
       cueUsage().then(
         (next) => live && setUsage(next ?? null),
         () => {},
       );
     }
-    watchKeys(receive).then(
+    watchKeys((next) => receive(next, true)).then(
       (unlisten) => (live ? (stop = unlisten) : unlisten()),
       () => {},
     );
@@ -191,11 +210,13 @@ function useProviderKeysData(includeUsage: boolean) {
  * through Rust and are never shown again; only their state comes back. */
 export function ProviderKeys({
   onPreferencesChange,
+  onKeysChanged,
 }: {
   onPreferencesChange?: () => void;
+  onKeysChanged?: () => void;
 }) {
   const { status, setStatus, unavailable, setUnavailable, usage } =
-    useProviderKeysData(true);
+    useProviderKeysData(true, onKeysChanged);
   const [selectedSttProvider, setSelectedSttProvider] =
     useState<TranscriptionProvider>('deepgram');
   const [prefs, setPrefs] = useState<ProviderPreferences | null>(null);
@@ -264,9 +285,11 @@ export function ProviderKeys({
             provider={provider}
             status={status?.[provider.id]}
             store={status?.store}
+            unavailable={unavailable}
             onStatus={(next) => {
               setStatus(next);
               setUnavailable(false);
+              onKeysChanged?.();
               onPreferencesChange?.();
             }}
           />
@@ -484,11 +507,13 @@ function CueProviderAndModelChoice({
  * and controls to Settings -> Your API keys. */
 export function ProviderKeysRows({
   showWhereToGet = false,
+  onKeysChanged,
 }: {
   showWhereToGet?: boolean;
+  onKeysChanged?: () => void;
 }) {
   const { status, setStatus, unavailable, setUnavailable } =
-    useProviderKeysData(false);
+    useProviderKeysData(false, onKeysChanged);
 
   return (
     <div className="provider-keys-list provider-keys-embedded">
@@ -504,11 +529,13 @@ export function ProviderKeysRows({
           provider={provider}
           status={status?.[provider.id]}
           store={status?.store}
+          unavailable={unavailable}
           showWhereToGet={showWhereToGet}
           embedded
           onStatus={(next) => {
             setStatus(next);
             setUnavailable(false);
+            onKeysChanged?.();
           }}
         />
       ))}
@@ -520,6 +547,7 @@ function KeyRow({
   provider,
   status,
   store,
+  unavailable = false,
   showWhereToGet = false,
   embedded = false,
   onStatus,
@@ -527,6 +555,7 @@ function KeyRow({
   provider: (typeof providers)[number];
   status: KeyStatus | undefined;
   store: KeyStore | undefined;
+  unavailable?: boolean;
   showWhereToGet?: boolean;
   /** In setup, directly under the step's level-one heading. */
   embedded?: boolean;
@@ -534,31 +563,92 @@ function KeyRow({
 }) {
   const id = useId();
   const Heading = embedded ? 'h2' : 'h3';
+  const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const replaceButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingFocusRef = useRef<'input' | 'replace' | null>(null);
   const [draft, setDraft] = useState('');
+  const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const noStore = !!store && !store.available;
   const stored = !!status && status.state !== 'notSet' && !noStore;
+  const badgeClass =
+    busy === 'test' ? 'is-checking' : stateClass(status, unavailable);
+  const isSaved = status?.state === 'set' && !noStore && !unavailable;
+  const isRejected = status?.state === 'rejected' && !noStore && !unavailable;
+  const isWarningBadge =
+    badgeClass === 'is-rejected' || badgeClass === 'is-unreadable';
+  const showInput = !isSaved || replacing;
+  const inputPlaceholder = noStore
+    ? 'Cannot be saved on this system yet'
+    : isSaved
+      ? SAVED_KEY_PLACEHOLDER
+      : isRejected
+        ? REJECTED_KEY_PLACEHOLDER
+        : status?.state === 'unreadable' && !unavailable
+          ? UNREADABLE_KEY_PLACEHOLDER
+          : undefined;
+
+  useEffect(() => {
+    if (!isSaved) setReplacing(false);
+  }, [isSaved]);
+
+  useEffect(() => {
+    const target = pendingFocusRef.current;
+    if (!target || busy !== null) return;
+    if (target === 'input' && showInput && inputRef.current) {
+      pendingFocusRef.current = null;
+      inputRef.current.focus();
+    } else if (target === 'replace' && !showInput && replaceButtonRef.current) {
+      pendingFocusRef.current = null;
+      replaceButtonRef.current.focus();
+    }
+  }, [showInput, busy]);
+
+  const startReplace = () => {
+    pendingFocusRef.current = 'input';
+    setReplacing(true);
+    setError('');
+    setNote('');
+  };
+
+  const cancelReplace = () => {
+    pendingFocusRef.current = 'replace';
+    setReplacing(false);
+    setDraft('');
+    setError('');
+  };
 
   const run = async (
     action: 'save' | 'test' | 'remove',
     work: () => Promise<KeysStatus>,
     done: (status: KeysStatus) => string,
   ) => {
+    const focusInRow = !!formRef.current?.contains(document.activeElement);
+    if (action === 'save' && focusInRow) {
+      pendingFocusRef.current = 'replace';
+    }
     setBusy(action);
     setError('');
     setNote('');
     try {
       const next = await work();
-      if (action === 'save') setDraft('');
+      if (action === 'save') {
+        setDraft('');
+        setReplacing(false);
+      }
       if (isKeysStatus(next)) {
         onStatus(next);
         setNote(done(next));
       }
     } catch (failure) {
-      // A refused key is not kept on screen or in memory longer than needed.
-      if (action === 'save') setDraft('');
+      if (action === 'save') {
+        pendingFocusRef.current = null;
+        // A refused key is not kept on screen or in memory longer than needed.
+        setDraft('');
+      }
       setError(message(failure, 'Nothing was changed. Try again.'));
     } finally {
       setBusy(null);
@@ -577,21 +667,25 @@ function KeyRow({
 
   return (
     <form
+      ref={formRef}
       className="provider-key"
       aria-labelledby={`${id}-name`}
       onSubmit={save}
     >
       <div className="provider-key-head">
         <Heading id={`${id}-name`}>{provider.name}</Heading>
-        <p
-          id={`${id}-state`}
-          className={`provider-key-state ${
-            busy === 'test' ? 'is-checking' : stateClass(status)
-          }`}
-        >
-          {busy === 'test'
-            ? 'Checking…'
-            : stateText(provider.name, status, store)}
+        <p id={`${id}-state`} className={`provider-key-state ${badgeClass}`}>
+          {badgeClass === 'is-set' && (
+            <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+          )}
+          {isWarningBadge && (
+            <TriangleAlert size={14} strokeWidth={2.25} aria-hidden="true" />
+          )}
+          <span>
+            {busy === 'test'
+              ? 'Checking…'
+              : stateText(provider.name, status, store, unavailable)}
+          </span>
         </p>
       </div>
       <p id={`${id}-role`} className="provider-key-role">
@@ -602,29 +696,72 @@ function KeyRow({
           <strong>Where to get one:</strong> {provider.whereToGet}
         </p>
       )}
-      <label htmlFor={`${id}-input`}>
-        {stored ? `Replace ${provider.name} key` : `${provider.name} API key`}
-      </label>
-      <input
-        id={`${id}-input`}
-        type="password"
-        value={draft}
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        maxLength={512}
-        disabled={noStore}
-        aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
-        onChange={(event) => setDraft(event.target.value)}
-      />
+      {showInput ? (
+        <>
+          <label htmlFor={`${id}-input`}>
+            {stored
+              ? `Replace ${provider.name} key`
+              : `${provider.name} API key`}
+          </label>
+          <input
+            ref={inputRef}
+            id={`${id}-input`}
+            type="password"
+            className={isRejected ? 'is-rejected' : undefined}
+            value={draft}
+            placeholder={inputPlaceholder}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            maxLength={512}
+            disabled={noStore}
+            aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </>
+      ) : (
+        <div className="provider-key-stored">
+          <span className="provider-key-mask" aria-hidden="true">
+            {SAVED_KEY_MASK}
+          </span>
+          <span className="provider-key-stored-note">
+            <span className="visually-hidden">{provider.name} key </span>
+            Stored in {keyStoreLabel(store?.kind)}
+          </span>
+        </div>
+      )}
       <div className="provider-key-actions">
-        <button
-          type="submit"
-          className="primary-button provider-key-btn"
-          disabled={noStore || !draft.trim() || busy !== null}
-        >
-          {busy === 'save' ? 'Saving…' : 'Save key'}
-        </button>
+        {showInput ? (
+          <>
+            <button
+              type="submit"
+              className="primary-button provider-key-btn"
+              disabled={noStore || !draft.trim() || busy !== null}
+            >
+              {busy === 'save' ? 'Saving…' : 'Save key'}
+            </button>
+            {isSaved && (
+              <button
+                type="button"
+                className="secondary-button provider-key-btn"
+                disabled={busy !== null}
+                onClick={cancelReplace}
+              >
+                Cancel
+              </button>
+            )}
+          </>
+        ) : (
+          <button
+            ref={replaceButtonRef}
+            type="button"
+            className="secondary-button provider-key-btn"
+            disabled={busy !== null}
+            onClick={startReplace}
+          >
+            Replace key
+          </button>
+        )}
         <button
           type="button"
           className="secondary-button provider-key-btn"
