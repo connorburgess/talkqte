@@ -185,13 +185,13 @@ test('Notebook opens the kept meeting on Open and opens confirmation before send
     page.getByRole('heading', { name: 'Live session ended' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Write meeting notes…' }),
+    page.getByRole('button', { name: 'Generate notes' }),
   ).toBeVisible();
   const [saved] = await page.evaluate(() => window.historyTest.meetings());
   expect(saved).toBeTruthy();
 
   // Clicking Write notes in the companion invokes respond_to_end_prompt and
-  // brings Notebook to the explicit confirmation plan (never auto-sends).
+  // focuses Generate notes in the Notebook (never auto-sends).
   await page.evaluate(async () => {
     const session = window.liveTest.session().endPrompt!.session;
     const tauri = (
@@ -207,8 +207,8 @@ test('Notebook opens the kept meeting on Open and opens confirmation before send
     });
   });
   await expect(
-    page.getByRole('heading', { name: 'Send this meeting to Anthropic?' }),
-  ).toBeVisible();
+    page.getByRole('button', { name: 'Generate notes' }),
+  ).toBeFocused();
   expect(
     await page.evaluate(() => window.liveTest.session().endPrompt),
   ).toBeUndefined();

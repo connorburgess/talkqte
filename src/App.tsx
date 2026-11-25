@@ -1692,9 +1692,8 @@ function Notebook() {
           <div
             className="notebook-processing"
             hidden={
-              view !== 'settings' &&
-              !state.live &&
-              !capture.state?.source?.mayBeCapturing
+              view === 'meetings' ||
+              (!state.live && !capture.state?.source?.mayBeCapturing)
             }
           >
             <ProcessingControl
