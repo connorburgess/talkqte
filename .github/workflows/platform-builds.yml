@@ -1,16 +1,33 @@
 name: Windows and Ubuntu builds (unsigned)
 
 # Installable, unsigned Windows and Ubuntu builds of the desktop app, made on
-# every pull request and on manual dispatch, and uploaded as workflow
-# artifacts only. Nothing here signs, notarises, publishes a release or
+# merges to main that change the app or packaging, on pull requests that touch
+# this workflow or its launch scripts, and on manual dispatch, and uploaded as
+# workflow artifacts only. Nothing here signs, notarises, publishes a release or
 # touches an update feed. Each job also proves the build launches on its
 # runner (Windows: the installed app's window; Ubuntu: the installed package
 # in the current LTS, under a virtual display). That is all a hosted runner can
 # show: no microphone, meeting app, real display or person is involved.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/platform-builds.yml
+      - src-tauri/**
+      - src/**
+      - index.html
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - vite.config.ts
+      - scripts/platform/**
+      - scripts/third-party-notices.mjs
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/platform-builds.yml
+      - scripts/platform/**
   workflow_dispatch:
 
 permissions:

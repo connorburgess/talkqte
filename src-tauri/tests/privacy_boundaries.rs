@@ -536,3 +536,53 @@ fn granola_requests_name_the_app_and_carry_the_token_only_as_a_bearer_header() {
     let debug = format!("{tokens:?} {connection:?}");
     assert!(!debug.contains("fictional-access-token"), "{debug}");
 }
+
+#[test]
+fn global_system_audio_tap_keeps_no_app_name_or_private_data_in_companion_or_kept_meetings() {
+    use talkqte_lib::engine::SessionSources;
+    let mut engine = Engine::live();
+    engine.set_user_name(Some("Marisol".into())).unwrap();
+    engine
+        .update_notes("Fictional notes for the orchard call.".into())
+        .unwrap();
+    engine.start().unwrap();
+    engine.set_sources(SessionSources::system_audio());
+    engine.advance(2_000);
+    let session = engine.session();
+    engine
+        .ingest_from(
+            session,
+            talkqte_lib::engine::LineOrigin::Application,
+            line("sys-1", 1_000, "Let's check the seed delivery."),
+        )
+        .unwrap();
+    engine
+        .ingest_from(
+            session,
+            talkqte_lib::engine::LineOrigin::Microphone,
+            line("mic-1", 1_500, "Sounds good, Friday works."),
+        )
+        .unwrap();
+
+    // Companion never receives transcript text, notes, or source details.
+    let cue_json = serde_json::to_string(&engine.cue_snapshot()).unwrap();
+    for secret in ["seed delivery", "orchard call", "Marisol", "System audio"] {
+        assert!(!cue_json.contains(secret), "companion leaked {secret}");
+    }
+
+    // Export holds manual notes only while ended/kept never stores an app name for system audio.
+    let export = engine.markdown();
+    assert!(!export.contains("seed delivery"));
+    assert!(!export.contains("System audio"));
+    engine.end();
+    let kept = engine.keepable_meeting(true).unwrap();
+    assert_eq!(kept.application, None);
+    assert_eq!(kept.sources, talkqte_lib::meeting_history::Sources::Both);
+    assert_eq!(
+        kept.transcript.iter().map(|l| l.label).collect::<Vec<_>>(),
+        vec![
+            Some(talkqte_lib::meeting_history::Label::Them),
+            Some(talkqte_lib::meeting_history::Label::You),
+        ]
+    );
+}

@@ -499,7 +499,7 @@ test('one-click Start live session discloses active sources and immediately enab
   });
   await page.goto('/?live&processor&keys=set');
   await expect(page.locator('.session-start-disclosure')).toHaveText(
-    'Starts immediately: sends your microphone to Deepgram and recent lines to Anthropic until you press Stop.',
+    'Starts immediately: sends your microphone and system audio to Deepgram and recent lines to Anthropic until you press Stop.',
   );
   await page
     .getByRole('button', { name: 'Start live session', exact: true })

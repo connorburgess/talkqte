@@ -11,7 +11,7 @@ Planning baseline, 8 November 2026. These are delivery priorities and validation
 
 ## Unsigned CI builds for Windows and Ubuntu
 
-The [Windows and Ubuntu builds workflow](../.github/workflows/platform-builds.yml) runs on every pull request and on manual dispatch. It builds the release app (no development features) and uploads, per platform, the installers, `SHA256SUMS.txt`, the third-party notices for that build's Rust target and a `README-UNSIGNED.txt` naming the commit and run. Nothing is signed or notarised, nothing is published as a release, and no update feed exists. Artifacts are kept for 14 days. To download one, open the workflow run from the pull request's checks (or **Actions → Windows and Ubuntu builds (unsigned)**), then the **Artifacts** list at the bottom of the run summary, or use `gh run download <run-id> -n <artifact-name>`.
+The [Windows and Ubuntu builds workflow](../.github/workflows/platform-builds.yml) runs on merges to `main` that change the app or packaging, on pull requests that touch that workflow or its launch scripts, and on manual dispatch. It builds the release app (no development features) and uploads, per platform, the installers, `SHA256SUMS.txt`, the third-party notices for that build's Rust target and a `README-UNSIGNED.txt` naming the commit and run. Nothing is signed or notarised, nothing is published as a release, and no update feed exists. Artifacts are kept for 14 days. To download one, open **Actions → Windows and Ubuntu builds (unsigned)**, select a run, then open the **Artifacts** list at the bottom of the run summary, or use `gh run download <run-id> -n <artifact-name>`.
 
 | Artifact | Contents | Built on | What CI checks |
 | --- | --- | --- | --- |
