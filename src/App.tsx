@@ -855,9 +855,13 @@ function Notebook() {
   useEffect(() => {
     if (!state) return;
     setEndedFocus(
-      state.live && state.status === 'ended' ? state.focus.join('\n') : null,
+      state.live &&
+        state.status === 'ended' &&
+        (state.transcript.length > 0 || state.notes.trim().length > 0)
+        ? state.focus.join('\n')
+        : null,
     );
-  }, [state?.live, state?.status]);
+  }, [state?.live, state?.status, state?.transcript.length, state?.notes]);
   // The cap's countdown is said when it first appears, not every minute.
   const lowSaid = useRef(false);
   const lowText = transcriptionLowText(state?.transcription);
@@ -888,7 +892,7 @@ function Notebook() {
   const sessionWas = useRef<string | null>(null);
   useEffect(() => {
     const now = state?.live ? (state.status ?? null) : null;
-    if (sessionWas.current === 'running' && now === 'ended')
+    if (sessionWas.current === 'running' && now !== 'running')
       setNotice('Live session ended.');
     sessionWas.current = now;
   }, [state?.live, state?.status]);
@@ -1268,6 +1272,13 @@ function Notebook() {
   }, [preview, busy]);
 
   const live = !!state?.live && state.status === 'running';
+  const emptyEndedLive =
+    !!state?.live &&
+    state.status === 'ended' &&
+    state.transcript.length === 0 &&
+    state.notes.trim().length === 0 &&
+    notes.trim().length === 0;
+  const sessionLive = !!state?.live && !emptyEndedLive;
   // Browser preview and tests only: a replay of a fictional conversation.
   // The flag comes from the browser tests' stand-in (liveTest.simulate in
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
@@ -1632,7 +1643,7 @@ function Notebook() {
                   ? 'Meetings'
                   : 'Settings'}
             </span>
-            {view === 'notebook' && state.live && (
+            {view === 'notebook' && sessionLive && (
               <>
                 <ChevronRight size={14} />
                 <span>Live session</span>
@@ -1710,7 +1721,13 @@ function Notebook() {
             className="notebook-processing"
             hidden={
               view === 'meetings' ||
-              (!state.live && !capture.state?.source?.mayBeCapturing)
+              (!live &&
+                !preparing &&
+                !finishing &&
+                !capture.state?.source?.mayBeCapturing &&
+                !capture.state?.issue &&
+                !capture.error &&
+                !(capture.statusError && (live || preparing || finishing)))
             }
           >
             <ProcessingControl
@@ -1777,7 +1794,7 @@ function Notebook() {
                         : 'Preparing live session'
                       : finishing
                         ? 'Finishing live session'
-                        : state.live
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? 'Cues paused · session continues'
@@ -1795,7 +1812,7 @@ function Notebook() {
                           microphoneNotCapturing(microphone.state)
                           ? 'Ending live session. See Cue processing above.'
                           : 'Releasing microphone and finishing transcription…'
-                        : state.live
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? sourceApp
@@ -1827,7 +1844,7 @@ function Notebook() {
                   </p>
                   {capturesSystemAudio &&
                     liveStatus?.available &&
-                    !state.live &&
+                    !sessionLive &&
                     !simulated &&
                     !preparing &&
                     !finishing && (
@@ -1837,7 +1854,7 @@ function Notebook() {
                       </p>
                     )}
                   {notMacos(platform) &&
-                    !state.live &&
+                    !sessionLive &&
                     !simulated &&
                     !preparing &&
                     !finishing && (
@@ -1877,9 +1894,8 @@ function Notebook() {
                 </div>
               </div>
               <div className="session-actions">
-                {(state.live || simulated) && !preparing && (
+                {(live || simulated) && !preparing && (
                   <span className="session-clock">
-                    {state.live && !live && !finishing ? 'Length ' : ''}
                     {clockTime(state.elapsedMs)}
                   </span>
                 )}
@@ -2122,9 +2138,9 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    {(state.live || simulated) && (
+                    {(sessionLive || simulated) && (
                       <p className="muted small">
-                        {state.live
+                        {sessionLive
                           ? (sourcesHeading(
                               state.sources,
                               state.transcription,
@@ -2198,7 +2214,7 @@ function Notebook() {
                             ? sourceApp
                               ? 'Lines from the app appear a few seconds after they’re heard.'
                               : 'Lines appear a few seconds after they’re spoken.'
-                            : state.live
+                            : sessionLive
                               ? 'No lines transcribed.'
                               : simulated
                                 ? 'Replay lines appear here.'
@@ -2238,7 +2254,7 @@ function Notebook() {
                           ? 'Cues are paused.'
                           : live || simulated
                             ? 'A little room to think.'
-                            : state.live
+                            : sessionLive
                               ? 'Cues have stopped.'
                               : 'No cue yet.'}
                       </h3>
@@ -2247,7 +2263,7 @@ function Notebook() {
                           ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
                           : live || simulated
                             ? 'Cues pass quietly. Keep listening without needing to respond.'
-                            : state.live
+                            : sessionLive
                               ? 'Start a new session for cues.'
                               : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
                       </p>
@@ -2541,7 +2557,7 @@ function Notebook() {
               <p>
                 {live || preparing || finishing
                   ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
-                  : state.live
+                  : sessionLive
                     ? sessionHistory?.kept
                       ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
                       : 'In memory until you quit or start another session, unless you save or export it.'

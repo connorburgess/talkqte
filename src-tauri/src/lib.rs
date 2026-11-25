@@ -1789,6 +1789,9 @@ fn finish_live_with(app: &tauri::AppHandle, live: Live, flush: bool, force_save:
     let mut ended = false;
     let finished = change(app, &state, |e| {
         ended = e.finish_live_stop(live.session);
+        if ended {
+            e.return_to_ready_if_empty();
+        }
         Ok(())
     })
     .is_ok();
