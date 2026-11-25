@@ -700,6 +700,11 @@ pub fn refresh(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
+pub(crate) fn allocations_during(work: impl FnOnce()) -> usize {
+    tests::allocations_during(work)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -735,7 +740,7 @@ mod tests {
     static ALLOCATOR: CountingAllocator = CountingAllocator;
 
     /// Allocations `work` makes on this thread.
-    fn allocations_during(work: impl FnOnce()) -> usize {
+    pub(super) fn allocations_during(work: impl FnOnce()) -> usize {
         ALLOCATIONS.set(0);
         COUNTING.set(true);
         work();

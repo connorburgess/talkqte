@@ -13,6 +13,7 @@
 //! CloseStream on finish or at the minute cap.
 
 use super::cloud::{Budget, Full, Language, StreamingTranscriber, SttEvent, SttFailure};
+use super::vad::{StreamTimeline, VadGate};
 use super::SAMPLE_RATE;
 use std::{
     sync::{
@@ -321,6 +322,8 @@ fn run(
     let _ = events.send(SttEvent::Connected {
         query: query.to_string(),
     });
+    let mut vad = VadGate::new();
+    let mut timeline = StreamTimeline::default();
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
     let mut last_send = timing.now();
     // When anything was last heard from Deepgram, and whether audio has gone
@@ -343,14 +346,17 @@ fn run(
             // it is dropped and counted, instead of piling up unbounded.
             while pending.len() < MAX_PENDING_SAMPLES {
                 match queue.try_recv() {
-                    Ok(block) => pending.extend(
-                        block
-                            .iter()
-                            .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
-                    ),
+                    Ok(block) => vad.push_samples(&block, |start_sample, pcm| {
+                        timeline.record(start_sample, pcm.len() as u64);
+                        pending.extend_from_slice(pcm);
+                    }),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         closing = Some(timing.now());
+                        vad.flush_end(|start_sample, pcm| {
+                            timeline.record(start_sample, pcm.len() as u64);
+                            pending.extend_from_slice(pcm);
+                        });
                         break;
                     }
                 }
@@ -436,6 +442,7 @@ fn run(
         match reply {
             Ok(Some(text)) => match parse(&text, &mut seq) {
                 Ok(Some(event)) => {
+                    let event = timeline.remap_event(event);
                     match &event {
                         SttEvent::Final { .. } => unfinalized = None,
                         SttEvent::Partial => {
@@ -810,6 +817,7 @@ mod tests {
         url: Option<String>,
         token: Option<String>,
         binary: Vec<usize>,
+        binary_bytes: Vec<Vec<u8>>,
         text: Vec<String>,
         replies: std::collections::VecDeque<Result<Option<String>, SttFailure>>,
         closed: bool,
@@ -838,7 +846,9 @@ mod tests {
         fn send_binary(&mut self, data: Vec<u8>) -> Result<(), SttFailure> {
             let delay = self.0.lock().unwrap().send_delay;
             std::thread::sleep(delay);
-            self.0.lock().unwrap().binary.push(data.len());
+            let mut wire = self.0.lock().unwrap();
+            wire.binary.push(data.len());
+            wire.binary_bytes.push(data);
             Ok(())
         }
         fn send_text(&mut self, text: &str) -> Result<(), SttFailure> {
@@ -1687,5 +1697,145 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert!(stream.poll().is_empty());
         assert!(fake.0.lock().unwrap().url.is_some());
+    }
+
+    #[test]
+    fn vad_gates_pure_silence_and_keeps_connection_alive_with_keepalive() {
+        let fake = Fake::default();
+        let timing = Timing {
+            keep_alive: Duration::from_millis(40),
+            ..Timing::default()
+        };
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            timing,
+        );
+        // Feed 2 seconds of silence and quiet sub-threshold noise.
+        for i in 0..20 {
+            let val = if i % 2 == 0 { 0.0 } else { 0.002 };
+            stream.push(&[val; FRAME]).unwrap();
+        }
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let wire = fake.0.lock().unwrap();
+            let keep_alives = wire
+                .text
+                .iter()
+                .filter(|t| *t == r#"{"type":"KeepAlive"}"#)
+                .count();
+            if keep_alives >= 2 {
+                assert!(
+                    wire.binary.is_empty(),
+                    "silence should send zero PCM frames"
+                );
+                assert!(!wire.closed);
+                break;
+            }
+            drop(wire);
+            assert!(Instant::now() < until, "expected KeepAlive frames");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let events = stream.finish(Duration::from_secs(2));
+        assert!(!events.iter().any(|e| matches!(e, SttEvent::Failed(_))));
+        assert!(fake.0.lock().unwrap().binary.is_empty());
+    }
+
+    #[test]
+    fn vad_flushes_pre_roll_on_speech_onset_and_sends_hangover_before_gating() {
+        use std::f32::consts::PI;
+        let fake = Fake::default();
+        let timing = Timing {
+            keep_alive: Duration::from_millis(60),
+            ..Timing::default()
+        };
+        let mut stream = DeepgramStream::start_with(
+            fake.clone(),
+            ListenRequest::lab(),
+            "t".repeat(24),
+            Duration::from_secs(60),
+            timing,
+        );
+        // 700 ms digital silence, then 300 ms tagged sub-threshold pre-roll.
+        for _ in 0..7 {
+            stream.push(&[0.0; FRAME]).unwrap();
+        }
+        for _ in 0..3 {
+            stream.push(&[0.002; FRAME]).unwrap();
+        }
+        // 500 ms synthetic sine speech starting at input 1,000 ms.
+        for f in 0..5 {
+            let chunk: Vec<f32> = (0..FRAME)
+                .map(|n| {
+                    0.2 * (2.0 * PI * 440.0 * (f * FRAME + n) as f32 / SAMPLE_RATE as f32).sin()
+                })
+                .collect();
+            stream.push(&chunk).unwrap();
+        }
+        // 2,500 ms trailing silence (beyond 1,400 ms hangover).
+        for _ in 0..25 {
+            stream.push(&[0.0; FRAME]).unwrap();
+        }
+        // Wait for 22 active+hangover frames (300ms pre-roll + 500ms speech + 1400ms hangover)
+        // and at least one KeepAlive after gating resumes.
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let wire = fake.0.lock().unwrap();
+            let has_keepalive = wire.text.iter().any(|t| *t == r#"{"type":"KeepAlive"}"#);
+            if wire.binary.len() == 22 && has_keepalive {
+                break;
+            }
+            drop(wire);
+            assert!(
+                Instant::now() < until,
+                "timed out waiting for VAD + KeepAlive"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Deepgram sends a Final timed at 0.30..0.80 s on its compressed stream.
+        let final_msg = serde_json::json!({
+            "type": "Results",
+            "is_final": true,
+            "speech_final": true,
+            "start": 0.0,
+            "duration": 1.2,
+            "channel": {
+                "alternatives": [{
+                    "transcript": "Fictional speech line.",
+                    "words": [
+                        {"word": "Fictional", "start": 0.30, "end": 0.50, "speaker": 0},
+                        {"word": "line", "start": 0.50, "end": 0.80, "speaker": 0}
+                    ]
+                }]
+            }
+        })
+        .to_string();
+        fake.0
+            .lock()
+            .unwrap()
+            .replies
+            .push_back(Ok(Some(final_msg)));
+        let events = wait_for(&mut stream, |e| {
+            e.iter().any(|ev| matches!(ev, SttEvent::Final { .. }))
+        });
+        let _ = stream.finish(Duration::from_secs(2));
+
+        let wire = fake.0.lock().unwrap();
+        // 22 * 100ms frames = 2,200ms = 70,400 bytes; 1,800ms of silence suppressed.
+        assert_eq!(wire.binary.len(), 22);
+        assert_eq!(wire.binary.iter().sum::<usize>(), 22 * FRAME * 2);
+        // First emitted pre-roll sample matches the tagged 0.002 pre-roll, not 0.0.
+        let first_sample = i16::from_le_bytes([wire.binary_bytes[0][0], wire.binary_bytes[0][1]]);
+        assert_eq!(first_sample, (0.002 * i16::MAX as f32) as i16);
+        // Provider 300..800 ms maps back to true input 1,000..1,500 ms.
+        assert!(events.contains(&SttEvent::Final {
+            seq: 1,
+            text: "Fictional speech line.".into(),
+            start_ms: 1_000,
+            end_ms: 1_500,
+            untrusted_speaker: Some(0),
+        }));
     }
 }
