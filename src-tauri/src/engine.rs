@@ -11,7 +11,7 @@ pub use evaluation::{
     ProcessorSummary, Scope, SourceCapture, SourcePhase, SourceProblem, StartupState, StopTarget,
 };
 pub use history::{EndPrompt, EndPromptAction, EndPromptState};
-pub use sources::{Declared, SessionSources, SourcesStatus, THEM, YOU};
+pub use sources::{Declared, SessionSources, SourcesStatus, SYSTEM_AUDIO, THEM, YOU};
 
 const CUE_MS: u64 = 18_000;
 /// A question asked of the user stays long enough for them to answer.

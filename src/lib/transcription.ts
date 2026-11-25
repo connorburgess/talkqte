@@ -142,21 +142,37 @@ export function sourcesHeading(
   transcription: CloudTranscription | undefined,
 ): string | null {
   if (!sources || !bothSources(sources)) return null;
-  return `You: your microphone · Them: audio from ${sources.application} · ${transcribedWhere(transcription)}. The labels say where a line was heard, not who said it.`;
+  const remote =
+    sources.application === 'System audio'
+      ? 'system audio'
+      : `audio from ${sources.application}`;
+  return `You: your microphone · Them: ${remote} · ${transcribedWhere(transcription)}. The labels say where a line was heard, not who said it.`;
 }
 
-/** Said while a two-source session runs on without its application. */
+/** Said while a two-source session runs on without its application or system audio. */
 export function applicationEndedText(
   sources: SessionSources | undefined,
 ): string | null {
   if (!sources || !bothSources(sources) || !sources.applicationEnded)
     return null;
+  const isSystemAudio = sources.application === 'System audio';
+  if (isSystemAudio) {
+    if (sources.applicationEnded === 'unsupported') {
+      return 'System audio requires macOS 14.2 or later. Only your microphone is heard now.';
+    }
+    if (sources.applicationEnded === 'permission_denied') {
+      return 'System audio permission was not allowed. Check System Audio Recording Only for TalkQTE in System Settings → Privacy & Security. Only your microphone is heard now.';
+    }
+  }
   const what =
     sources.applicationEnded === 'not_started'
       ? 'did not start'
       : sources.applicationEnded === 'ended'
         ? 'stopped'
         : `stopped: ${STOP_REASONS[sources.applicationEnded] ?? 'it stopped unexpectedly'}`;
+  if (isSystemAudio) {
+    return `System audio ${what}. Only your microphone is heard now.`;
+  }
   return `Audio from ${sources.application} ${what}. Only your microphone is heard now; Cue processing says why. Stop and start again to hear both.`;
 }
 
@@ -164,5 +180,9 @@ export function applicationEndedText(
 export function echoText(sources: SessionSources | undefined): string | null {
   const dropped = sources?.echoDropped ?? 0;
   if (!dropped) return null;
-  return `${dropped === 1 ? '1 microphone line looks' : `${dropped} microphone lines look`} like a repeat of ${sources?.application ?? 'the application'}'s sound through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.`;
+  const remote =
+    sources?.application === 'System audio'
+      ? 'system audio'
+      : `${sources?.application ?? 'the application'}'s sound`;
+  return `${dropped === 1 ? '1 microphone line looks' : `${dropped} microphone lines look`} like a repeat of ${remote} through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.`;
 }

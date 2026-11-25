@@ -149,6 +149,18 @@ test('onboarding auto-opens when both keys are notSet, moves focus to each step 
   await expect(step3).toBeFocused();
   await expect(page.getByText('Step 3 of 4')).toBeVisible();
   await expect(page.getByText('Nothing requested here')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Microphone', level: 2 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      name: 'System Audio Recording Only',
+      level: 2,
+    }),
+  ).toBeVisible();
+  await expect(page.locator('.onboarding-flow')).not.toContainText(
+    'Screen & System Audio Recording',
+  );
 
   // Step 4: per-session approval sequence, focus on heading.
   await page.getByRole('button', { name: 'Next: First session' }).click();

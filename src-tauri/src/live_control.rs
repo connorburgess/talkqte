@@ -289,6 +289,8 @@ impl Runtime {
             session,
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         Ok(session)
     }
@@ -515,6 +517,8 @@ mod tests {
             session,
             microphone: Some(12),
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         let live = runtime.take_live_for_stop().unwrap();
         assert_eq!(live.microphone, Some(12));
