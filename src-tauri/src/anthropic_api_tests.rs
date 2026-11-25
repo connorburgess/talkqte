@@ -816,3 +816,198 @@ fn a_cue_session_with_failures_and_notes_writes_nothing_and_prints_nothing() {
         assert!(!printed.contains(private), "printed {private}: {printed}");
     }
 }
+
+fn sse_with_usage(
+    model: &str,
+    text: &str,
+    stop_reason: &str,
+    message_start_usage: Value,
+) -> String {
+    let (a, b) = text.split_at(text.len() / 2);
+    let events = [
+        json!({"type":"message_start","message":{"model":model,"usage":message_start_usage}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":a}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":b}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":{"output_tokens":40}}),
+        json!({"type":"message_stop"}),
+    ];
+    events
+        .iter()
+        .map(|event| {
+            format!(
+                "event: {}\ndata: {event}\n\n",
+                event["type"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn cache_control_is_serialized_on_system_prefix_without_leaking_focus_or_notes() {
+    let quiet = decision("quiet", None, &["transcript:line-1"]);
+    let transport = Scripted::default()
+        .answer(Ok((200, sse(MODEL, &quiet, "end_turn"))))
+        .answer(Ok((200, sse(MODEL, &quiet, "end_turn"))));
+    let usage = Arc::new(Usage::default());
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| {}),
+        usage,
+    );
+    let mut engine = registered(adapter, haiku(), None);
+    engine.start().unwrap();
+    engine.set_focus(vec![PRIVATE_FOCUS.into()]).unwrap();
+    engine.update_notes(PRIVATE_NOTE.into()).unwrap();
+    let review = engine
+        .review_processing(ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    engine.approve_processing(review).unwrap();
+    let mut s = Session {
+        engine,
+        transport: transport.clone(),
+        line: 0,
+    };
+    s.say("Who owns the fictional Atlas checklist?");
+    s.settle();
+    s.say("Priya will take the Atlas checklist by Friday.");
+    s.settle();
+
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 2);
+    for (_, payload) in &sent {
+        let system = payload["system"].as_array().expect("system array");
+        assert_eq!(system.len(), 1);
+        assert_eq!(system[0]["type"], "text");
+        assert_eq!(system[0]["text"], system_prompt());
+        assert_eq!(system[0]["cache_control"], json!({"type": "ephemeral"}));
+        let serialized = payload.to_string();
+        assert!(!serialized.contains(PRIVATE_FOCUS));
+        assert!(!serialized.contains(PRIVATE_NOTE));
+    }
+}
+
+#[test]
+fn cache_creation_and_cache_read_tokens_account_accurately_across_turns() {
+    // Haiku 5.5 prices ($/M = micro-USD/token):
+    // input = 0.1, cache_write = 0.125 (1.25x), cache_read = 0.01 (0.1x), output = 0.5.
+    let model = haiku();
+    let uncached_only = TokenUsage {
+        input: Some(2_000),
+        cache_write: None,
+        cache_read: None,
+        output: Some(40),
+    }
+    .cost_micro_usd(model);
+    assert_eq!(uncached_only, 220); // 200 + 20
+
+    let cache_write_turn = TokenUsage {
+        input: Some(200),
+        cache_write: Some(2_000),
+        cache_read: Some(0),
+        output: Some(40),
+    }
+    .cost_micro_usd(model);
+    assert_eq!(cache_write_turn, 290); // 20 + 250 (1.25x) + 0 + 20
+
+    let cache_read_turn = TokenUsage {
+        input: Some(200),
+        cache_write: Some(0),
+        cache_read: Some(2_000),
+        output: Some(40),
+    }
+    .cost_micro_usd(model);
+    assert_eq!(cache_read_turn, 60); // 20 + 0 + 20 (0.1x) + 20
+
+    // Verify end-to-end stream parsing + session spend accumulation through
+    // CueUsageTracker and Usage across cache-write, cache-read, and no-cache turns.
+    let quiet = decision("quiet", None, &["transcript:line-1"]);
+    let transport = Scripted::default()
+        .answer(Ok((
+            200,
+            sse_with_usage(
+                MODEL,
+                &quiet,
+                "end_turn",
+                json!({"input_tokens": 200, "cache_creation_input_tokens": 2000, "cache_read_input_tokens": 0, "output_tokens": 1}),
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse_with_usage(
+                MODEL,
+                &quiet,
+                "end_turn",
+                json!({"input_tokens": 200, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2000, "output_tokens": 1}),
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse_with_usage(
+                MODEL,
+                &quiet,
+                "end_turn",
+                json!({"input_tokens": 2000, "output_tokens": 1}),
+            ),
+        )));
+    let usage = Arc::new(Usage::default());
+    let tracker = Arc::new(crate::llm_provider::CueUsageTracker::new(
+        crate::llm_provider::CueProvider::Anthropic,
+        MODEL,
+        false,
+    ));
+    let resolved = crate::llm_provider::ResolvedModel::from_curated(
+        crate::llm_provider::default_cue_model(crate::llm_provider::CueProvider::Anthropic),
+    );
+    let adapter = AnthropicApi::for_resolved(
+        resolved,
+        transport,
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| {}),
+        usage.clone(),
+        tracker.clone(),
+    );
+    let worker = Worker::start(adapter, DEADLINE).unwrap();
+    let mut run = Run {
+        usage,
+        rejected: Arc::default(),
+        worker,
+    };
+    let req = request(None);
+    assert_eq!(run.evaluate(&req).unwrap().action, Action::Quiet);
+    assert_eq!(run.usage.snapshot(model).spent_micro_usd, 290);
+    assert_eq!(tracker.snapshot().spent_micro_usd, Some(290));
+
+    assert_eq!(run.evaluate(&req).unwrap().action, Action::Quiet);
+    assert_eq!(run.usage.snapshot(model).spent_micro_usd, 290 + 60);
+    assert_eq!(tracker.snapshot().spent_micro_usd, Some(350));
+
+    // Omitted cache fields default cleanly to zero without error.
+    assert_eq!(run.evaluate(&req).unwrap().action, Action::Quiet);
+    assert_eq!(run.usage.snapshot(model).spent_micro_usd, 290 + 60 + 220);
+    assert_eq!(tracker.snapshot().spent_micro_usd, Some(570));
+    assert_eq!(tracker.snapshot().requests, 3);
+}
+
+#[test]
+fn filler_lines_do_not_trigger_anthropic_requests_in_live_session() {
+    let quiet = decision("quiet", None, &["transcript:line-5"]);
+    let mut s = session(Scripted::default().answer(Ok((200, sse(MODEL, &quiet, "end_turn")))));
+    s.approve();
+    s.say("Yeah.");
+    s.say("Okay.");
+    s.say("Mm-hmm.");
+    s.say("Sure.");
+    assert!(s.transport.sent().is_empty());
+    s.say("Who owns the fictional Atlas checklist?");
+    s.settle();
+    assert_eq!(s.transport.sent().len(), 1);
+    let content = s.transport.sent()[0].1["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(content.contains("Who owns the fictional Atlas checklist?"));
+}

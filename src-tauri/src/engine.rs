@@ -25,14 +25,15 @@ const MAX_NOTE_CHARS: usize = 20_000;
 const MAX_SEGMENT_CHARS: usize = 1_000;
 const MAX_SPEAKER_CHARS: usize = 80;
 const MAX_SEGMENT_ID_BYTES: usize = 64;
-/// Lines the notebook shows and the cue rules look back over. Every snapshot
-/// carries them, so they stay few.
-const MAX_TRANSCRIPT_SEGMENTS: usize = 400;
+/// Lines the notebook shows and keeps for the session (matches
+/// `meeting_history::MAX_LINES`). Cue evaluation reads only a bounded recent
+/// sliding window from the tail.
+const MAX_TRANSCRIPT_SEGMENTS: usize = 50_000;
 /// Lines of the whole meeting kept for a kept meeting's export and for
-/// meeting notes: as many as one notes request can take, about two hours of
-/// talk, which the 120-minute audio cap stays within. Past it the oldest go,
-/// and both say so rather than leave out the start in silence.
-const MAX_MEETING_LINES: usize = 4_000;
+/// meeting notes. Matches `MAX_TRANSCRIPT_SEGMENTS` so long multi-hour
+/// sessions never truncate; past it the oldest go, and both say so rather
+/// than leave out the start in silence.
+const MAX_MEETING_LINES: usize = 50_000;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -600,6 +601,10 @@ pub struct CueSnapshot {
     /// person has turned that prompt on. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_prompt: Option<crate::call_prompt::Prompt>,
+    /// A previously active call went inactive while a live session is running:
+    /// asks the person whether to stop & save or keep recording. Metadata only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_end_prompt: Option<crate::call_prompt::CallEndPrompt>,
     /// An ended non-empty live session prompt: counts and keep status only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_prompt: Option<EndPrompt>,
@@ -660,6 +665,8 @@ pub struct Engine {
     /// Recent application lines, so a microphone line that repeats them
     /// through the speakers can be dropped.
     echo: sources::EchoGuard,
+    /// Segment IDs currently in `state.transcript`, for O(1) duplicate checks.
+    seen_ids: std::collections::HashSet<String>,
     /// Every line of this session, beyond the few the notebook shows, for
     /// the export of a kept meeting and for meeting notes. In memory only.
     meeting: Vec<Segment>,
@@ -779,6 +786,7 @@ impl Engine {
             cooldown_until: 0,
             line_floor: [0; 2],
             echo: sources::EchoGuard::default(),
+            seen_ids: std::collections::HashSet::new(),
             meeting: Default::default(),
             meeting_cut: false,
             asked_lines: vec![],
@@ -815,6 +823,7 @@ impl Engine {
             sensitivity: self.state.sensitivity,
             source_session: false,
             call_prompt: None,
+            call_end_prompt: None,
             end_prompt: None,
             model: match self.evaluation_status() {
                 Some(EvaluationStatus::Unavailable(_)) if self.state.live => {
@@ -912,6 +921,7 @@ impl Engine {
         self.cooldown_until = 0;
         self.line_floor = [0; 2];
         self.echo.clear();
+        self.seen_ids.clear();
         self.meeting.clear();
         self.meeting_cut = false;
         self.asked_lines.clear();
@@ -1327,11 +1337,7 @@ impl Engine {
         {
             return Err("A transcript segment needs a short ID.".into());
         }
-        if self
-            .state
-            .transcript
-            .iter()
-            .any(|existing| existing.id == segment.id)
+        if self.seen_ids.contains(&segment.id)
             || self
                 .script
                 .segments
@@ -1366,6 +1372,7 @@ impl Engine {
         self.line_floor[origin as usize] = segment.at_ms;
         if both && origin == LineOrigin::Application {
             self.echo.heard_application(segment.at_ms, text);
+            self.retroactively_mark_echoes(segment.at_ms, text);
         }
         let speaker = sources::label(self.sources(), origin).unwrap_or(speaker);
         let segment = Segment {
@@ -1378,13 +1385,56 @@ impl Engine {
         Ok(())
     }
 
+    /// Retroactively moves recent `You` lines that match a newly arrived
+    /// `Them` line into `sources.echoes`, removing them from `transcript` and
+    /// `meeting` so speaker bleed that finalized slightly ahead of the
+    /// application stream is still suppressed.
+    fn retroactively_mark_echoes(&mut self, app_at_ms: u64, app_text: &str) {
+        let mut matched_indices = Vec::new();
+        for (index, line) in self.state.transcript.iter().enumerate().rev().take(128) {
+            if line.speaker == YOU
+                && sources::EchoGuard::is_pair_echo(line.at_ms, &line.text, app_at_ms, app_text)
+            {
+                matched_indices.push(index);
+            }
+        }
+        if matched_indices.is_empty() {
+            return;
+        }
+        matched_indices.sort_unstable();
+        let mut removed = Vec::with_capacity(matched_indices.len());
+        for index in matched_indices.into_iter().rev() {
+            let line = self.state.transcript.remove(index);
+            self.seen_ids.remove(&line.id);
+            removed.push(line);
+        }
+        removed.reverse();
+        for line in removed {
+            self.meeting.retain(|m| m.id != line.id);
+            if self
+                .state
+                .cue
+                .as_ref()
+                .is_some_and(|cue| cue.source_id == line.id && !cue.held)
+            {
+                self.state.cue = None;
+            }
+            if let Some(status) = self.state.sources.as_mut() {
+                status.suppressed(line);
+            }
+        }
+    }
+
     fn consume(&mut self, segment: Segment, now: u64) {
         self.speech_changed();
+        self.seen_ids.insert(segment.id.clone());
         self.state.transcript.push(segment.clone());
         // Keep memory bounded in a long session; the oldest lines go first.
         if self.state.transcript.len() > MAX_TRANSCRIPT_SEGMENTS {
             let excess = self.state.transcript.len() - MAX_TRANSCRIPT_SEGMENTS;
-            self.state.transcript.drain(..excess);
+            for old in self.state.transcript.drain(..excess) {
+                self.seen_ids.remove(&old.id);
+            }
         }
         self.meeting.push(segment.clone());
         if self.meeting.len() > MAX_MEETING_LINES {
@@ -1415,7 +1465,8 @@ impl Engine {
             let correction = corrects(&segment.text);
             // The model is still asked while the cue is up, with it as the
             // cue on screen, so it can say the question was answered.
-            if self.ask_of_user(&segment, correction, now) {
+            let asked = self.ask_of_user(&segment, correction, now);
+            if asked {
                 if let Some(cue) = self
                     .state
                     .cue
@@ -1439,7 +1490,9 @@ impl Engine {
                     self.evaluated_cue = Some((cue.id.clone(), sources));
                 }
             }
-            self.submit_evaluation();
+            if !self.should_skip_filler_evaluation(&segment.text, asked) {
+                self.submit_evaluation();
+            }
             return;
         }
         // The conversation answered the open cue. Withdraw it before the
@@ -2400,6 +2453,8 @@ impl Engine {
         }
         // Lines suppressed as a likely echo stay in the meeting, marked, unless
         // the person removed them; one they kept as theirs is ordinary.
+        // Only the last `MAX_ECHO_LINES` suppressed echoes are retained; lines
+        // past `MAX_MEETING_LINES` trim the start of the meeting.
         let echoes = self
             .state
             .sources
@@ -4058,12 +4113,85 @@ mod tests {
     #[test]
     fn a_long_session_keeps_only_the_most_recent_transcript() {
         let mut e = live_session();
-        for index in 0..450 {
+        for index in 0..(MAX_TRANSCRIPT_SEGMENTS + 50) {
             e.ingest(e.session(), live(&format!("w{index}"), 9_000, "Noted."))
                 .unwrap();
         }
-        assert_eq!(e.state.transcript.len(), 400);
+        assert_eq!(e.state.transcript.len(), MAX_TRANSCRIPT_SEGMENTS);
         assert_eq!(e.state.transcript[0].id, "w50");
+        assert_eq!(
+            e.state.transcript.last().unwrap().id,
+            format!("w{}", MAX_TRANSCRIPT_SEGMENTS + 49)
+        );
+    }
+
+    #[test]
+    fn a_session_past_400_lines_stays_intact_in_history_and_notes() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.advance(20_000);
+        for index in 0..650 {
+            e.ingest(
+                e.session(),
+                live(
+                    &format!("w{index}"),
+                    9_000 + index as u64,
+                    &format!("Fictional line {index}."),
+                ),
+            )
+            .unwrap();
+        }
+        assert_eq!(e.state.transcript.len(), 650);
+        e.end();
+        let kept = e.keepable_meeting(false).unwrap();
+        assert_eq!(kept.transcript.len(), 650);
+        assert_eq!(kept.transcript[0].text, "Fictional line 0.");
+        assert_eq!(kept.transcript[649].text, "Fictional line 649.");
+        let plan = e.meeting_notes_plan(false).unwrap();
+        assert_eq!(plan.transcript_lines, 650);
+    }
+
+    #[test]
+    fn retroactive_echo_marking_moves_early_you_bleed_into_echoes_and_out_of_notes() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.set_sources(SessionSources::both(("Fictional Call", "fictional-call")));
+        let session = e.session();
+        e.advance(500_000);
+        // Microphone finalizes slightly before the application stream.
+        e.ingest_from(
+            session,
+            LineOrigin::Microphone,
+            live("m1", 460_000, "goo goo noise."),
+        )
+        .unwrap();
+        e.ingest_from(session, LineOrigin::Microphone, live("m2", 462_000, "No."))
+            .unwrap();
+        e.ingest_from(
+            session,
+            LineOrigin::Microphone,
+            live("m3", 470_000, "I can send the schedule Friday."),
+        )
+        .unwrap();
+        // Application lines arrive slightly later.
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            live("a1", 460_000, "Google noise."),
+        )
+        .unwrap();
+        e.ingest_from(session, LineOrigin::Application, live("a2", 462_000, "No."))
+            .unwrap();
+        // Only the two Them lines and the genuine You line remain in transcript & notes.
+        let ids: Vec<&str> = e.state.transcript.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["m3", "a1", "a2"]);
+        let sources = e.state.sources.as_ref().unwrap();
+        assert_eq!(sources.echo_dropped, 2);
+        let echo_ids: Vec<&str> = sources.echoes.iter().map(|l| l.line.id.as_str()).collect();
+        assert_eq!(echo_ids, vec!["m1", "m2"]);
+        e.end();
+        let plan = e.meeting_notes_plan(false).unwrap();
+        assert_eq!(plan.transcript_lines, 3);
     }
 
     #[test]

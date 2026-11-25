@@ -333,8 +333,19 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
   await expect(
     page.getByText('Will the draft be ready Wednesday?'),
   ).toBeVisible();
-  await expect(page.getByText('Likely echo')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Transcript (2)', level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByText('Likely echo', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Can we ship the rota Friday?')).toBeVisible();
+  const echoToggle = page.getByRole('button', {
+    name: 'Show 1 likely echo line',
+  });
+  await expect(echoToggle).toHaveAttribute('aria-expanded', 'false');
+  await echoToggle.click();
+  await expect(page.getByText('Likely echo', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide 1 likely echo line' }).click();
+  await expect(page.getByText('Likely echo', { exact: true })).toHaveCount(0);
   // Read-only detail view has no editor textarea for notes or transcript.
   await expect(page.locator('textarea')).toHaveCount(0);
 });

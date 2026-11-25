@@ -25,7 +25,10 @@ impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.cue.is_some() || state.end_prompt.is_some() {
+        } else if state.cue.is_some()
+            || state.end_prompt.is_some()
+            || state.call_end_prompt.is_some()
+        {
             Self::Question
         } else if state.call_prompt.is_some() {
             Self::Prompt
@@ -748,6 +751,27 @@ mod tests {
         hidden.call_prompt = snapshot.call_prompt.clone();
         assert_eq!(
             Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn a_call_end_prompt_keeps_the_companion_open_unless_hidden() {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        let mut snapshot = engine.cue_snapshot();
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
+            Mode::Compact
+        );
+        snapshot.call_end_prompt = Some(crate::call_prompt::CallEndPrompt { id: 1 });
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
+            Mode::Question
+        );
+        snapshot.overlay_enabled = false;
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
             Mode::Hidden
         );
     }

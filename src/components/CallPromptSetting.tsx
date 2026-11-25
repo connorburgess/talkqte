@@ -80,9 +80,12 @@ export function CallPromptSetting() {
           bundle identifier, never audio, video, or what is on screen, and that
           stays on this Mac. Offer in the dock shows a 1-click Start button
           without starting capture; Start automatically (off by default) begins
-          listening right away (sending your mic and macOS system audio to
-          Deepgram and recent lines to Anthropic until Stop, showing Listening ·
-          Stop in the dock). App preferences save by bundle identifier only.
+          listening once a known call app or browser uses your microphone (never
+          on a camera-only preview screen), sending your mic and macOS system
+          audio to Deepgram and recent lines to Anthropic until Stop, showing
+          Listening · Stop in the dock. While a live session runs, TalkQTE also
+          offers a Call ended dock prompt if your call’s camera and mic go
+          inactive. App preferences save by bundle identifier only.
         </p>
         {settings && (
           <>
