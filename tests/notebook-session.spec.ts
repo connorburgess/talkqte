@@ -390,13 +390,13 @@ test('the notebook says the transcription cap is near before the session ends on
     );
   await publish(10);
   const said =
-    "About 10 minutes of transcription are left before this session's 120-minute cap; then the session ends.";
+    "About 10 minutes of transcription are left before this session's 480-minute cap; then the session ends.";
   await expect(session(page)).toContainText(said);
   const notice = page.getByRole('status').filter({ hasText: 'cap; then' });
   await expect(notice).toContainText(said);
   await publish(1);
   await expect(session(page)).toContainText(
-    "About 1 minute of transcription is left before this session's 120-minute cap",
+    "About 1 minute of transcription is left before this session's 480-minute cap",
   );
   // The countdown is shown, not read out again each minute.
   await expect(notice).toContainText('About 10 minutes');

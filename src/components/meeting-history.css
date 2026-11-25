@@ -252,6 +252,13 @@
   font-weight: 600;
   letter-spacing: -0.015em;
 }
+.history-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
 .history-text {
   margin: 0;
   font-family: var(--font);

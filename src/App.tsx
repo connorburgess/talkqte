@@ -640,6 +640,9 @@ function Notebook() {
     if (startPending && state?.live && state.status === 'running')
       setStartInstalled(true);
   }, [startPending, state?.live, state?.status]);
+  useEffect(() => {
+    if (!state?.sources?.echoes?.length) setShowEchoes(false);
+  }, [state?.sources?.echoes?.length]);
   const startButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement | null>(null);
   const stopButton = useRef<HTMLButtonElement | null>(null);
@@ -687,6 +690,7 @@ function Notebook() {
   const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
     'notebook',
   );
+  const [showEchoes, setShowEchoes] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [sessionHistory, setSessionHistory] = useState<HistoryStatus | null>(
     null,
@@ -2119,77 +2123,104 @@ function Notebook() {
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
-                    {transcriptLines(state).length ? (
-                      transcriptLines(state).map(({ segment, echo }) => (
-                        <article
-                          className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
-                          key={segment.id}
-                        >
-                          <div className="transcript-segment-head">
-                            <strong>{segment.speaker}</strong>
-                            <time>{clockTime(segment.atMs)}</time>
-                            {echo && !echo.kept && (
-                              <span className="transcript-echo-label">
-                                Likely an echo of Them · not used for cues
-                              </span>
-                            )}
-                          </div>
-                          <p>{segment.text}</p>
-                          {echo && !echo.kept && (
-                            <div className="transcript-echo-actions">
+                    {(() => {
+                      const allLines = transcriptLines(state);
+                      const echoCount = allLines.filter(
+                        ({ echo }) => echo && !echo.kept,
+                      ).length;
+                      const visibleLines = showEchoes
+                        ? allLines
+                        : allLines.filter(({ echo }) => !echo || echo.kept);
+                      return (
+                        <>
+                          {echoCount > 0 && (
+                            <div className="transcript-echo-toggle-row">
                               <button
-                                className="secondary-button"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: true,
-                                    }),
-                                  )
-                                }
+                                type="button"
+                                className="transcript-echo-toggle"
+                                aria-expanded={showEchoes}
+                                onClick={() => setShowEchoes((open) => !open)}
                               >
-                                It was me
-                              </button>
-                              <button
-                                className="secondary-button transcript-echo-remove"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: false,
-                                    }),
-                                  )
-                                }
-                              >
-                                Remove
+                                {showEchoes
+                                  ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                                  : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
                               </button>
                             </div>
                           )}
-                        </article>
-                      ))
-                    ) : (
-                      <div className="empty-inline">
-                        <MessageCircle size={25} />
-                        <h2>
-                          {live || simulated
-                            ? 'A conversation starts here.'
-                            : 'No transcript yet.'}
-                        </h2>
-                        <p>
-                          {live
-                            ? sourceApp
-                              ? 'Lines from the app appear a few seconds after they’re heard.'
-                              : 'Lines appear a few seconds after they’re spoken.'
-                            : state.live
-                              ? 'No lines transcribed.'
-                              : simulated
-                                ? 'Replay lines appear here.'
-                                : 'Lines appear here during a live session.'}
-                        </p>
-                      </div>
-                    )}
+                          {visibleLines.length ? (
+                            visibleLines.map(({ segment, echo }) => (
+                              <article
+                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
+                                key={segment.id}
+                              >
+                                <div className="transcript-segment-head">
+                                  <strong>{segment.speaker}</strong>
+                                  <time>{clockTime(segment.atMs)}</time>
+                                  {echo && !echo.kept && (
+                                    <span className="transcript-echo-label">
+                                      Likely an echo of Them · not used for cues
+                                    </span>
+                                  )}
+                                </div>
+                                <p>{segment.text}</p>
+                                {echo && !echo.kept && (
+                                  <div className="transcript-echo-actions">
+                                    <button
+                                      className="secondary-button"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: true,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      It was me
+                                    </button>
+                                    <button
+                                      className="secondary-button transcript-echo-remove"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: false,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </article>
+                            ))
+                          ) : echoCount > 0 ? null : (
+                            <div className="empty-inline">
+                              <MessageCircle size={25} />
+                              <h2>
+                                {live || simulated
+                                  ? 'A conversation starts here.'
+                                  : 'No transcript yet.'}
+                              </h2>
+                              <p>
+                                {live
+                                  ? sourceApp
+                                    ? 'Lines from the app appear a few seconds after they’re heard.'
+                                    : 'Lines appear a few seconds after they’re spoken.'
+                                  : state.live
+                                    ? 'No lines transcribed.'
+                                    : simulated
+                                      ? 'Replay lines appear here.'
+                                      : 'Lines appear here during a live session.'}
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </section>

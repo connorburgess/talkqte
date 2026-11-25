@@ -818,6 +818,36 @@ svg {
 .transcript-echo-remove:hover:not(:disabled) {
   background: var(--danger-surface);
 }
+.transcript-echo-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: var(--space-8);
+  margin-bottom: var(--space-4);
+}
+.transcript-echo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 10px;
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.transcript-echo-toggle:hover {
+  color: var(--ink);
+  border-color: var(--border);
+}
+.transcript-echo-toggle:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 .context-panel {
   margin-top: var(--space-8);
   padding: 0 0 var(--space-16);
