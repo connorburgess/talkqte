@@ -196,9 +196,12 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   // Step 2 uses the single ProviderKeys rows with dashboard guidance.
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
   const deepgram = providerRow(page, 'Deepgram');
+  const elevenlabs = providerRow(page, 'ElevenLabs');
   const anthropic = providerRow(page, 'Anthropic');
   await expect(deepgram).toContainText('Not set');
   await expect(deepgram).toContainText('console.deepgram.com');
+  await expect(elevenlabs).toContainText('Not set');
+  await expect(elevenlabs).toContainText('elevenlabs.io');
   await expect(anthropic).toContainText('Not set');
   await expect(anthropic).toContainText('console.anthropic.com');
 
@@ -340,6 +343,7 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await page.evaluate(() =>
     window.providerKeysTest.emitStatus({
       deepgram: { state: 'set', verified: true },
+      elevenlabs: { state: 'notSet', verified: false },
       anthropic: { state: 'notSet', verified: false },
       anyMissing: true,
     }),

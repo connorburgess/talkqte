@@ -6,6 +6,7 @@ import {
   keysStatus,
   providerPreferences,
   transcriptionLanguage,
+  transcriptionProvider,
 } from '../lib/providerKeys';
 
 /** Settings → Diagnostics: shows the report, then copies it on request.
@@ -15,7 +16,7 @@ export function Diagnostics({
 }: {
   current: () => Omit<
     DiagnosticsInput,
-    'keys' | 'usage' | 'language' | 'preferences'
+    'keys' | 'usage' | 'language' | 'transcriptionProvider' | 'preferences'
   >;
 }) {
   const [report, setReport] = useState<string | null>(null);
@@ -24,14 +25,22 @@ export function Diagnostics({
 
   const show = async () => {
     setSaid('');
-    const [keys, usage, language, preferences] = await Promise.all([
+    const [keys, usage, provider, language, preferences] = await Promise.all([
       keysStatus().catch(() => null),
       cueUsage().catch(() => null),
+      transcriptionProvider().catch(() => null),
       transcriptionLanguage().catch(() => null),
       providerPreferences().catch(() => null),
     ]);
     setReport(
-      diagnosticsReport({ ...current(), keys, usage, language, preferences }),
+      diagnosticsReport({
+        ...current(),
+        keys,
+        usage,
+        transcriptionProvider: provider,
+        language,
+        preferences,
+      }),
     );
     setTimeout(() => preview.current?.focus(), 0);
   };

@@ -1171,12 +1171,12 @@ pub(crate) mod app {
                 Err(crate::LiveUnavailable::Build | crate::LiveUnavailable::CueKeyRejected) => {
                     Reason::CloudBuildMissing
                 }
-                Err(crate::LiveUnavailable::Selection) => Reason::CloudNotSelected,
+                Err(crate::LiveUnavailable::Selection(_)) => Reason::CloudNotSelected,
                 Err(crate::LiveUnavailable::Settings) => Reason::CloudSettingsInvalid,
                 Err(crate::LiveUnavailable::TokenMetadata) => Reason::TokenMetadataRejected,
                 Err(
-                    crate::LiveUnavailable::KeyRejected
-                    | crate::LiveUnavailable::KeyUnreadable
+                    crate::LiveUnavailable::KeyRejected(_)
+                    | crate::LiveUnavailable::KeyUnreadable(_)
                     | crate::LiveUnavailable::CueKeyUnreadable,
                 ) => Reason::CloudSettingsInvalid,
             },

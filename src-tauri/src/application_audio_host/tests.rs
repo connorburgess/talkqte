@@ -1985,7 +1985,14 @@ mod startup_diagnostics {
     ) {
         for (failure, reason) in [
             (LiveUnavailable::Build, Reason::CloudBuildMissing),
-            (LiveUnavailable::Selection, Reason::CloudNotSelected),
+            (
+                LiveUnavailable::Selection(crate::transcription::cloud::Provider::Deepgram),
+                Reason::CloudNotSelected,
+            ),
+            (
+                LiveUnavailable::Selection(crate::transcription::cloud::Provider::ElevenLabs),
+                Reason::CloudNotSelected,
+            ),
             (LiveUnavailable::Settings, Reason::CloudSettingsInvalid),
             (
                 LiveUnavailable::TokenMetadata,

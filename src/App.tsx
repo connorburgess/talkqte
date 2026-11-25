@@ -1005,13 +1005,14 @@ function Notebook() {
       return;
     if (onboardingChecked.current) return;
     onboardingChecked.current = true;
-    // Auto-open once per launch only when both keys are notSet (an unreadable
+    // Auto-open once per launch only when all keys are notSet (an unreadable
     // key is not missing), live transcription is unavailable for that reason
     // (a development or lab launch with its own credentials stays on the
     // notebook) and no session is active.
     if (
       !liveStatus.available &&
       initialKeys.deepgram.state === 'notSet' &&
+      (!initialKeys.elevenlabs || initialKeys.elevenlabs.state === 'notSet') &&
       initialKeys.anthropic.state === 'notSet' &&
       (!initialKeys.openai || initialKeys.openai.state === 'notSet') &&
       (!initialKeys.gemini || initialKeys.gemini.state === 'notSet') &&
@@ -1105,12 +1106,14 @@ function Notebook() {
     let current = true;
     refreshLiveStatus();
     let stopKeys: (() => void) | undefined;
-    watchKeys(() => {
-      if (current) refreshLiveStatus();
-    }).then(
-      (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
-      () => {},
-    );
+    if (bridge.desktop) {
+      watchKeys(() => {
+        if (current) refreshLiveStatus();
+      }).then(
+        (unlisten) => (current ? (stopKeys = unlisten) : unlisten()),
+        () => {},
+      );
+    }
     return () => {
       current = false;
       liveStatusSeq.current++;
@@ -1524,6 +1527,9 @@ function Notebook() {
             }
           >
             <ProcessingControl
+              transcriptionProvider={
+                state?.transcription?.provider ?? liveStatus?.transcription
+              }
               status={{
                 snapshot: capture.state,
                 failed: capture.statusError,
@@ -2472,11 +2478,13 @@ function Notebook() {
                   Start live session in the notebook to get questions from what
                   your microphone hears and, on a Mac, from one application you
                   choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: the session’s audio is sent to
-                  Deepgram with your key once you enable cue processing for that
-                  session. Audio is not recorded by TalkQTE. The transcript
-                  stays in memory until you start another session or close the
-                  app, unless you choose to keep the meeting and export it.
+                  transcribe on this device: the session’s audio is sent to{' '}
+                  {liveStatus?.transcription ??
+                    'your chosen provider (Deepgram or ElevenLabs)'}{' '}
+                  with your key once you enable cue processing for that session.
+                  Audio is not recorded by TalkQTE. The transcript stays in
+                  memory until you start another session or close the app,
+                  unless you choose to keep the meeting and export it.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus

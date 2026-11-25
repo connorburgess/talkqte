@@ -71,9 +71,9 @@ test('Linux without a keyring: keys cannot be saved, the notebook says why, and 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const keys = page.getByRole('region', { name: 'Your API keys' });
   await expect(keys.getByRole('status').first()).toHaveText(
-    /^Keys cannot be saved on this system yet\. .*Live sessions need both keys\.$/,
+    /^Keys cannot be saved on this system yet\. .*Live sessions need a transcription key and an Anthropic key\.$/,
   );
-  for (const name of ['Deepgram', 'Anthropic']) {
+  for (const name of ['Deepgram', 'ElevenLabs', 'Anthropic']) {
     await expect(row(page, name)).toContainText(
       'Cannot be saved on this system yet',
     );

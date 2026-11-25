@@ -584,14 +584,16 @@ mockIPC(
         await emit('context:changed', await preview.contextItemsNow());
         return;
       case 'live_status': {
+        const stt = providerKeysFixture.providerKeysTest.provider();
+        const provider = stt === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
         const keyStatus = providerKeysFixture.providerKeysTest.status();
         const available =
           liveAvailable ||
           (liveFromKeys &&
-            keyStatus.deepgram.state === 'set' &&
+            keyStatus[stt]?.state === 'set' &&
             keyStatus.anthropic.state === 'set');
         const value: LiveStatus = available
-          ? { available: true, reason: null, transcription: 'Deepgram' }
+          ? { available: true, reason: null, transcription: provider }
           : {
               available: false,
               reason: 'This build has no live transcription.',

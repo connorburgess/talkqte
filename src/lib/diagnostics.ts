@@ -13,6 +13,7 @@ import type {
   KeysStatus,
   ProviderPreferences,
   TranscriptionLanguage,
+  TranscriptionProvider,
 } from './providerKeys';
 
 export const APP_VERSION = '0.1 alpha';
@@ -24,6 +25,7 @@ export interface DiagnosticsInput {
   microphone: MicrophoneSnapshot | null;
   keys: KeysStatus | null;
   usage: CueUsage | null;
+  transcriptionProvider: TranscriptionProvider | null;
   language: TranscriptionLanguage | null;
   preferences?: ProviderPreferences | null;
   /** Whether a live session can start in this launch. */
@@ -73,9 +75,11 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Build', input.desktop ? 'desktop' : 'browser preview'],
     ['Live sessions available', flag(input.liveAvailable)],
     ['Deepgram key', key('deepgram')],
+    ['ElevenLabs key', key('elevenlabs')],
     ['Anthropic key', key('anthropic')],
     ['OpenAI key', key('openai')],
     ['Gemini key', key('gemini')],
+    ['Transcription provider', code(input.transcriptionProvider)],
     ['Cue provider', code(preferences?.cueProvider)],
     ['Custom cue model', flag(preferences?.effectiveCueCustom)],
     ['Custom notes model', flag(preferences?.effectiveNotesCustom)],
