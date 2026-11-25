@@ -22,6 +22,7 @@ fn main() {
             "approve_processing_scope",
             "cancel_processing_review",
             "revoke_processing",
+            "turn_off_processing",
             "set_processing_paused",
             "set_live_cues_paused",
             "respond_to_cue",

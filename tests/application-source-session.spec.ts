@@ -152,7 +152,7 @@ test('a session for an application alone never says the microphone is transcribe
   const { microphone, panel } = await notebook(page);
   await sourceSession(page, 'listening');
   await expect(microphone).toContainText(
-    'Audio from Fictional player is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.',
+    'Audio from Fictional player is sent to Deepgram for transcription. The microphone is not used. TalkQTE does not record audio.',
   );
   await expect(microphone).toContainText('Stop live session to end it.');
   await expect(microphone).not.toContainText('Your microphone is transcribed');
@@ -175,7 +175,7 @@ test('an ordinary live session keeps its microphone wording', async ({
   const { microphone } = await notebook(page);
   await page.evaluate(() => window.liveTest.start());
   await expect(microphone).toContainText(
-    'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.',
+    'Your microphone is sent to Deepgram for transcription. TalkQTE does not record audio.',
   );
   await expect(microphone).toContainText(
     'Stop live session to release the microphone.',
@@ -432,7 +432,7 @@ test('a failed microphone counts as unused only once its device is released', as
     deviceName: null,
   });
   await expect(microphone).toContainText(
-    'Audio from Fictional player is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used.',
+    'Audio from Fictional player is sent to Deepgram for transcription. The microphone is not used.',
   );
   // Failed with its cleanup still pending: it may still be capturing.
   await page.evaluate((value) => window.microphoneTest.send(value), {

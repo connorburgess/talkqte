@@ -742,6 +742,9 @@ struct LiveStatus {
     /// selected; absent otherwise, and then nothing is transcribed.
     #[serde(skip_serializing_if = "Option::is_none")]
     transcription: Option<&'static str>,
+    /// The cue provider configured for live sessions, when one is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cue_provider: Option<&'static str>,
 }
 
 /// Why a live session cannot start, if it cannot. Audio is sent to
@@ -939,6 +942,25 @@ pub(crate) fn live_unavailable() -> Option<&'static str> {
         .map(|err| err.message_for(provider))
 }
 
+fn cue_provider_name() -> Option<&'static str> {
+    if cue_connection().is_err() {
+        return None;
+    }
+    #[cfg(all(
+        debug_assertions,
+        target_os = "macos",
+        feature = "native-audio-spike",
+        feature = "lab-evaluator"
+    ))]
+    if lab_evaluator::selected() {
+        return Some("Claude");
+    }
+    if cfg!(feature = "claude-cli") {
+        return Some("Claude");
+    }
+    Some(llm_provider::cue_provider().name())
+}
+
 #[tauri::command]
 fn live_status() -> LiveStatus {
     let reason = live_unavailable();
@@ -947,6 +969,7 @@ fn live_status() -> LiveStatus {
         reason,
         transcription: transcription::cloud::selected()
             .then_some(transcription::cloud::active_provider_name()),
+        cue_provider: cue_provider_name(),
     }
 }
 
@@ -1568,18 +1591,25 @@ fn stop_after_cloud_failure(
     });
 }
 
-/// Starts a live session: the microphone feeds cloud transcription, and the
-/// cue engine runs on what is said. Nothing is recorded or stored. Audio is
-/// sent to the provider only after the session's review is approved. A build
-/// or launch without cloud transcription refuses the start; nothing is
-/// transcribed on this device.
+/// Starts a live session: the microphone feeds cloud transcription, and cue
+/// processing is enabled for the session in one step (except in lab runs,
+/// which keep their explicit manual review). A build or launch without cloud
+/// transcription refuses the start; nothing is transcribed on this device.
 #[tauri::command]
 async fn start_live_session(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    microphone: tauri::State<'_, microphone::Controller>,
     application: Option<String>,
 ) -> Result<(), String> {
+    start_live_session_now(app, application, false).await
+}
+
+pub(crate) async fn start_live_session_now(
+    app: tauri::AppHandle,
+    application: Option<String>,
+    auto_started: bool,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let microphone = app.state::<microphone::Controller>();
     {
         if let Some(reason) = live_unavailable() {
             return Err(reason.into());
@@ -1600,8 +1630,6 @@ async fn start_live_session(
         let streams = transcription::cloud::streams()
             .map_err(|_| "The cloud transcription settings are not usable.")?;
         let budget = streams.budget();
-        // Nothing is opened here: the stream opens once the review is
-        // approved. The start can still be cancelled before capture.
         let (start, streams) =
             tauri::async_runtime::spawn_blocking(move || start.load(|| Ok(streams)))
                 .await
@@ -1610,7 +1638,7 @@ async fn start_live_session(
         let session = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
-            let session = runtime.install_live_start(&start)?;
+            let session = runtime.install_live_start_with(&start, auto_started)?;
             // An application joining this session spends the same budget.
             runtime.live_budget = budget.map(|budget| (session, budget));
             publish(&app, &mut runtime);
@@ -1916,6 +1944,7 @@ pub fn run() {
             processing_commands::approve_processing_scope,
             processing_commands::cancel_processing_review,
             processing_commands::revoke_processing,
+            processing_commands::turn_off_processing,
             processing_commands::set_processing_paused,
             processing_snapshot,
             snapshot,

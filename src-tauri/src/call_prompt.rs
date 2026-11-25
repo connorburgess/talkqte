@@ -1,19 +1,20 @@
-//! "A call seems to be starting": a quiet offer to start a live session.
+//! "A call seems to be starting": a quiet offer to start a live session, or
+//! opt-in automatic start when a known call application or browser uses the
+//! microphone.
 //!
 //! Two signals, neither needing a permission: the default microphone is in
 //! use by another process (Core Audio's "device is running somewhere"), and
 //! which application is frontmost. When the microphone has been in use for a
 //! moment, no TalkQTE session or microphone check runs, and the person has
-//! turned the prompt on, the companion offers to start a session with the
-//! microphone and, when the frontmost application is a known call app or a
-//! browser, that application preselected. Nothing is captured, listed or sent
-//! by the offer: it only opens the notebook's ordinary start. It never starts
-//! a session by itself, and it shows once per spell of microphone use.
+//! turned the prompt or auto-start on, TalkQTE either offers in the companion
+//! to start a session (1-click Start) or, if auto-start is opted in and a
+//! known meeting app or browser is active with keys configured, starts a live
+//! session immediately and shows Listening · Stop in the companion.
 //!
-//! Nothing is read while the prompt is off. What is read is whether the
-//! microphone is in use and the frontmost application's name and bundle
-//! identifier, never audio or window content, and it stays on this Mac.
-//! The on/off setting and the applications not to ask about are kept in the
+//! Nothing is read while both prompt and auto-start are off. What is read is
+//! whether the microphone is in use and the frontmost application's name and
+//! bundle identifier, never audio or window content, and it stays on this Mac.
+//! The settings and the applications not to ask about are kept in the
 //! settings file (`settings.rs`), the latter as bundle identifiers only.
 
 use serde::Serialize;
@@ -132,10 +133,29 @@ pub struct Preselect {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    /// Off until the person turns it on.
+    /// Offer in the dock when a call seems to start. Off until the person
+    /// turns it on.
     pub enabled: bool,
+    /// Start a live session automatically when a known meeting app or browser
+    /// uses the microphone for `SETTLE`. Off by default.
+    pub auto_start: bool,
     /// Applications the person said not to ask about, by name.
     pub not_for: Vec<String>,
+}
+
+/// An automatic session start triggered for a known meeting app or browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AutoStart {
+    pub bundle_id: String,
+    pub application: String,
+    pub kind: Kind,
+}
+
+/// Result of one observation of the signals.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Observation {
+    pub prompt_changed: bool,
+    pub auto_start: Option<AutoStart>,
 }
 
 /// An answer from the companion.
@@ -178,11 +198,36 @@ impl Watcher {
         self.settings.enabled
     }
 
-    /// Turn the prompt on or off. Off clears any offer and what was seen.
+    /// Whether auto-start when a call begins is enabled.
+    pub fn auto_start(&self) -> bool {
+        self.settings.auto_start
+    }
+
+    /// Whether either the dock offer or auto-start needs signal polling.
+    pub fn watching(&self) -> bool {
+        self.settings.enabled || self.settings.auto_start
+    }
+
+    /// Turn the prompt on or off. Off clears any offer and what was seen
+    /// when auto-start is also off.
     pub fn set_enabled(&mut self, enabled: bool) -> bool {
         let changed = self.settings.enabled != enabled;
         self.settings.enabled = enabled;
         if !enabled {
+            if !self.settings.auto_start {
+                self.in_use_since = None;
+                self.spent = false;
+            }
+            return self.clear() || changed;
+        }
+        changed
+    }
+
+    /// Turn automatic start on or off.
+    pub fn set_auto_start(&mut self, auto_start: bool) -> bool {
+        let changed = self.settings.auto_start != auto_start;
+        self.settings.auto_start = auto_start;
+        if !self.watching() {
             self.in_use_since = None;
             self.spent = false;
             return self.clear() || changed;
@@ -197,8 +242,9 @@ impl Watcher {
 
     /// Restores saved choices at launch, or the defaults on a reset. Only
     /// known applications are kept, named as Settings names them.
-    pub fn restore(&mut self, enabled: bool, not_for_ids: &[String]) {
+    pub fn restore(&mut self, enabled: bool, auto_start: bool, not_for_ids: &[String]) {
         self.set_enabled(enabled);
+        self.set_auto_start(auto_start);
         self.clear_not_for();
         for bundle in not_for_ids {
             if let Some(name) = known_name(bundle) {
@@ -226,22 +272,45 @@ impl Watcher {
 
     /// One read of the signals. `busy` is true while a TalkQTE live session
     /// starts or runs, or its microphone check is on: the microphone is then
-    /// TalkQTE's own business, and that spell of use gets no offer. Returns
-    /// whether the offer changed.
+    /// TalkQTE's own business, and that spell of use gets no offer or
+    /// auto-start. Returns whether the offer changed.
     pub fn observe(&mut self, signals: &Signals, busy: bool, now: Instant) -> bool {
-        if !self.settings.enabled {
-            return self.clear();
+        self.observe_with(signals, busy, false, now).prompt_changed
+    }
+
+    /// One read of the signals, also returning an automatic start when
+    /// `auto_start` is enabled, `can_auto_start` is true (keys are configured
+    /// and not a lab run), and a known meeting app or browser has used the
+    /// microphone for `SETTLE`.
+    pub fn observe_with(
+        &mut self,
+        signals: &Signals,
+        busy: bool,
+        can_auto_start: bool,
+        now: Instant,
+    ) -> Observation {
+        if !self.watching() {
+            return Observation {
+                prompt_changed: self.clear(),
+                auto_start: None,
+            };
         }
         if busy {
             if self.in_use_since.is_some() || signals.microphone_in_use {
                 self.spent = true;
             }
-            return self.clear();
+            return Observation {
+                prompt_changed: self.clear(),
+                auto_start: None,
+            };
         }
         if !signals.microphone_in_use {
             self.in_use_since = None;
             self.spent = false;
-            return self.clear();
+            return Observation {
+                prompt_changed: self.clear(),
+                auto_start: None,
+            };
         }
         let since = *self.in_use_since.get_or_insert(now);
         if let Some((_, shown, bundle)) = &self.prompt {
@@ -249,13 +318,16 @@ impl Watcher {
                 // Left to go away: as Not now, for the rest of this call.
                 let bundle = bundle.clone();
                 self.quiet_for(bundle, now);
-                return self.clear();
+                return Observation {
+                    prompt_changed: self.clear(),
+                    auto_start: None,
+                };
             }
-            return false;
+            return Observation::default();
         }
         self.quiet.retain(|(_, until)| *until > now);
         if self.spent || now.saturating_duration_since(since) < SETTLE {
-            return false;
+            return Observation::default();
         }
         self.spent = true;
         let candidate = signals
@@ -268,7 +340,22 @@ impl Watcher {
             .is_some_and(|bundle| self.not_for_ids.contains(bundle))
             || self.quiet.iter().any(|(quiet, _)| *quiet == bundle)
         {
-            return false;
+            return Observation::default();
+        }
+        if self.settings.auto_start && can_auto_start {
+            if let Some((app, app_kind)) = candidate {
+                return Observation {
+                    prompt_changed: self.clear(),
+                    auto_start: Some(AutoStart {
+                        bundle_id: app.bundle_id.clone(),
+                        application: app.name.clone(),
+                        kind: app_kind,
+                    }),
+                };
+            }
+        }
+        if !self.settings.enabled {
+            return Observation::default();
         }
         self.next_id += 1;
         let prompt = Prompt {
@@ -277,7 +364,10 @@ impl Watcher {
             id: self.next_id,
         };
         self.prompt = Some((prompt, now, bundle));
-        true
+        Observation {
+            prompt_changed: true,
+            auto_start: None,
+        }
     }
 
     fn quiet_for(&mut self, bundle: Option<String>, now: Instant) {
@@ -572,6 +662,7 @@ mod tests {
         let mut watcher = Watcher::default();
         watcher.restore(
             true,
+            false,
             &[
                 "us.zoom.xos".into(),
                 "com.example.unknown".into(),
@@ -589,7 +680,7 @@ mod tests {
         for bundle in MEETING.iter().chain(BROWSERS) {
             assert!(known_name(bundle).is_some(), "{bundle}");
         }
-        watcher.restore(false, &[]);
+        watcher.restore(false, false, &[]);
         assert_eq!(watcher.settings(), &Settings::default());
     }
 
@@ -616,5 +707,143 @@ mod tests {
         watcher.observe(&IN_USE(zoom()), false, start + SETTLE);
         assert!(watcher.set_enabled(false));
         assert_eq!(watcher.prompt(), None);
+    }
+
+    #[test]
+    fn auto_start_is_off_by_default_and_triggers_once_per_spell_when_enabled() {
+        let mut watcher = Watcher::default();
+        assert!(!watcher.auto_start());
+        assert!(!watcher.watching());
+        assert!(watcher.set_auto_start(true));
+        assert!(watcher.watching());
+
+        let start = Instant::now();
+        let none = Signals::default();
+        assert!(watcher
+            .observe_with(&IN_USE(zoom()), false, true, start)
+            .auto_start
+            .is_none());
+        let obs = watcher.observe_with(&IN_USE(zoom()), false, true, start + SETTLE);
+        assert!(obs.auto_start.is_some());
+        assert!(!obs.prompt_changed);
+        assert_eq!(watcher.prompt(), None);
+
+        // Same mic spell does not trigger auto-start again.
+        assert!(watcher
+            .observe_with(
+                &IN_USE(zoom()),
+                false,
+                true,
+                start + SETTLE + Duration::from_secs(5)
+            )
+            .auto_start
+            .is_none());
+
+        // Wait out QUIET_FOR and trigger again on a browser call.
+        watcher.observe_with(&none, false, true, start + SETTLE + Duration::from_secs(6));
+        watcher.observe_with(
+            &none,
+            false,
+            true,
+            start + SETTLE + Duration::from_secs(6) + QUIET_FOR,
+        );
+        let chrome = Some(Frontmost {
+            bundle_id: "com.google.Chrome".into(),
+            name: "Google Chrome".into(),
+        });
+        let next = start + SETTLE + Duration::from_secs(12) + QUIET_FOR;
+        watcher.observe_with(&IN_USE(chrome.clone()), false, true, next);
+        assert!(watcher
+            .observe_with(&IN_USE(chrome), false, true, next + SETTLE)
+            .auto_start
+            .is_some());
+    }
+
+    #[test]
+    fn auto_start_skips_when_unavailable_busy_skipped_or_unknown_app() {
+        let facetime = || {
+            Some(Frontmost {
+                bundle_id: "com.apple.FaceTime".into(),
+                name: "FaceTime".into(),
+            })
+        };
+        let mut watcher = Watcher::default();
+        watcher.restore(false, true, &["us.zoom.xos".into()]);
+        let start = Instant::now();
+
+        // Unavailable: keys missing.
+        watcher.observe_with(&IN_USE(facetime()), false, false, start);
+        assert!(watcher
+            .observe_with(&IN_USE(facetime()), false, false, start + SETTLE)
+            .auto_start
+            .is_none());
+
+        // Busy: session already active.
+        let t2 = start + SETTLE + Duration::from_secs(10) + QUIET_FOR;
+        watcher.observe_with(
+            &Signals::default(),
+            false,
+            true,
+            start + SETTLE + Duration::from_secs(1),
+        );
+        watcher.observe_with(&Signals::default(), false, true, t2);
+        watcher.observe_with(&IN_USE(facetime()), true, true, t2 + Duration::from_secs(1));
+        assert!(watcher
+            .observe_with(
+                &IN_USE(facetime()),
+                true,
+                true,
+                t2 + Duration::from_secs(1) + SETTLE
+            )
+            .auto_start
+            .is_none());
+
+        // Skipped app or unknown app.
+        let t3 = t2 + Duration::from_secs(20) + QUIET_FOR;
+        watcher.observe_with(
+            &Signals::default(),
+            false,
+            true,
+            t2 + SETTLE + Duration::from_secs(2),
+        );
+        watcher.observe_with(&Signals::default(), false, true, t3);
+        watcher.observe_with(&IN_USE(zoom()), false, true, t3 + Duration::from_secs(1));
+        assert!(watcher
+            .observe_with(
+                &IN_USE(zoom()),
+                false,
+                true,
+                t3 + Duration::from_secs(1) + SETTLE
+            )
+            .auto_start
+            .is_none());
+
+        let unknown = Some(Frontmost {
+            bundle_id: "com.example.voice".into(),
+            name: "Voice Memo".into(),
+        });
+        let t4 = t3 + Duration::from_secs(20) + QUIET_FOR;
+        watcher.observe_with(
+            &Signals::default(),
+            false,
+            true,
+            t3 + SETTLE + Duration::from_secs(2),
+        );
+        watcher.observe_with(&Signals::default(), false, true, t4);
+        watcher.observe_with(
+            &IN_USE(unknown.clone()),
+            false,
+            true,
+            t4 + Duration::from_secs(1),
+        );
+        assert!(watcher
+            .observe_with(
+                &IN_USE(unknown),
+                false,
+                true,
+                t4 + Duration::from_secs(1) + SETTLE
+            )
+            .auto_start
+            .is_none());
     }
 }

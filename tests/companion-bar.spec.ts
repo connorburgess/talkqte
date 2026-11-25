@@ -335,3 +335,61 @@ test('Codex lab disclosure uses the selected provider and strict first-timeout p
     'Claude',
   );
 });
+
+test('the dock offers Turn off processing while the model is on and Listening · Stop when auto-started', async ({
+  page,
+}) => {
+  const bar = await companion(page);
+  await microphone(page, { status: 'listening', activity: 'active' });
+  const publish = (value: Record<string, unknown>) =>
+    page.evaluate((value) => window.liveTest.publish(value as never), value);
+
+  await publish({
+    transcription: { provider: 'Deepgram' },
+    model: 'on',
+  });
+  await page.setViewportSize({ width: 320, height: 76 });
+  await expect(bar.getByRole('button')).toHaveCount(4);
+  const turnOff = bar.getByRole('button', {
+    name: 'Turn off processing',
+    exact: true,
+  });
+  await expect(turnOff).toBeInViewport({ ratio: 1 });
+  expect((await turnOff.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+  expect((await turnOff.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+
+  await publish({ autoStarted: true });
+  await expect(bar.getByText('Listening', { exact: true })).toBeVisible();
+  const stop = bar.getByRole('button', {
+    name: 'Stop live session',
+    exact: true,
+  });
+  await expect(stop).toHaveText('Stop');
+  await expect(stop).toBeInViewport({ ratio: 1 });
+  expect((await stop.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector('main')!.scrollHeight <= innerHeight &&
+        document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+
+  await page.setViewportSize({ width: 320, height: 232 });
+  await page.evaluate((value) => window.liveTest.setCue(value), cue);
+  await expect(
+    page.getByRole('region', { name: 'Suggested question' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        document.querySelector('main')!.scrollHeight <= innerHeight &&
+        document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

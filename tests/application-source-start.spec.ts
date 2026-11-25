@@ -104,7 +104,7 @@ test('both sides: the notice comes first, then the chosen application joins the 
     'macOS asks you to allow Screen & System Audio Recording for TalkQTE',
   );
   await expect(chooser).toContainText(
-    'that one approval covers the microphone and the application',
+    'that one start covers the microphone and the application',
   );
   await expect(chooser).toContainText('Use headphones if you can.');
   await expect(start(page)).toBeDisabled();

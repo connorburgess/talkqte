@@ -454,8 +454,30 @@ svg {
 .session-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-8);
+}
+.session-start-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+.session-start-disclosure {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 36ch;
+  text-align: right;
+}
+@media (max-width: 760px) {
+  .session-start-group {
+    align-items: flex-start;
+  }
+  .session-start-disclosure {
+    text-align: left;
+  }
 }
 .session-clock {
   font-family: var(--font-mono);
@@ -1260,6 +1282,24 @@ svg {
   font-family: var(--font);
   font-size: 13px;
   font-weight: 700;
+}
+.companion-status .companion-listening {
+  font-size: 12px;
+}
+.companion-auto-sep {
+  flex: none;
+  color: var(--companion-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.companion-control.companion-stop-label {
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--companion-fg);
+  background: #181f28;
+  border: 1px solid #637286;
+  border-radius: 6px;
 }
 /* A state the glyph cannot say on its own is spelled out, on one line. */
 .companion-status [role='status']:not(.visually-hidden) {
