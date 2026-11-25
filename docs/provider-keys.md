@@ -13,9 +13,12 @@ meeting.
 
 **Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
 per provider: what the key is for and how it is billed, its state (**Not
-set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
-Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
-saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
+set**, **Saved · not checked yet**, **Saved · checked**, **Rejected by …
+Replace it with a new key.**, **Could not be read from the Keychain**, or
+**Unavailable**), a non-editable fixed-length masked display with **Replace key**
+(revealing the password field with **Save key** and **Cancel**) when a key is
+saved, or the password field directly when not set, rejected, or unreadable, plus
+**Test key** and **Remove key**. Errors are the
 fixed messages below, announced as alerts. Below the key forms, the current session's cue requests and estimated spend are
 shown as `"This session: 12 of 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model claude-haiku-5-5."`
 for built-in models, or `"This session: 7 of 400 cue requests. Estimated spend unavailable for custom model …."`

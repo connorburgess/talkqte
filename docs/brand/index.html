@@ -1525,9 +1525,10 @@
       }
 
       .sk-chip.is-set {
-        border-color: var(--g-amber-ink);
+        border: 1.5px solid var(--g-amber-ink);
         background: #fdf6e9;
         color: var(--g-amber-ink);
+        font-weight: 600;
       }
 
       .sk-chip.is-checking {
@@ -6803,21 +6804,20 @@ Cue processing stopped: -</pre>
                   <div class="sk-provider">
                     <strong class="panel-h3">Deepgram</strong>
                   </div>
-                  <span class="sk-chip is-set">Set and checked</span>
+                  <span class="sk-chip is-set">✓ Saved · checked</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
                   Transcribes a live session's audio. Billed by Deepgram per
                   minute, at most 120 minutes per session.
                 </p>
                 <div class="sk-entry">
-                  <div class="mono-label" style="color: var(--g-ink)">
-                    Replace Deepgram key
-                  </div>
                   <div class="sk-input-row">
-                    <span class="sk-password" style="color: var(--g-muted)"
-                      >Paste replacement key…</span
+                    <span
+                      class="sk-password"
+                      style="background: var(--g-band); border-color: var(--g-line)"
+                      >••••••••••••••••••••••••</span
                     >
-                    <span class="sk-btn-primary is-disabled">Save key</span>
+                    <span class="sk-btn">Replace key</span>
                     <span class="sk-btn">Test key</span>
                     <span class="sk-btn is-danger">Remove key</span>
                   </div>
@@ -6922,7 +6922,7 @@ Cue processing stopped: -</pre>
               <div class="sk-row">
                 <div class="sk-row-head">
                   <strong class="panel-h3">Deepgram</strong>
-                  <span class="sk-chip is-set">Set, not checked yet</span>
+                  <span class="sk-chip is-set">✓ Saved · not checked yet</span>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
                   Deepgram key saved. It was not checked.
@@ -6998,7 +6998,7 @@ Cue processing stopped: -</pre>
                 <div class="sk-row" style="margin-top: 10px">
                   <div class="sk-row-head">
                     <strong style="font-size: 14px">Deepgram</strong>
-                    <span class="sk-chip is-set">Set and checked</span>
+                    <span class="sk-chip is-set">✓ Saved · checked</span>
                   </div>
                   <p
                     class="panel-muted"
@@ -8048,7 +8048,7 @@ Cue processing stopped: -</pre>
                         <div class="sk-provider">
                           <strong class="panel-h3">Deepgram</strong>
                         </div>
-                        <span class="sk-chip is-set">Set and checked</span>
+                        <span class="sk-chip is-set">✓ Saved · checked</span>
                       </div>
                       <p
                         class="panel-muted"

@@ -17,6 +17,7 @@ interface OnboardingProps {
   onSkip: () => void;
   onFinish: () => void;
   onStartLive: () => void;
+  onKeysChanged?: () => void;
 }
 
 const STEP_META: Record<
@@ -50,6 +51,7 @@ export function Onboarding({
   onSkip,
   onFinish,
   onStartLive,
+  onKeysChanged,
 }: OnboardingProps) {
   const [step, setStep] = useState<Step>(1);
   const [keyStore, setKeyStore] = useState<KeyStore>();
@@ -232,7 +234,7 @@ export function Onboarding({
                 </strong>{' '}
                 You can skip either key now and add it later in Settings.
               </p>
-              <ProviderKeysRows showWhereToGet />
+              <ProviderKeysRows showWhereToGet onKeysChanged={onKeysChanged} />
             </>
           )}
 
