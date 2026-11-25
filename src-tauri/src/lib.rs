@@ -2971,11 +2971,10 @@ mod context_file_path_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod dictation_ipc_tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn dictation_ipc_is_restricted_to_main_and_refuses_while_live_or_mic_is_active() {
         use tauri::Manager;
