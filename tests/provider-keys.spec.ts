@@ -32,6 +32,8 @@ async function openNative(page: Page) {
 const row = (page: Page, name: string) =>
   page.getByRole('form', { name, exact: true });
 
+const SAVED_MASK = '••••••••••••••••••••••••';
+
 test('browser preview fake: a new install shows both keys as not set, with what each is for', async ({
   page,
 }) => {
@@ -76,10 +78,38 @@ test('browser preview fake: a key is entered, hidden, cleared after saving or re
   await expect(input).toHaveValue('');
   await input.fill(ANTHROPIC);
   await anthropic.getByRole('button', { name: 'Save key' }).click();
-  await expect(anthropic).toContainText('Set, not checked yet');
+  await expect(anthropic).toContainText('Saved · not checked yet');
+  await expect(
+    anthropic.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
   await expect(anthropic).toContainText('Anthropic key saved.');
-  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveValue('');
+  // Saved state hides the blank input behind a non-editable masked display + Replace key.
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(anthropic.locator('.provider-key-stored')).toContainText(
+    'Stored in macOS Keychain',
+  );
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveCount(0);
+  await expect(
+    anthropic.getByRole('button', { name: 'Replace key' }),
+  ).toBeEnabled();
   await expect(page.locator('body')).not.toContainText(ANTHROPIC);
+
+  // Clicking Replace key reveals the empty replacement input + Save key + Cancel.
+  await anthropic.getByRole('button', { name: 'Replace key' }).click();
+  const replaceInput = anthropic.getByLabel('Replace Anthropic key');
+  await expect(replaceInput).toBeFocused();
+  await expect(replaceInput).toHaveValue('');
+  await expect(replaceInput).toHaveAttribute(
+    'placeholder',
+    'Paste a new key to replace the saved one',
+  );
+  await expect(
+    anthropic.getByRole('button', { name: 'Save key' }),
+  ).toBeDisabled();
+  await anthropic.getByRole('button', { name: 'Cancel' }).click();
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveCount(0);
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+
   // The browser preview checks nothing.
   await anthropic.getByRole('button', { name: 'Test key' }).click();
   await expect(anthropic.getByRole('alert')).toContainText(
@@ -87,7 +117,9 @@ test('browser preview fake: a key is entered, hidden, cleared after saving or re
   );
   await anthropic.getByRole('button', { name: 'Remove key' }).click();
   await expect(anthropic).toContainText('Not set');
-  await expect(anthropic.getByLabel('Anthropic API key')).toBeVisible();
+  const clearedInput = anthropic.getByLabel('Anthropic API key');
+  await expect(clearedInput).toBeVisible();
+  await expect(clearedInput).not.toHaveAttribute('placeholder', /.+/);
 });
 
 test('browser preview fake: the keyboard reaches every key control in order', async ({
@@ -100,17 +132,37 @@ test('browser preview fake: the keyboard reaches every key control in order', as
   await input.focus();
   await page.keyboard.type(DEEPGRAM);
   await page.keyboard.press('Enter');
-  await expect(row(page, 'Deepgram')).toContainText('Set, not checked yet');
+  await expect(row(page, 'Deepgram')).toContainText('Saved · not checked yet');
   // macOS WebKit follows Safari's Tab setting; Option-Tab reaches buttons.
   const tab =
     browserName === 'webkit' && process.platform === 'darwin'
       ? 'Alt+Tab'
       : 'Tab';
-  await row(page, 'Deepgram').getByLabel('Replace Deepgram key').focus();
+  const replaceBtn = row(page, 'Deepgram').getByRole('button', {
+    name: 'Replace key',
+  });
+  await expect(replaceBtn).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Test key' }),
+  ).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Remove key' }),
+  ).toBeFocused();
+  await replaceBtn.focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    row(page, 'Deepgram').getByLabel('Replace Deepgram key'),
+  ).toBeFocused();
   await page.keyboard.type(DEEPGRAM);
   await page.keyboard.press(tab);
   await expect(
     row(page, 'Deepgram').getByRole('button', { name: 'Save key' }),
+  ).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Cancel' }),
   ).toBeFocused();
   await page.keyboard.press(tab);
   await expect(
@@ -131,17 +183,37 @@ test('native fixture: the key crosses IPC once and only its state comes back', a
   await expect(deepgram).toContainText('Not set');
   await deepgram.getByLabel('Deepgram API key').fill(DEEPGRAM);
   await deepgram.getByRole('button', { name: 'Save key' }).click();
-  await expect(deepgram).toContainText('Set, not checked yet');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await deepgram.getByRole('button', { name: 'Test key' }).click();
-  await expect(deepgram).toContainText('Set and checked');
+  await expect(deepgram).toContainText('Saved · checked');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toHaveCount(0);
   await expect(deepgram).toContainText('Deepgram accepted the key.');
   await anthropic.getByLabel('Anthropic API key').fill(ANTHROPIC);
   await anthropic.getByRole('button', { name: 'Save key' }).click();
+  // Different-length keys share the exact same fixed-length masked display.
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await anthropic.getByRole('button', { name: 'Test key' }).click();
   await expect(anthropic).toContainText(
     'Rejected by Anthropic. Replace it with a new key.',
   );
-  await expect(anthropic.getByLabel('Replace Anthropic key')).toBeVisible();
+  await expect(
+    anthropic.locator('.provider-key-state.is-rejected svg'),
+  ).toBeVisible();
+  // Rejected state shows the replace input directly with zero extra clicks.
+  const replaceAnthropic = anthropic.getByLabel('Replace Anthropic key');
+  await expect(replaceAnthropic).toBeVisible();
+  await expect(replaceAnthropic).toHaveAttribute(
+    'placeholder',
+    'Paste a new key to replace the rejected one',
+  );
   const { sent, replies } = await page.evaluate(() => ({
     sent: window.providerKeysTest.sent,
     replies: window.providerKeysTest.replies,
@@ -262,10 +334,18 @@ test('native fixture: ElevenLabs key entry, test, removal, and Transcription pro
   );
   await elevenlabs.getByLabel('ElevenLabs API key').fill(ELEVENLABS);
   await elevenlabs.getByRole('button', { name: 'Save key' }).click();
-  await expect(elevenlabs).toContainText('Set, not checked yet');
+  await expect(elevenlabs).toContainText('Saved · not checked yet');
+  await expect(
+    elevenlabs.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(elevenlabs.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await expect(page.locator('body')).not.toContainText(ELEVENLABS);
   await elevenlabs.getByRole('button', { name: 'Test key' }).click();
-  await expect(elevenlabs).toContainText('Set and checked');
+  await expect(elevenlabs).toContainText('Saved · checked');
+  await expect(
+    elevenlabs.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(elevenlabs.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await expect(elevenlabs).toContainText('ElevenLabs accepted the key.');
 
   const providerChoice = page.getByLabel('Transcription provider');
@@ -305,7 +385,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   );
   await openai.getByLabel('OpenAI API key').fill(OPENAI);
   await openai.getByRole('button', { name: 'Save key' }).click();
-  await expect(openai).toContainText('Set, not checked yet');
+  await expect(openai).toContainText('Saved · not checked yet');
+  await expect(openai.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await openai.getByRole('button', { name: 'Test key' }).click();
   await expect(openai).toContainText(
     'Rejected by OpenAI. Replace it with a new key.',
@@ -322,7 +403,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   await gemini.getByLabel('Gemini API key').fill(GEMINI);
   await gemini.getByRole('button', { name: 'Save key' }).click();
   await gemini.getByRole('button', { name: 'Test key' }).click();
-  await expect(gemini).toContainText('Set and checked');
+  await expect(gemini).toContainText('Saved · checked');
+  await expect(gemini.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await expect(gemini).toContainText('Gemini accepted the key.');
 
   const { sent, replies } = await page.evaluate(() => ({

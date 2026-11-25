@@ -1152,34 +1152,25 @@ function Notebook() {
       confirmedFocus.current = state.focus.join('\n');
     }
   }, [state]);
+  const liveStatusSeq = useRef(0);
   const refreshLiveStatus = useCallback(() => {
+    const seq = ++liveStatusSeq.current;
     bridge
       .liveStatus()
       .then((status) => {
-        setLiveStatus(status);
+        if (liveStatusSeq.current === seq) setLiveStatus(status);
       })
       .catch(() => {
-        setLiveStatus({
-          available: false,
-          reason: 'Live transcription status is unavailable.',
-        });
-      });
-  }, []);
-  useEffect(() => {
-    let current = true;
-    setLiveStatus(null);
-    bridge
-      .liveStatus()
-      .then((status) => {
-        if (current) setLiveStatus(status);
-      })
-      .catch(() => {
-        if (current)
+        if (liveStatusSeq.current === seq)
           setLiveStatus({
             available: false,
             reason: 'Live transcription status is unavailable.',
           });
       });
+  }, []);
+  useEffect(() => {
+    let current = true;
+    refreshLiveStatus();
     let stopKeys: (() => void) | undefined;
     if (bridge.desktop) {
       watchKeys(() => {
@@ -1191,6 +1182,7 @@ function Notebook() {
     }
     return () => {
       current = false;
+      liveStatusSeq.current++;
       stopKeys?.();
     };
   }, [refreshLiveStatus, settingsEpoch]);
@@ -1637,6 +1629,7 @@ function Notebook() {
             onSkip={skipOnboarding}
             onFinish={finishOnboarding}
             onStartLive={startFromOnboarding}
+            onKeysChanged={refreshLiveStatus}
           />
         )}
 
@@ -2332,6 +2325,7 @@ function Notebook() {
             <ProviderKeys
               key={settingsEpoch}
               onPreferencesChange={refreshLiveStatus}
+              onKeysChanged={refreshLiveStatus}
             />
             {keysAvailable && (
               <section className="setting">

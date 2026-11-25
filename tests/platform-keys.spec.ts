@@ -106,5 +106,5 @@ test('Windows: setup step 2 names Windows Credential Manager', async ({
   await expect(setup).toContainText('Stored in Windows Credential Manager');
   await row(page, 'Deepgram').getByLabel('Deepgram API key').fill(DEEPGRAM);
   await row(page, 'Deepgram').getByRole('button', { name: 'Save key' }).click();
-  await expect(row(page, 'Deepgram')).toContainText('Set, not checked yet');
+  await expect(row(page, 'Deepgram')).toContainText('Saved · not checked yet');
 });
