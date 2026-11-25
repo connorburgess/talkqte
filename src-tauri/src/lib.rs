@@ -171,6 +171,12 @@ struct Runtime {
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
+    /// Source IDs of kept meetings (`Provider::History`) auto-selected for
+    /// this session.
+    pub(crate) auto_context_ids: std::collections::HashSet<String>,
+    /// Source IDs of kept meetings explicitly removed during this session,
+    /// so auto-selection never re-adds them.
+    pub(crate) dismissed_auto_context_ids: std::collections::HashSet<String>,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
     /// Identity of the latest explicit file read; cancellation/replacement wins.
@@ -211,6 +217,8 @@ impl Default for Runtime {
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
+            auto_context_ids: std::collections::HashSet::new(),
+            dismissed_auto_context_ids: std::collections::HashSet::new(),
             pending_import: None,
             pending_file_pick: None,
             refresh: context_refresh::Refresh::default(),
@@ -616,12 +624,14 @@ fn set_user_name(
     )
 }
 #[tauri::command]
-fn set_focus(
+async fn set_focus(
     app: tauri::AppHandle,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     lines: Vec<String>,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.set_focus(lines))
+    change(&app, &state, |e| e.set_focus(lines))?;
+    refresh_auto_prior_context(&app).await;
+    Ok(())
 }
 #[tauri::command]
 fn set_sensitivity(
@@ -991,6 +1001,211 @@ pub(crate) struct PickedNotes {
     pub(crate) asks_for_dates: bool,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextItemView {
+    #[serde(flatten)]
+    item: context::ContextItem,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    auto_selected: bool,
+}
+
+fn context_views(runtime: &Runtime) -> Vec<ContextItemView> {
+    runtime
+        .context
+        .items()
+        .iter()
+        .map(|item| ContextItemView {
+            auto_selected: item.provider == context::Provider::History
+                && runtime.auto_context_ids.contains(&item.source_id),
+            item: item.clone(),
+        })
+        .collect()
+}
+
+impl Runtime {
+    /// Updates auto-selected kept meetings while preserving manual imports and
+    /// respecting per-session removals. Returns `(context_changed, cue_changed)`.
+    pub(crate) fn apply_auto_prior_context(
+        &mut self,
+        candidates: Option<Vec<context::ContextItem>>,
+    ) -> (bool, bool) {
+        let non_auto_count = self
+            .context
+            .items()
+            .iter()
+            .filter(|item| {
+                !(item.provider == context::Provider::History
+                    && self.auto_context_ids.contains(&item.source_id))
+            })
+            .count();
+        let capacity = context::MAX_ITEMS
+            .saturating_sub(non_auto_count)
+            .min(meeting_history::MAX_AUTO_PRIOR_CONTEXT);
+
+        let desired: Vec<context::ContextItem> = match candidates {
+            Some(list) if capacity > 0 => list
+                .into_iter()
+                .filter(|item| {
+                    item.provider == context::Provider::History
+                        && !self.dismissed_auto_context_ids.contains(&item.source_id)
+                        && !self.context.items().iter().any(|existing| {
+                            existing.provider == context::Provider::History
+                                && existing.source_id == item.source_id
+                                && !self.auto_context_ids.contains(&existing.source_id)
+                        })
+                })
+                .take(capacity)
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        let current: Vec<context::ContextItem> = self
+            .context
+            .items()
+            .iter()
+            .filter(|item| {
+                item.provider == context::Provider::History
+                    && self.auto_context_ids.contains(&item.source_id)
+            })
+            .cloned()
+            .collect();
+        if current == desired {
+            return (false, false);
+        }
+
+        let old_ids: Vec<String> = self.auto_context_ids.drain().collect();
+        for id in old_ids {
+            self.context.remove(context::Provider::History, &id);
+            self.refresh.forget(context::Provider::History, &id);
+        }
+        if desired.is_empty() {
+            return (true, self.sync_prior_notes());
+        }
+        let ids: Vec<String> = desired.iter().map(|item| item.source_id.clone()).collect();
+        for id in &ids {
+            self.auto_context_ids.insert(id.clone());
+        }
+        let (_, cue_changed) = self.merge_imported_notes(context::Provider::History, &ids, desired);
+        (true, cue_changed)
+    }
+}
+
+pub(crate) fn refresh_auto_prior_context_sync(app: &tauri::AppHandle) {
+    if settings::lab_run() {
+        return;
+    }
+    let enabled = app
+        .try_state::<settings::Store>()
+        .is_none_or(|store| store.saved().auto_prior_context);
+    let Some(history) = app.try_state::<meeting_history::Store>() else {
+        return;
+    };
+    let (should_suggest, focus, title, dismissed_count) = {
+        let state = app.state::<AppState>();
+        let Ok(runtime) = state.0.lock() else {
+            return;
+        };
+        let ready =
+            runtime.engine.state.status == engine::Status::Ready && !runtime.engine.state.live;
+        let title = (!runtime.engine.state.title.trim().is_empty())
+            .then(|| runtime.engine.state.title.clone());
+        (
+            enabled && ready,
+            runtime.engine.state.focus.clone(),
+            title,
+            runtime.dismissed_auto_context_ids.len(),
+        )
+    };
+    let candidates = if should_suggest {
+        let limit = meeting_history::MAX_AUTO_PRIOR_CONTEXT.saturating_add(dismissed_count);
+        history
+            .suggest_prior_context(&focus, title.as_deref(), limit)
+            .ok()
+    } else if !enabled {
+        Some(Vec::new())
+    } else {
+        return;
+    };
+    let Some(candidates) = candidates else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if enabled
+        && (runtime.engine.state.status != engine::Status::Ready || runtime.engine.state.live)
+    {
+        return;
+    }
+    let arg = enabled.then_some(candidates);
+    let (changed, cue_changed) = runtime.apply_auto_prior_context(arg);
+    if changed {
+        emit_context(app, &mut runtime, cue_changed);
+    }
+}
+
+pub(crate) async fn refresh_auto_prior_context(app: &tauri::AppHandle) {
+    if settings::lab_run() {
+        return;
+    }
+    let enabled = app
+        .try_state::<settings::Store>()
+        .is_none_or(|store| store.saved().auto_prior_context);
+    if app.try_state::<meeting_history::Store>().is_none() {
+        return;
+    }
+    let (ready, focus, title, dismissed_count) = {
+        let state = app.state::<AppState>();
+        let Ok(runtime) = state.0.lock() else {
+            return;
+        };
+        let ready =
+            runtime.engine.state.status == engine::Status::Ready && !runtime.engine.state.live;
+        let title = (!runtime.engine.state.title.trim().is_empty())
+            .then(|| runtime.engine.state.title.clone());
+        (
+            ready,
+            runtime.engine.state.focus.clone(),
+            title,
+            runtime.dismissed_auto_context_ids.len(),
+        )
+    };
+    if enabled && !ready {
+        return;
+    }
+    let candidates = if enabled {
+        let handle = app.clone();
+        let limit = meeting_history::MAX_AUTO_PRIOR_CONTEXT.saturating_add(dismissed_count);
+        let Ok(Ok(found)) = tauri::async_runtime::spawn_blocking(move || {
+            handle
+                .state::<meeting_history::Store>()
+                .suggest_prior_context(&focus, title.as_deref(), limit)
+        })
+        .await
+        else {
+            return;
+        };
+        Some(found)
+    } else {
+        None
+    };
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if enabled
+        && (runtime.engine.state.status != engine::Status::Ready || runtime.engine.state.live)
+    {
+        return;
+    }
+    let (changed, cue_changed) = runtime.apply_auto_prior_context(candidates);
+    if changed {
+        emit_context(app, &mut runtime, cue_changed);
+    }
+}
+
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
     let cue_changed = runtime.sync_prior_notes();
@@ -998,12 +1213,13 @@ fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
 }
 
 /// Tells the windows about prior notes the engine has already been given.
-fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
+pub(crate) fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
     if cue_changed {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
-    let _ = app.emit_to("main", "context:changed", runtime.context.items());
+    let views = context_views(runtime);
+    let _ = app.emit_to("main", "context:changed", &views);
     publish_processing(app, runtime);
 }
 
@@ -1155,6 +1371,13 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
+    if provider == context::Provider::History {
+        for id in &ids {
+            let trimmed = id.trim();
+            runtime.auto_context_ids.remove(trimmed);
+            runtime.dismissed_auto_context_ids.remove(trimmed);
+        }
+    }
     let (outcome, cue_changed) = runtime.merge_imported_notes(provider, &ids, fetched);
     emit_context(&app, &mut runtime, cue_changed);
     Ok(outcome)
@@ -1169,11 +1392,11 @@ fn cancel_context_import(state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
-fn context_items(state: tauri::State<AppState>) -> Result<Vec<context::ContextItem>, String> {
+fn context_items(state: tauri::State<AppState>) -> Result<Vec<ContextItemView>, String> {
     state
         .0
         .lock()
-        .map(|runtime| runtime.context.items().to_vec())
+        .map(|runtime| context_views(&runtime))
         .map_err(|_| "The notebook is unavailable.".into())
 }
 
@@ -1189,6 +1412,11 @@ fn remove_context_item(
     let Some(cue_changed) = runtime.remove_imported_note(provider, &source_id) else {
         return Err("That note is no longer imported.".into());
     };
+    if provider == context::Provider::History {
+        let trimmed = source_id.trim().to_string();
+        runtime.auto_context_ids.remove(&trimmed);
+        runtime.dismissed_auto_context_ids.insert(trimmed);
+    }
     emit_context(&app, &mut runtime, cue_changed);
     Ok(())
 }
@@ -1201,6 +1429,17 @@ fn remove_context_from(
     state: tauri::State<AppState>,
 ) -> Result<usize, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let history_ids: Vec<String> = runtime
+        .context
+        .items()
+        .iter()
+        .filter(|item| item.provider == context::Provider::History)
+        .map(|item| item.source_id.clone())
+        .collect();
+    for id in history_ids {
+        runtime.dismissed_auto_context_ids.insert(id);
+    }
+    runtime.auto_context_ids.clear();
     let removed = runtime.context.remove_all_from(context::Provider::File)
         + runtime.context.remove_all_from(context::Provider::Granola)
         + runtime.context.remove_all_from(context::Provider::History);
@@ -1982,6 +2221,8 @@ pub fn run() {
             meeting_history_commands::kept_meetings,
             meeting_history_commands::open_kept_meeting,
             meeting_history_commands::rename_kept_meeting,
+            meeting_history_commands::set_kept_meeting_archived,
+            meeting_history_commands::set_auto_prior_context,
             meeting_history_commands::delete_kept_meeting,
             meeting_history_commands::delete_all_kept_meetings,
             meeting_history_commands::kept_meeting_export_preview,
@@ -2041,6 +2282,9 @@ pub fn run() {
             settings_commands::load(app.handle());
             // Kept meetings: off in a lab run, read only when asked.
             meeting_history_commands::manage(app);
+            // Pre-select relevant recent kept meetings (notes only) when
+            // enabled; lab runs skip this completely.
+            refresh_auto_prior_context_sync(app.handle());
             // A lab launch may give the user's name; it is set before the
             // first session, as if typed in Settings, over any saved name,
             // and is never written to the settings file.
@@ -2209,6 +2453,84 @@ pub fn run() {
 
 #[cfg(test)]
 mod granola_privacy_tests;
+
+#[cfg(test)]
+mod auto_prior_context_tests {
+    use super::*;
+
+    fn history_item(id: &str, title: &str) -> context::ContextItem {
+        context::ContextItem {
+            provider: context::Provider::History,
+            source_id: id.into(),
+            title: title.into(),
+            source_date: "2026-11-02".into(),
+            excerpt: format!("Notes for {title}"),
+            revision: 1,
+        }
+    }
+
+    fn file_item(id: &str, title: &str) -> context::ContextItem {
+        context::ContextItem {
+            provider: context::Provider::File,
+            source_id: id.into(),
+            title: title.into(),
+            source_date: "2026-11-01".into(),
+            excerpt: format!("File note for {title}"),
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn per_session_removal_is_respected_and_manual_imports_stay_when_auto_is_off() {
+        let mut runtime = Runtime::default();
+        runtime.merge_imported_notes(
+            context::Provider::File,
+            &["manual-file".into()],
+            vec![file_item("manual-file", "Manual file note")],
+        );
+
+        let (changed, _) = runtime.apply_auto_prior_context(Some(vec![
+            history_item("m1", "Orchard sync"),
+            history_item("m2", "Budget check"),
+            history_item("m3", "Gate planning"),
+        ]));
+        assert!(changed);
+        assert_eq!(runtime.context.items().len(), 4);
+        assert!(runtime.auto_context_ids.contains("m2"));
+
+        // Simulate user clicking Remove on m2 during this session.
+        assert!(runtime
+            .remove_imported_note(context::Provider::History, "m2")
+            .is_some());
+        runtime.auto_context_ids.remove("m2");
+        runtime.dismissed_auto_context_ids.insert("m2".into());
+
+        // Subsequent Focus update returns m2 again, plus m4; m2 stays removed.
+        let (changed, _) = runtime.apply_auto_prior_context(Some(vec![
+            history_item("m2", "Budget check"),
+            history_item("m1", "Orchard sync"),
+            history_item("m3", "Gate planning"),
+            history_item("m4", "Seed order"),
+        ]));
+        assert!(changed);
+        let history_ids: Vec<&str> = runtime
+            .context
+            .items()
+            .iter()
+            .filter(|i| i.provider == context::Provider::History)
+            .map(|i| i.source_id.as_str())
+            .collect();
+        assert_eq!(history_ids, vec!["m1", "m3", "m4"]);
+        assert!(!history_ids.contains(&"m2"));
+
+        // Turning auto_prior_context off removes only auto-selected items, keeping manual file note.
+        let (changed, _) = runtime.apply_auto_prior_context(None);
+        assert!(changed);
+        assert_eq!(runtime.context.items().len(), 1);
+        assert_eq!(runtime.context.items()[0].source_id, "manual-file");
+        assert!(runtime.auto_context_ids.is_empty());
+    }
+}
 
 #[cfg(all(
     test,

@@ -20,6 +20,7 @@ import {
   minutes,
   openKeptMeeting,
   renameKeptMeeting,
+  setKeptMeetingArchived,
   sourceNames,
   type AfterSessionKeep,
   type KeptListing,
@@ -50,6 +51,7 @@ export function MeetingHistory({
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [listing, setListing] = useState<KeptListing | null>(null);
   const [afterKeep, setAfterKeep] = useState<AfterSessionKeep>('auto');
   const [selected, setSelected] = useState<KeptMeeting | null>(null);
@@ -180,6 +182,40 @@ export function MeetingHistory({
     }
   };
 
+  const toggleArchived = async (meetingId: string, archived: boolean) => {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await setKeptMeetingArchived(meetingId, archived);
+      setSelected((current) =>
+        current && current.id === updated.id
+          ? {
+              ...current,
+              archived: updated.archived,
+              revision: updated.revision,
+            }
+          : current,
+      );
+      setNotice(
+        archived
+          ? `Archived “${updated.title}”.`
+          : `Unarchived “${updated.title}”.`,
+      );
+      await loadList(query);
+    } catch (problem) {
+      setError(
+        failure(
+          problem,
+          archived
+            ? 'The meeting could not be archived.'
+            : 'The meeting could not be unarchived.',
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmDeleteMeeting = async () => {
     if (!selected) return;
     const title = selected.title;
@@ -274,6 +310,16 @@ export function MeetingHistory({
             >
               <ArrowUpRight size={16} />
               Export…
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() =>
+                void toggleArchived(selected.id, !selected.archived)
+              }
+            >
+              {selected.archived ? 'Unarchive' : 'Archive'}
             </button>
             {!confirmDelete && (
               <button
@@ -381,6 +427,7 @@ export function MeetingHistory({
             {selected.transcribedBy && (
               <span>Transcribed by {selected.transcribedBy}</span>
             )}
+            {selected.archived && <span className="history-tag">Archived</span>}
           </p>
         </header>
 
@@ -513,6 +560,13 @@ export function MeetingHistory({
     );
   }
 
+  const archivedCount = (listing?.meetings ?? []).filter(
+    (item) => item.archived,
+  ).length;
+  const visibleMeetings = (listing?.meetings ?? []).filter(
+    (item) => showArchived || !item.archived,
+  );
+
   return (
     <div className="history">
       <h1>Meetings</h1>
@@ -567,6 +621,19 @@ export function MeetingHistory({
             )}
           </div>
 
+          {(archivedCount > 0 || showArchived) && (
+            <div className="history-filter-row">
+              <label className="history-check">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                <span>Show archived ({archivedCount})</span>
+              </label>
+            </div>
+          )}
+
           {listing && listing.unreadable > 0 && (
             <p className="history-help" role="status">
               {listing.unreadable === 1
@@ -575,7 +642,7 @@ export function MeetingHistory({
             </p>
           )}
 
-          {listing && listing.meetings.length === 0 ? (
+          {listing && visibleMeetings.length === 0 ? (
             <div className="history-empty">
               {query.trim() ? (
                 <>
@@ -586,6 +653,21 @@ export function MeetingHistory({
                     onClick={() => setQuery('')}
                   >
                     Clear search
+                  </button>
+                </>
+              ) : archivedCount > 0 && !showArchived ? (
+                <>
+                  <p>
+                    {archivedCount === 1
+                      ? '1 archived meeting is hidden from the list and from auto prior context.'
+                      : `${archivedCount} archived meetings are hidden from the list and from auto prior context.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setShowArchived(true)}
+                  >
+                    Show archived
                   </button>
                 </>
               ) : (
@@ -600,8 +682,11 @@ export function MeetingHistory({
             </div>
           ) : (
             <ul className="history-list" aria-label="Meetings">
-              {(listing?.meetings ?? []).map((item) => (
-                <li key={item.id}>
+              {visibleMeetings.map((item) => (
+                <li
+                  key={item.id}
+                  className={`history-row${item.archived ? ' is-archived' : ''}`}
+                >
                   <button
                     type="button"
                     className="history-item"
@@ -616,7 +701,19 @@ export function MeetingHistory({
                       {item.hasMeetingNotes && (
                         <span className="history-tag">Meeting notes</span>
                       )}
+                      {item.archived && (
+                        <span className="history-tag">Archived</span>
+                      )}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button history-archive-button"
+                    aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
+                    disabled={busy}
+                    onClick={() => void toggleArchived(item.id, !item.archived)}
+                  >
+                    {item.archived ? 'Unarchive' : 'Archive'}
                   </button>
                 </li>
               ))}
