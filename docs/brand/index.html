@@ -6338,9 +6338,47 @@
                   <span class="nb-tab">≡ Transcript &nbsp;0</span>
                 </div>
                 <p class="panel-muted">What would you like to remember?</p>
-                <div class="nb-editor-foot" style="padding-top: 8px">
+                <div
+                  class="nb-editor-foot"
+                  style="padding-top: 8px; align-items: center"
+                >
                   <span>Kept in memory for this session</span
-                  ><span>0 / 20,000</span>
+                  ><span
+                    style="
+                      display: inline-flex;
+                      align-items: center;
+                      gap: 8px;
+                    "
+                    ><span>0 / 20,000</span
+                    ><span
+                      class="nb-btn"
+                      style="
+                        width: 32px;
+                        height: 32px;
+                        padding: 0;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                      "
+                      title="Dictate note (idle)"
+                      >🎙</span
+                    ><span
+                      class="nb-btn"
+                      style="
+                        width: 32px;
+                        height: 32px;
+                        padding: 0;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        border: 1.5px solid var(--g-amber-ink);
+                        background: var(--g-amber-wash);
+                        color: var(--g-amber-ink);
+                      "
+                      title="Stop dictating (listening)"
+                      >■</span
+                    ></span
+                  >
                 </div>
               </div>
               <div class="panel-section">
@@ -6445,8 +6483,31 @@
                   in memory for this session and are never sent to Deepgram or
                   Anthropic.
                 </p>
-                <div class="panel-input" style="margin-top: 8px; width: 100%">
-                  Confirm legal review window before Friday commitment
+                <div
+                  style="
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 8px;
+                    margin-top: 8px;
+                  "
+                >
+                  <div class="panel-input" style="flex: 1 1 auto; min-width: 0">
+                    Confirm legal review window before Friday commitment
+                  </div>
+                  <span
+                    class="nb-btn"
+                    style="
+                      width: 36px;
+                      height: 36px;
+                      padding: 0;
+                      display: inline-flex;
+                      align-items: center;
+                      justify-content: center;
+                      flex-shrink: 0;
+                    "
+                    title="Dictate focus"
+                    >🎙</span
+                  >
                 </div>
               </div>
               <div class="panel-section">
