@@ -6,6 +6,12 @@ import type {
   MeetingNotesDraft,
   MeetingNotesPlan,
 } from '../../src/lib/meetingNotes';
+import type { CueProvider } from '../../src/lib/providerKeys';
+import {
+  currentPreferences,
+  providerName as getProviderName,
+  setCuratedNotesModel,
+} from './native-provider-keys';
 
 export const commands = [
   'meeting_notes_plan',
@@ -22,7 +28,6 @@ type Publish = (value: Partial<Snapshot>) => Promise<void>;
 
 /** Every command the notebook invoked, with its arguments. */
 export const calls: { command: string; args: unknown }[] = [];
-let model = 'claude-opus-5-5';
 let draft: MeetingNotesDraft | null = null;
 let failure: string | null = null;
 let kept: string | null = null;
@@ -32,16 +37,29 @@ let failNext: string | null = null;
 let refuseNext: string | null = null;
 let cancelled = false;
 
-/** Stands in for Rust's digest of exactly what would be sent. */
-const fingerprint = (current: Snapshot, include: boolean) =>
-  `fictional-${current.transcript.length}-${model}-${include ? current.notes : ''}`;
+function notesDestination(provider: CueProvider): string {
+  switch (provider) {
+    case 'openai':
+      return 'the OpenAI API (US), with your own OpenAI API key, billed to your OpenAI account';
+    case 'gemini':
+      return 'the Gemini API (Google AI Studio), with your own Gemini API key, billed to your Google account';
+    default:
+      return 'the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account';
+  }
+}
 
-const fictionalDraft: MeetingNotesDraft = {
+/** Stands in for Rust's digest of exactly what would be sent. */
+const fingerprint = (current: Snapshot, include: boolean) => {
+  const prefs = currentPreferences();
+  return `fictional-${prefs.cueProvider}-${current.transcript.length}-${prefs.effectiveNotesModel}-${include ? current.notes : ''}`;
+};
+
+const baseFictionalDraft = {
   markdown:
     "## Meeting notes\n\nWritten by a model from this meeting's transcript.\n\n### Summary\n\n- The greenhouse keys were discussed. (transcript 00:05)\n\n### Decisions\n\nNone stated.\n\n### Action items\n\n- Return the keys to the blue tin. Owner: not stated. Due: not stated. (transcript 00:05)\n\n### Open questions\n\nNone stated.\n",
   items: [
     {
-      section: 'summary',
+      section: 'summary' as const,
       text: 'The greenhouse keys were discussed.',
       sources: [
         {
@@ -51,7 +69,7 @@ const fictionalDraft: MeetingNotesDraft = {
       ],
     },
     {
-      section: 'actions',
+      section: 'actions' as const,
       text: 'Return the keys to the blue tin.',
       sources: [
         {
@@ -61,7 +79,6 @@ const fictionalDraft: MeetingNotesDraft = {
       ],
     },
   ],
-  spentMicroUsd: 41_000,
 };
 
 /** Kept notes, for the stand-in's export preview. */
@@ -76,6 +93,11 @@ export async function command(
   calls.push({ command: name, args: structuredClone(args) });
   const current = session();
   const phase = current.meetingNotes ?? 'none';
+  const prefs = currentPreferences();
+  const provider = prefs.cueProvider;
+  const providerName = getProviderName(provider);
+  const customModel = prefs.effectiveNotesCustom;
+
   switch (name) {
     case 'meeting_notes_plan': {
       if (!current.live || current.status !== 'ended')
@@ -87,12 +109,14 @@ export async function command(
         transcriptLines: current.transcript.length,
         minutes: 1,
         kilobytes: 1,
-        model,
-        likelyMicroUsd: 74_000,
-        worstMicroUsd: 336_000,
-        spendCapMicroUsd: 1_000_000,
-        destination:
-          'the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account',
+        provider,
+        providerName,
+        model: prefs.effectiveNotesModel,
+        customModel,
+        likelyMicroUsd: customModel ? null : 74_000,
+        worstMicroUsd: customModel ? null : 336_000,
+        spendCapMicroUsd: customModel ? null : 1_000_000,
+        destination: notesDestination(provider),
         cueSpentMicroUsd: 12_000,
         fingerprint: fingerprint(current, include),
       };
@@ -131,7 +155,12 @@ export async function command(
         await publish({ meetingNotes: 'failed' });
         throw failure;
       }
-      draft = structuredClone(fictionalDraft);
+      draft = {
+        ...structuredClone(baseFictionalDraft),
+        spentMicroUsd: customModel ? null : 41_000,
+        providerName,
+        customModel,
+      };
       await publish({ meetingNotes: 'draft' });
       return draft;
     }
@@ -144,7 +173,11 @@ export async function command(
         ...(draft && phase === 'draft' ? { draft } : {}),
         ...(failure && phase === 'failed' ? { failure } : {}),
         ...(kept && phase === 'kept' ? { kept } : {}),
-        ...(draft && phase === 'draft' ? { spentMicroUsd: 41_000 } : {}),
+        ...(draft && phase === 'draft'
+          ? { spentMicroUsd: draft.spentMicroUsd ?? null }
+          : {}),
+        providerName,
+        customModel,
       };
     case 'keep_meeting_notes':
       kept = (args as { markdown: string }).markdown;
@@ -157,10 +190,10 @@ export async function command(
       await publish({ meetingNotes: 'discarded' });
       return;
     case 'meeting_notes_model':
-      return model;
-    case 'set_meeting_notes_model':
-      model = (args as { model: string }).model;
-      return model;
+      return prefs.effectiveNotesModel;
+    case 'set_meeting_notes_model': {
+      return setCuratedNotesModel((args as { model: string }).model);
+    }
   }
 }
 

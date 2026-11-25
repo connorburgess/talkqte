@@ -25,6 +25,7 @@
 
 use crate::anthropic_api::{self, Model, NoReply, Outcome, Transport};
 use crate::engine::Segment;
+use crate::llm_provider::{self, CueProvider, ResolvedModel};
 use crate::provider_keys::{KeyError, Secret};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -119,6 +120,11 @@ pub fn set_notes_model(id: &str) -> Result<&'static str, String> {
     Ok(model.id)
 }
 
+/// Active resolved model (provider, model ID, optional pricing) from settings.
+pub fn active_target() -> ResolvedModel {
+    llm_provider::resolved_notes_model()
+}
+
 /// One line the reply may cite: a transcript line (`L…`) or a line of the
 /// person's notes (`N…`, numbered as in the editor).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -167,18 +173,28 @@ impl Refusal {
     }
 
     pub fn message(self) -> &'static str {
-        match self {
-            Self::Empty => "This session has no transcript to write notes from. Nothing was sent.",
-            Self::TooLong => "This meeting's transcript is longer than one request can take (about two hours of talk), so notes cannot be written for it. Nothing was sent.",
-            Self::NotEnded => "Meeting notes can be written once a live session has ended. Nothing was sent.",
-            Self::AlreadySent => "Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.",
-            Self::Writing => "Notes for this meeting are already being written. Nothing else was sent.",
-            Self::SpendCap => "At its worst, this request could cost more than the $1.00 limit for one meeting's notes. A lower-cost model for meeting notes in Settings may fit. Nothing was sent.",
-            Self::KeyNotSet => "Add your Anthropic API key in Settings to write meeting notes. Nothing was sent.",
-            Self::KeyRejected => "Anthropic rejected your key. Replace it in Settings. Nothing was sent.",
-            Self::KeyUnreadable => "Your Anthropic key could not be read from the Keychain. Nothing was sent.",
-            Self::Changed => "What would be sent has changed since you looked (the transcript, your notes or the notes setting). Review it again. Nothing was sent.",
-            Self::Cancelled => "Stopped before anything was sent. Nothing was sent.",
+        self.message_for(CueProvider::Anthropic)
+    }
+
+    pub fn message_for(self, provider: CueProvider) -> &'static str {
+        match (self, provider) {
+            (Self::Empty, _) => "This session has no transcript to write notes from. Nothing was sent.",
+            (Self::TooLong, _) => "This meeting's transcript is longer than one request can take (about two hours of talk), so notes cannot be written for it. Nothing was sent.",
+            (Self::NotEnded, _) => "Meeting notes can be written once a live session has ended. Nothing was sent.",
+            (Self::AlreadySent, _) => "Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.",
+            (Self::Writing, _) => "Notes for this meeting are already being written. Nothing else was sent.",
+            (Self::SpendCap, _) => "At its worst, this request could cost more than the $1.00 limit for one meeting's notes. A lower-cost model for meeting notes in Settings may fit. Nothing was sent.",
+            (Self::KeyNotSet, CueProvider::Anthropic) => "Add your Anthropic API key in Settings to write meeting notes. Nothing was sent.",
+            (Self::KeyNotSet, CueProvider::OpenAi) => "Add your OpenAI API key in Settings to write meeting notes. Nothing was sent.",
+            (Self::KeyNotSet, CueProvider::Gemini) => "Add your Gemini API key in Settings to write meeting notes. Nothing was sent.",
+            (Self::KeyRejected, CueProvider::Anthropic) => "Anthropic rejected your key. Replace it in Settings. Nothing was sent.",
+            (Self::KeyRejected, CueProvider::OpenAi) => "OpenAI rejected your key. Replace it in Settings. Nothing was sent.",
+            (Self::KeyRejected, CueProvider::Gemini) => "Gemini rejected your key. Replace it in Settings. Nothing was sent.",
+            (Self::KeyUnreadable, CueProvider::Anthropic) => "Your Anthropic key could not be read from the Keychain. Nothing was sent.",
+            (Self::KeyUnreadable, CueProvider::OpenAi) => "Your OpenAI key could not be read from the Keychain. Nothing was sent.",
+            (Self::KeyUnreadable, CueProvider::Gemini) => "Your Gemini key could not be read from the Keychain. Nothing was sent.",
+            (Self::Changed, _) => "What would be sent has changed since you looked (the transcript, your notes or the notes setting). Review it again. Nothing was sent.",
+            (Self::Cancelled, _) => "Stopped before anything was sent. Nothing was sent.",
         }
     }
 }
@@ -229,6 +245,14 @@ impl Invalid {
 pub const UNSENT_OFFLINE: &str =
     "Anthropic could not be reached, so nothing was sent. Check your internet connection, then choose Write meeting notes again.";
 
+pub fn unsent_offline_for(provider: CueProvider) -> &'static str {
+    match provider {
+        CueProvider::Anthropic => UNSENT_OFFLINE,
+        CueProvider::OpenAi => "OpenAI could not be reached, so nothing was sent. Check your internet connection, then choose Write meeting notes again.",
+        CueProvider::Gemini => "Gemini could not be reached, so nothing was sent. Check your internet connection, then choose Write meeting notes again.",
+    }
+}
+
 /// Why a sent request produced no notes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -257,17 +281,22 @@ impl Failure {
     }
 
     pub fn message(self) -> String {
+        self.message_for(CueProvider::Anthropic)
+    }
+
+    pub fn message_for(self, provider: CueProvider) -> String {
+        let name = provider.name();
         let after = "No notes were written, and nothing else will be sent for this meeting.";
         match self {
             Self::Cancelled => {
                 format!("Cancelled. What was already sent may still be billed. {after}")
             }
             Self::Unreachable => {
-                format!("Anthropic could not be reached or did not finish in time. {after}")
+                format!("{name} could not be reached or did not finish in time. {after}")
             }
-            Self::SignIn => format!("Anthropic rejected your key. Replace it in Settings. {after}"),
+            Self::SignIn => format!("{name} rejected your key. Replace it in Settings. {after}"),
             Self::UsageLimit => {
-                format!("Your Anthropic account is at a usage or rate limit. {after}")
+                format!("Your {name} account is at a usage or rate limit. {after}")
             }
             Self::Refused => format!("The model declined this request. {after}"),
             Self::OutputLimit => format!("The reply was longer than allowed. {after}"),
@@ -288,11 +317,36 @@ pub struct Prepared {
     /// Set by Stop waiting for this request only.
     cancel: Arc<AtomicBool>,
     model: Model,
+    target: ResolvedModel,
     lines: Vec<Line>,
     user: String,
     transcript_lines: usize,
     note_lines: Option<usize>,
     duration_ms: u64,
+}
+
+/// Multi-provider confirmation facts. Cost estimates are `None` for custom
+/// model IDs outside the built-in price table.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanView {
+    pub transcript_lines: usize,
+    pub minutes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note_lines: Option<usize>,
+    pub kilobytes: usize,
+    pub provider: CueProvider,
+    pub provider_name: &'static str,
+    pub model: String,
+    pub custom_model: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub likely_micro_usd: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worst_micro_usd: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spend_cap_micro_usd: Option<u64>,
+    pub destination: &'static str,
+    pub fingerprint: String,
 }
 
 /// The confirmation's facts. Content-free apart from counts.
@@ -336,6 +390,31 @@ fn flat(text: &str) -> String {
 /// session name, focus lines, imported notes and cues are never included.
 pub fn prepare(
     model: Model,
+    transcript: &[Segment],
+    notes: Option<&str>,
+) -> Result<Prepared, Refusal> {
+    let target = ResolvedModel {
+        provider: CueProvider::Anthropic,
+        id: model.id.to_string(),
+        price: Some(model.price),
+        thinking: None,
+        custom: false,
+    };
+    prepare_inner(model, target, transcript, notes)
+}
+
+pub fn prepare_for(
+    target: ResolvedModel,
+    transcript: &[Segment],
+    notes: Option<&str>,
+) -> Result<Prepared, Refusal> {
+    let fallback = anthropic_api::model(DEFAULT_MODEL).expect("default model");
+    prepare_inner(fallback, target, transcript, notes)
+}
+
+fn prepare_inner(
+    model: Model,
+    target: ResolvedModel,
     transcript: &[Segment],
     notes: Option<&str>,
 ) -> Result<Prepared, Refusal> {
@@ -399,6 +478,7 @@ pub fn prepare(
     Ok(Prepared {
         cancel: Arc::default(),
         model,
+        target,
         lines,
         user,
         transcript_lines,
@@ -408,18 +488,34 @@ pub fn prepare(
 }
 
 impl Prepared {
+    pub fn target(&self) -> &ResolvedModel {
+        &self.target
+    }
+
     pub fn body(&self) -> Value {
-        json!({
-            "model": self.model.id,
-            "max_tokens": MAX_TOKENS,
-            "system": system_prompt(),
-            "messages": [{"role": "user", "content": self.user}],
-            "output_config": {
-                "effort": EFFORT,
-                "format": {"type": "json_schema", "schema": schema()},
-            },
-            "stream": true,
-        })
+        match self.target.provider {
+            CueProvider::Anthropic => json!({
+                "model": self.target.id,
+                "max_tokens": MAX_TOKENS,
+                "system": system_prompt(),
+                "messages": [{"role": "user", "content": self.user}],
+                "output_config": {
+                    "effort": EFFORT,
+                    "format": {"type": "json_schema", "schema": schema()},
+                },
+                "stream": true,
+            }),
+            CueProvider::OpenAi => crate::openai_api::notes_body(
+                &self.target.id,
+                system_prompt(),
+                &self.user,
+                schema(),
+                MAX_TOKENS,
+            ),
+            CueProvider::Gemini => {
+                crate::gemini_api::notes_body(system_prompt(), &self.user, schema(), MAX_TOKENS)
+            }
+        }
     }
 
     fn sent_bytes(&self) -> usize {
@@ -430,15 +526,20 @@ impl Prepared {
     /// rarely uses more) plus 1,500 tokens for the structured-output prompt,
     /// at the input price (nothing is cached), plus the whole output bound.
     pub fn worst_micro_usd(&self) -> u64 {
-        let tokens = self.sent_bytes() as f64 + 1_500.0;
-        let [input, _, _, output] = self.model.price;
-        (tokens * input + MAX_TOKENS as f64 * output).ceil() as u64
+        self.worst_micro_usd_opt().unwrap_or(0)
     }
 
-    /// A digest of the request body: the model, prompt, schema and input.
+    pub fn worst_micro_usd_opt(&self) -> Option<u64> {
+        let [input, _, _, output] = self.target.price?;
+        let tokens = self.sent_bytes() as f64 + 1_500.0;
+        Some((tokens * input + MAX_TOKENS as f64 * output).ceil() as u64)
+    }
+
+    /// A digest of the provider, model, prompt, schema and input.
     pub fn fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(self.body().to_string().as_bytes());
+        let payload = format!("{}:{}", self.target.provider.id(), self.body());
+        let digest = Sha256::digest(payload.as_bytes());
         digest.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
@@ -450,9 +551,13 @@ impl Prepared {
     /// A likelier figure: about four bytes per token and a few thousand
     /// tokens of thinking and reply. Still an estimate, not a bill.
     pub fn likely_micro_usd(&self) -> u64 {
+        self.likely_micro_usd_opt().unwrap_or(0)
+    }
+
+    pub fn likely_micro_usd_opt(&self) -> Option<u64> {
+        let [input, _, _, output] = self.target.price?;
         let tokens = self.sent_bytes().div_ceil(4) as f64 + 1_500.0;
-        let [input, _, _, output] = self.model.price;
-        (tokens * input + LIKELY_OUTPUT_TOKENS * output).ceil() as u64
+        Some((tokens * input + LIKELY_OUTPUT_TOKENS * output).ceil() as u64)
     }
 
     pub fn plan(&self) -> Plan {
@@ -470,13 +575,32 @@ impl Prepared {
         }
     }
 
-    /// Refuses a request whose worst case passes the per-meeting cap.
-    pub fn check_cap(&self) -> Result<(), Refusal> {
-        if self.worst_micro_usd() > SPEND_CAP_MICRO_USD {
-            Err(Refusal::SpendCap)
-        } else {
-            Ok(())
+    pub fn plan_view(&self) -> PlanView {
+        PlanView {
+            transcript_lines: self.transcript_lines,
+            minutes: self.duration_ms.div_ceil(60_000).max(1),
+            note_lines: self.note_lines,
+            kilobytes: self.user.len().div_ceil(1_000),
+            provider: self.target.provider,
+            provider_name: self.target.provider.name(),
+            model: self.target.id.clone(),
+            custom_model: self.target.custom,
+            likely_micro_usd: self.likely_micro_usd_opt(),
+            worst_micro_usd: self.worst_micro_usd_opt(),
+            spend_cap_micro_usd: (!self.target.custom).then_some(SPEND_CAP_MICRO_USD),
+            destination: self.target.provider.notes_destination(),
+            fingerprint: self.fingerprint(),
         }
+    }
+
+    /// Refuses a request whose worst case passes the per-meeting cap (when pricing is known).
+    pub fn check_cap(&self) -> Result<(), Refusal> {
+        if let Some(worst) = self.worst_micro_usd_opt() {
+            if worst > SPEND_CAP_MICRO_USD {
+                return Err(Refusal::SpendCap);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -855,12 +979,161 @@ pub fn write<T: Transport>(
     })
 }
 
+/// Sends the one request to the provider named in `prepared.target()` over
+/// the real HTTPS transport.
+pub fn write_network(key: Secret, prepared: &Prepared, on_rejected: impl FnOnce()) -> Written {
+    let cancel = prepared.cancel_flag();
+    let cancelled = || cancel.load(Ordering::Acquire);
+    match prepared.target.provider {
+        CueProvider::Anthropic => {
+            let mut net = anthropic_api::Network;
+            write_provider(
+                prepared,
+                key,
+                on_rejected,
+                &cancelled,
+                |k, body| net.post(k, body, DEADLINE),
+                |reply_body| {
+                    let (outcome, usage, complete) = anthropic_api::read_bounded_stream_for_id(
+                        reply_body,
+                        &prepared.target.id,
+                        true,
+                        MAX_TEXT_BYTES,
+                        &cancelled,
+                    );
+                    let cost = complete.then(|| {
+                        prepared.target.price.map(|p| {
+                            llm_provider::token_cost_micro_usd(
+                                p,
+                                usage.input,
+                                usage.cache_write,
+                                usage.cache_read,
+                                usage.output,
+                            )
+                        })
+                    });
+                    (outcome, cost.flatten())
+                },
+            )
+        }
+        CueProvider::OpenAi => {
+            let mut net = crate::openai_api::Network;
+            write_provider(
+                prepared,
+                key,
+                on_rejected,
+                &cancelled,
+                |k, body| {
+                    crate::openai_api::Transport::post(&mut net, k, body, DEADLINE)
+                        .map(|r| anthropic_api::Reply {
+                            status: r.status,
+                            body: r.body,
+                        })
+                        .map_err(|e| match e {
+                            llm_provider::NoReply::Unsent => NoReply::Unsent,
+                            llm_provider::NoReply::Lost => NoReply::Lost,
+                        })
+                },
+                |reply_body| {
+                    let (outcome, usage, complete) = crate::openai_api::read_bounded_stream(
+                        reply_body,
+                        &prepared.target.id,
+                        MAX_TEXT_BYTES,
+                        &cancelled,
+                    );
+                    let cost = complete
+                        .then(|| prepared.target.price.map(|p| usage.cost_micro_usd(p)))
+                        .flatten();
+                    (map_outcome(outcome), cost)
+                },
+            )
+        }
+        CueProvider::Gemini => {
+            let mut net = crate::gemini_api::Network;
+            write_provider(
+                prepared,
+                key,
+                on_rejected,
+                &cancelled,
+                |k, body| {
+                    crate::gemini_api::Transport::post(
+                        &mut net,
+                        &prepared.target.id,
+                        k,
+                        body,
+                        DEADLINE,
+                    )
+                    .map(|r| anthropic_api::Reply {
+                        status: r.status,
+                        body: r.body,
+                    })
+                    .map_err(|e| match e {
+                        llm_provider::NoReply::Unsent => NoReply::Unsent,
+                        llm_provider::NoReply::Lost => NoReply::Lost,
+                    })
+                },
+                |reply_body| {
+                    let (outcome, usage, complete) = crate::gemini_api::read_bounded_stream(
+                        reply_body,
+                        &prepared.target.id,
+                        MAX_TEXT_BYTES,
+                        &cancelled,
+                    );
+                    let cost = complete
+                        .then(|| prepared.target.price.map(|p| usage.cost_micro_usd(p)))
+                        .flatten();
+                    (map_outcome(outcome), cost)
+                },
+            )
+        }
+    }
+}
+
+fn map_outcome(outcome: llm_provider::Outcome) -> Outcome {
+    match outcome {
+        llm_provider::Outcome::Decision(t) => Outcome::Decision(t),
+        llm_provider::Outcome::Cancelled => Outcome::Cancelled,
+        llm_provider::Outcome::Refusal => Outcome::Refusal,
+        llm_provider::Outcome::OutputLimit => Outcome::OutputLimit,
+        llm_provider::Outcome::ConfigurationMismatch => Outcome::ConfigurationMismatch,
+        llm_provider::Outcome::Protocol => Outcome::Protocol,
+        llm_provider::Outcome::Provider => Outcome::Provider,
+    }
+}
+
 fn write_with<T: Transport>(
     transport: &mut T,
     key: Secret,
     prepared: &Prepared,
     on_rejected: impl FnOnce(),
     cancelled: &dyn Fn() -> bool,
+) -> Written {
+    write_provider(
+        prepared,
+        key,
+        on_rejected,
+        cancelled,
+        |k, body| transport.post(k, body, DEADLINE),
+        |reply_body| {
+            let (outcome, usage, complete) = anthropic_api::read_bounded_stream(
+                reply_body,
+                prepared.model,
+                MAX_TEXT_BYTES,
+                cancelled,
+            );
+            let spent = complete.then(|| usage.cost_micro_usd(prepared.model));
+            (outcome, spent)
+        },
+    )
+}
+
+pub(crate) fn write_provider(
+    prepared: &Prepared,
+    key: Secret,
+    on_rejected: impl FnOnce(),
+    cancelled: &dyn Fn() -> bool,
+    post: impl FnOnce(&Secret, &[u8]) -> Result<anthropic_api::Reply, NoReply>,
+    parse_stream: impl FnOnce(Box<dyn std::io::Read + Send>) -> (Outcome, Option<u64>),
 ) -> Written {
     let unsent = |failure| Written {
         result: Err(failure),
@@ -876,7 +1149,7 @@ fn write_with<T: Transport>(
     if cancelled() {
         return unsent(Failure::Cancelled);
     }
-    let reply = transport.post(&key, body.as_bytes(), DEADLINE);
+    let reply = post(&key, body.as_bytes());
     drop(key);
     // Offline, or no connection could be made: nothing left the Mac, so the
     // meeting's one request is still there to send.
@@ -906,14 +1179,18 @@ fn write_with<T: Transport>(
             on_rejected();
             return failed(Failure::SignIn, Some(0));
         }
+        400 if prepared.target.provider == CueProvider::Gemini
+            && crate::gemini_api::is_invalid_api_key_400(reply.body) =>
+        {
+            on_rejected();
+            return failed(Failure::SignIn, Some(0));
+        }
         // Whether a refused or failed request is billed is not reported.
         429 => return failed(Failure::UsageLimit, None),
         _ => return failed(Failure::Unreachable, None),
     }
-    let (outcome, usage, complete) =
-        anthropic_api::read_bounded_stream(reply.body, prepared.model, MAX_TEXT_BYTES, cancelled);
-    // Only a complete reply reports its usage; otherwise the cost is unknown.
-    let spent = complete.then(|| usage.cost_micro_usd(prepared.model));
+    let (outcome, spent) = parse_stream(reply.body);
+    let spent = if prepared.target.custom { None } else { spent };
     let result = match outcome {
         Outcome::Decision(text) => match validate(&text, prepared) {
             Ok((markdown, items)) => Ok(Draft {
@@ -971,8 +1248,10 @@ pub struct Record {
     failure: Option<String>,
     kept: Option<String>,
     /// Reported cost of this session's notes request, once sent; `None`
-    /// when it is not known.
+    /// when it is not known or when using a custom model ID.
     spent_micro_usd: Option<u64>,
+    provider_name: Option<&'static str>,
+    custom_model: bool,
     /// Stop waiting for the request in flight, if one is.
     in_flight: Option<Arc<AtomicBool>>,
 }
@@ -997,8 +1276,18 @@ impl Record {
         self.spent_micro_usd
     }
 
+    pub fn provider_name(&self) -> &'static str {
+        self.provider_name.unwrap_or("Anthropic")
+    }
+
+    pub fn custom_model(&self) -> bool {
+        self.custom_model
+    }
+
     /// Records the request now in flight, so Stop waiting reaches it.
     pub fn begin(&mut self, prepared: &Prepared) {
+        self.provider_name = Some(prepared.target.provider.name());
+        self.custom_model = prepared.target.custom;
         self.in_flight = Some(prepared.cancel_flag());
     }
 
@@ -1010,15 +1299,25 @@ impl Record {
     }
 
     pub fn finish(&mut self, result: Result<Draft, Failure>, spent: Option<u64>) -> Phase {
+        let provider = CueProvider::Anthropic;
+        self.finish_for(provider, result, spent)
+    }
+
+    pub fn finish_for(
+        &mut self,
+        provider: CueProvider,
+        result: Result<Draft, Failure>,
+        spent: Option<u64>,
+    ) -> Phase {
         self.in_flight = None;
-        self.spent_micro_usd = spent;
+        self.spent_micro_usd = if self.custom_model { None } else { spent };
         match result {
             Ok(draft) => {
                 self.draft = Some(draft);
                 Phase::Draft
             }
             Err(failure) => {
-                self.failure = Some(failure.message());
+                self.failure = Some(failure.message_for(provider));
                 Phase::Failed
             }
         }

@@ -1,9 +1,10 @@
 //! The notebook's commands for model-written meeting notes. The webview
 //! receives the plan, the checked notes and fixed messages; never the key,
-//! the request body or any provider text. The Keychain read and the request
-//! run off the main thread, outside the notebook lock.
+//! the request body or any provider text. The secret-store read and the
+//! request run off the main thread, outside the notebook lock.
 
-use crate::meeting_notes::{self, Draft, Failure, Plan};
+use crate::llm_provider;
+use crate::meeting_notes::{self, Draft, Failure, PlanView};
 use crate::provider_keys::{self, KeyState, Provider};
 use crate::AppState;
 
@@ -12,11 +13,21 @@ use crate::AppState;
 #[serde(rename_all = "camelCase")]
 pub struct PlanReply {
     #[serde(flatten)]
-    plan: Plan,
-    /// Estimated spend of this session's cue requests with the same key, if
-    /// any were sent.
+    plan: PlanView,
+    /// Estimated spend of this session's cue requests with the same provider
+    /// when known and non-zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     cue_spent_micro_usd: Option<u64>,
+}
+
+/// Reply from `write_meeting_notes` with provider and custom-model flags.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftReply {
+    #[serde(flatten)]
+    draft: Draft,
+    provider_name: &'static str,
+    custom_model: bool,
 }
 
 /// Where this session's notes stand, for the notebook to show.
@@ -32,6 +43,8 @@ pub struct NotesResult {
     /// Absent when nothing was sent or the cost is not known.
     #[serde(skip_serializing_if = "Option::is_none")]
     spent_micro_usd: Option<u64>,
+    provider_name: &'static str,
+    custom_model: bool,
 }
 
 /// What a notes request would send and cost. Sends nothing.
@@ -43,13 +56,19 @@ pub fn meeting_notes_plan(
     let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     let plan = runtime
         .engine
-        .meeting_notes_plan(include_notes)
-        .map_err(|refusal| refusal.message().to_string())?;
+        .meeting_notes_plan_view(include_notes)
+        .map_err(|refusal| {
+            refusal
+                .message_for(llm_provider::cue_provider())
+                .to_string()
+        })?;
+    let cue_spent_micro_usd = llm_provider::cue_usage()
+        .filter(|usage| usage.provider == plan.provider)
+        .and_then(|usage| usage.spent_micro_usd)
+        .filter(|spent| *spent > 0);
     Ok(PlanReply {
         plan,
-        cue_spent_micro_usd: crate::anthropic_api::usage()
-            .map(|usage| usage.spent_micro_usd)
-            .filter(|spent| *spent > 0),
+        cue_spent_micro_usd,
     })
 }
 
@@ -62,28 +81,36 @@ pub async fn write_meeting_notes(
     state: tauri::State<'_, AppState>,
     include_notes: bool,
     fingerprint: String,
-) -> Result<Draft, String> {
+) -> Result<DraftReply, String> {
     let (prepared, session) = {
         let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+        let active_provider = llm_provider::cue_provider();
         let prepared = runtime
             .engine
             .begin_meeting_notes(include_notes, &fingerprint)
-            .map_err(|refusal| refusal.message().to_string())?;
+            .map_err(|refusal| refusal.message_for(active_provider).to_string())?;
         let session = runtime.engine.session();
         crate::publish(&app, &mut runtime);
         (prepared, session)
     };
+    let provider = prepared.target().provider;
+    let custom_model = prepared.target().custom;
+    let key_provider = provider.key_provider();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let keys = provider_keys::global();
-        let read = keys.get(Provider::Anthropic);
-        let rejected = keys.status().anthropic.state == KeyState::Rejected;
+        let read = keys.get(key_provider);
+        let status = keys.status();
+        let key_status = match key_provider {
+            Provider::Deepgram => status.deepgram,
+            Provider::Anthropic => status.anthropic,
+            Provider::OpenAi => status.openai,
+            Provider::Gemini => status.gemini,
+        };
+        let rejected = key_status.state == KeyState::Rejected;
         let key = meeting_notes::key(read, rejected)?;
-        Ok::<_, meeting_notes::Refusal>(meeting_notes::write(
-            &mut crate::anthropic_api::Network,
-            key,
-            &prepared,
-            || keys.mark_rejected(Provider::Anthropic),
-        ))
+        Ok::<_, meeting_notes::Refusal>(meeting_notes::write_network(key, &prepared, || {
+            keys.mark_rejected(key_provider)
+        }))
     })
     .await;
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
@@ -92,7 +119,7 @@ pub async fn write_meeting_notes(
         Ok(Err(refusal)) => {
             runtime.engine.abandon_meeting_notes(session);
             crate::publish(&app, &mut runtime);
-            return Err(refusal.message().to_string());
+            return Err(refusal.message_for(provider).to_string());
         }
         // Stop waiting came before anything was sent.
         Ok(Ok(written)) if !written.sent => {
@@ -100,14 +127,15 @@ pub async fn write_meeting_notes(
             crate::publish(&app, &mut runtime);
             return Err(match written.result {
                 Err(Failure::Cancelled) => meeting_notes::Refusal::Cancelled.message().into(),
-                Err(Failure::Unreachable) => meeting_notes::UNSENT_OFFLINE.into(),
+                Err(Failure::Unreachable) => meeting_notes::unsent_offline_for(provider).into(),
                 _ => "The request could not be prepared. Nothing was sent.".into(),
             });
         }
         Ok(Ok(written)) => {
             let result = written.result;
-            let current = runtime.engine.finish_meeting_notes(
+            let current = runtime.engine.finish_meeting_notes_for(
                 session,
+                provider,
                 result.clone(),
                 written.spent_micro_usd,
             );
@@ -123,12 +151,18 @@ pub async fn write_meeting_notes(
             let failure = Failure::Unavailable;
             runtime
                 .engine
-                .finish_meeting_notes(session, Err(failure), None);
+                .finish_meeting_notes_for(session, provider, Err(failure), None);
             crate::publish(&app, &mut runtime);
             Err(failure)
         }
     };
-    result.map_err(|failure| failure.message())
+    result
+        .map(|draft| DraftReply {
+            draft,
+            provider_name: provider.name(),
+            custom_model,
+        })
+        .map_err(|failure| failure.message_for(provider))
 }
 
 /// Stops waiting for this session's request in flight; if it has not been
@@ -149,6 +183,8 @@ pub fn meeting_notes_result(state: tauri::State<AppState>) -> Result<NotesResult
         failure: record.failure().map(str::to_string),
         kept: record.kept().map(str::to_string),
         spent_micro_usd: record.spent_micro_usd(),
+        provider_name: record.provider_name(),
+        custom_model: record.custom_model(),
     })
 }
 
@@ -179,19 +215,24 @@ pub fn discard_meeting_notes(
     Ok(())
 }
 
-/// The model the next notes request uses.
+/// The effective model the next notes request uses.
 #[tauri::command]
-pub fn meeting_notes_model() -> &'static str {
-    meeting_notes::notes_model().id
+pub fn meeting_notes_model() -> String {
+    llm_provider::resolved_notes_model().id
 }
 
-/// Chooses the model for the next notes request, from those the app lists.
+/// Chooses a curated model for the active provider's next notes request.
 #[tauri::command]
-pub fn set_meeting_notes_model(
-    app: tauri::AppHandle,
-    model: String,
-) -> Result<&'static str, String> {
-    let model = meeting_notes::set_notes_model(&model)?;
-    crate::settings_commands::record(&app, |settings| settings.notes_model = model);
-    Ok(model)
+pub fn set_meeting_notes_model(app: tauri::AppHandle, model: String) -> Result<String, String> {
+    let prefs = llm_provider::set_curated_notes_model(&model)?;
+    let _ = meeting_notes::set_notes_model(&model);
+    crate::settings_commands::record(&app, |settings| {
+        if prefs.cue_provider == llm_provider::CueProvider::Anthropic {
+            if let Some(m) = crate::anthropic_api::model(&prefs.notes_model) {
+                settings.notes_model = m.id;
+            }
+        }
+        settings.notes_model_override = prefs.notes_model_override.clone();
+    });
+    Ok(prefs.effective_notes_model)
 }
