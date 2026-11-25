@@ -177,7 +177,7 @@ impl Engine {
             }
         })
     }
-    pub(super) fn is_lab_evaluator(&self) -> bool {
+    pub(crate) fn is_lab_evaluator(&self) -> bool {
         self.evaluation.as_ref().is_some_and(|s| {
             matches!(
                 s.permission.processor.id.as_str(),

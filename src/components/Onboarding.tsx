@@ -280,32 +280,30 @@ export function Onboarding({
           {step === 4 && (
             <>
               <p className="ob-lead">
-                Nothing leaves {device} when you press Start live session. You
-                approve each session before anything is sent, and Stop ends the
-                session and stops sending.
+                Pressing Start live session starts capture and sends audio to
+                Deepgram and recent transcript lines to Anthropic immediately,
+                until you press Stop or Turn off processing.
               </p>
 
               <div className="ob-perm-card">
                 <span className="ob-sequence-label">
-                  Per-session approval sequence
+                  One-click session flow
                 </span>
                 <ol className="ob-sequence-list">
                   <li>
-                    <strong>Start live session</strong> opens the floating dock
-                    and starts local capture only. Audio captured before
-                    approval is discarded.
+                    <strong>Start live session</strong> opens the floating dock,
+                    starts capture on {device}, and immediately enables{' '}
+                    <strong>Deepgram</strong> (session audio for transcription,
+                    up to 120 minutes per session) and{' '}
+                    <strong>Anthropic</strong> (up to six recent transcript
+                    lines, the cue on screen and earlier cues, and your session
+                    name if set, for cue decisions; never audio, your notes or
+                    focus lines).
                   </li>
                   <li>
-                    <strong>
-                      Review processing → Review selected sources → Enable for
-                      this session
-                    </strong>{' '}
-                    names both services explicitly: <strong>Deepgram</strong>{' '}
-                    (session audio for transcription, up to 120 minutes per
-                    session) and <strong>Anthropic</strong> (up to six recent
-                    transcript lines, the cue on screen and earlier cues, and
-                    your session name if set, for cue decisions; never audio,
-                    your notes or focus lines).
+                    <strong>Pause cues</strong> stops cue decisions while
+                    listening continues. <strong>Turn off processing</strong>{' '}
+                    stops sending audio and lines.
                   </li>
                   <li>
                     <strong>Stop</strong> ends the session, releases the

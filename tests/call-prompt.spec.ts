@@ -20,7 +20,7 @@ async function companion(page: Page) {
 const answers = (page: Page) =>
   page.evaluate(() => window.captureTest.callPromptAnswers);
 
-test('the companion offers a session for the call app and never starts one itself', async ({
+test('the companion offers a 1-click Start for the call app', async ({
   page,
 }) => {
   await companion(page);
@@ -32,14 +32,14 @@ test('the companion offers a session for the call app and never starts one itsel
     'A call seems to be starting in Fictional Call.',
   );
   await expect(page.locator('main')).toContainText(
-    'nothing is heard until then',
+    'Sends audio to Deepgram and recent lines to Anthropic until you stop.',
   );
   // It fits the companion's cue size.
   const fits = await page.evaluate(
     () => document.querySelector('main')!.scrollHeight <= innerHeight,
   );
   expect(fits).toBe(true);
-  await page.getByRole('button', { name: 'Start session…' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('button', { name: 'Not for Fictional Call' }).click();
   await page.getByRole('button', { name: 'Don’t ask again' }).click();
   await page.getByRole('button', { name: 'Not now' }).click();
@@ -49,7 +49,7 @@ test('the companion offers a session for the call app and never starts one itsel
     { id: 7, answer: 'dontAskAgain' },
     { id: 7, answer: 'dismiss' },
   ]);
-  // Answering asked for nothing else.
+  // Answering in the stand-in recorded the IPC calls only.
   expect(await page.evaluate(() => window.captureTest.liveStarts)).toEqual([]);
 });
 
@@ -65,7 +65,7 @@ test('a browser is named with its caveat, and an unknown app gets a microphone o
     'The microphone is in use and Fictional Browser is in front. A call?',
   );
   await expect(page.locator('main')).toContainText(
-    'You can add Fictional Browser there, but a browser’s audio includes every tab and may not be heard yet.',
+    'A browser call includes mic audio only.',
   );
   await page.evaluate(
     (callPrompt) => window.liveTest.publish({ callPrompt }),
@@ -146,7 +146,7 @@ test('Start opens the notebook with the microphone and the offered app chosen on
   expect(await page.evaluate(() => window.captureTest.liveStarts)).toEqual([]);
 });
 
-test('Settings has the prompt off by default and says what it reads', async ({
+test('Settings has both call-starting options off by default and says what it reads', async ({
   page,
 }) => {
   await standIn(page, '/');
@@ -156,13 +156,20 @@ test('Settings has the prompt off by default and says what it reads', async ({
     'It reads only whether the microphone is in use and which app is in front, never audio or what is on screen, and that stays on this Mac.',
   );
   const box = setting.getByRole('checkbox', {
-    name: 'Offer to start a session when a call seems to start',
+    name: 'Offer in the dock when a call seems to start',
+  });
+  const autoStart = setting.getByRole('checkbox', {
+    name: 'Start automatically when a call begins',
   });
   await expect(box).not.toBeChecked();
+  await expect(autoStart).not.toBeChecked();
   await box.check();
   await expect(box).toBeChecked();
+  await autoStart.check();
+  await expect(autoStart).toBeChecked();
   expect(await page.evaluate(() => window.captureTest.callPrompt())).toEqual({
     enabled: true,
+    autoStart: true,
     notFor: [],
   });
 });

@@ -156,10 +156,40 @@ test('processing is reviewed, enabled, paused, resumed and disabled from the key
   const microphone = page
     .getByRole('region', { name: 'Microphone', exact: true })
     .getByRole('status');
+  await expect(status).toHaveText('Model connection on');
+
+  const pause = panel.getByRole('button', { name: 'Pause cues', exact: true });
+  const resume = panel.getByRole('button', { name: 'Resume cues' });
+  const disable = panel.getByRole('button', { name: 'Turn off processing' });
+  for (const [control, name] of [
+    [pause, 'Pause cues'],
+    [disable, 'Turn off processing'],
+  ] as const)
+    await expectToFit(control, name);
+  await expectNoSidewaysScroll(page);
+
+  // Pausing and resuming relabel one control, so focus stays on it.
+  await pause.press('Enter');
+  await expect(status).toHaveText('Cues paused');
+  await expect(resume).toBeFocused();
+  await expectToFit(resume, 'Resume cues');
+  await expect(microphone).toHaveText('On');
+  await resume.press('Enter');
+  await expect(status).toHaveText('Model connection on');
+  await expect(pause).toBeFocused();
+
+  // Turning off processing returns to an unapproved session without ending capture,
+  // and Review processing -> Enable for this session fits at narrow width.
+  await disable.press('Enter');
   const review = panel.getByRole('button', {
     name: 'Review processing',
     exact: true,
   });
+  await expect(review).toBeEnabled();
+  await expect(pause).toHaveCount(0);
+  await expect(microphone).toHaveText('On');
+  await expect(stop).toBeEnabled();
+  await expectToFit(stop, 'Stop live session');
   await expectToFit(review, 'Review processing');
   await review.press('Enter');
   await panel
@@ -175,33 +205,4 @@ test('processing is reviewed, enabled, paused, resumed and disabled from the key
   await expectNoSidewaysScroll(page);
   await approve.press('Enter');
   await expect(status).toHaveText('Model connection on');
-
-  const pause = panel.getByRole('button', { name: 'Pause cues', exact: true });
-  const resume = panel.getByRole('button', { name: 'Resume cues' });
-  const disable = panel.getByRole('button', { name: 'Disable processing' });
-  for (const [control, name] of [
-    [pause, 'Pause cues'],
-    [disable, 'Disable processing'],
-  ] as const)
-    await expectToFit(control, name);
-  await expectNoSidewaysScroll(page);
-
-  // Pausing and resuming relabel one control, so focus stays on it.
-  await pause.press('Enter');
-  await expect(status).toHaveText('Cues paused');
-  await expect(resume).toBeFocused();
-  await expectToFit(resume, 'Resume cues');
-  await expect(microphone).toHaveText('On');
-  await resume.press('Enter');
-  await expect(status).toHaveText('Model connection on');
-  await expect(pause).toBeFocused();
-
-  // Disabling returns to an unapproved session without ending capture.
-  await disable.press('Enter');
-  await expect(review).toBeEnabled();
-  await expect(pause).toHaveCount(0);
-  await expect(microphone).toHaveText('On');
-  await expect(stop).toBeEnabled();
-  await expectToFit(stop, 'Stop live session');
-  await expectNoSidewaysScroll(page);
 });

@@ -88,6 +88,10 @@ test('the notebook, the review and a two-source session with a cue have no autom
     name: 'Cue processing',
     exact: true,
   });
+  expect(await violations(page), 'active session').toEqual([]);
+  await panel
+    .getByRole('button', { name: 'Turn off processing', exact: true })
+    .click();
   await panel
     .getByRole('button', { name: 'Review processing', exact: true })
     .click();

@@ -6,6 +6,7 @@ import {
   BookOpen,
   ChevronRight,
   Cloud,
+  CloudOff,
   CloudUpload,
   EyeOff,
   FileText,
@@ -346,6 +347,18 @@ function FloatingQuestion() {
                     {microphoneControl ? 'Mic only' : 'Cues off'}
                   </strong>
                 )}
+                {live &&
+                  !!state.autoStarted &&
+                  !state.cuesPaused &&
+                  state.model !== 'stopped' &&
+                  mic?.status !== 'error' && (
+                    <strong
+                      className="companion-title companion-listening"
+                      data-tauri-drag-region
+                    >
+                      Listening
+                    </strong>
+                  )}
                 {/* Always there for assistive technology. While capture is
                     on and well the glyph and its dot say it for the eye;
                     any other state is spelled out. */}
@@ -384,8 +397,28 @@ function FloatingQuestion() {
                       <Pause size={16} aria-hidden="true" />
                     )}
                   </button>
+                  {(state.model === 'on' || state.model === 'sending') && (
+                    <button
+                      className="companion-control"
+                      aria-label="Turn off processing"
+                      title="Turn off processing; stops sending audio and lines"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() => bridge.command('turn_off_processing'))
+                      }
+                    >
+                      <CloudOff size={16} aria-hidden="true" />
+                    </button>
+                  )}
+                  {state.autoStarted && (
+                    <span className="companion-auto-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  )}
                   <button
-                    className="companion-control"
+                    className={`companion-control${
+                      state.autoStarted ? ' companion-stop-label' : ''
+                    }`}
                     aria-label="Stop live session"
                     title="Stop live session"
                     disabled={busy}
@@ -393,7 +426,11 @@ function FloatingQuestion() {
                       void run(() => bridge.command('stop_live_session'))
                     }
                   >
-                    <Square size={14} aria-hidden="true" />
+                    {state.autoStarted ? (
+                      <span>Stop</span>
+                    ) : (
+                      <Square size={14} aria-hidden="true" />
+                    )}
                   </button>
                 </>
               ) : microphoneControl ? (
@@ -489,6 +526,35 @@ function transcriptLines(state: Snapshot) {
   for (const echo of state.sources?.echoes ?? [])
     lines.push({ segment: echo, echo });
   return lines.sort((a, b) => a.segment.atMs - b.segment.atMs);
+}
+
+/** Concise disclosure shown right beside Start live session. */
+function startDisclosure(
+  sources: SourceChoice,
+  canChooseSources: boolean,
+  liveStatus: LiveStatus | null,
+): string | null {
+  if (!liveStatus?.available) return null;
+  const active = canChooseSources ? sources : microphoneOnly;
+  const sourceLabel =
+    active.mode === 'microphone'
+      ? 'your microphone'
+      : active.mode === 'both'
+        ? active.application
+          ? `your microphone and ${active.application.name}`
+          : 'your microphone and the chosen application'
+        : active.application
+          ? `${active.application.name} audio`
+          : 'the chosen application’s audio';
+  const stt = liveStatus.transcription;
+  const cueProvider = liveStatus.cueProvider;
+  if (stt && cueProvider)
+    return `Starts immediately: sends ${sourceLabel} to ${stt} and recent lines to ${cueProvider} until you press Stop.`;
+  if (stt)
+    return `Starts immediately: sends ${sourceLabel} to ${stt} until you press Stop.`;
+  if (cueProvider)
+    return `Starts immediately: sends recent lines to ${cueProvider} until you press Stop.`;
+  return `Starts immediately with ${sourceLabel} until you press Stop.`;
 }
 
 const defaultNotesRatio = 1 / 1.95;
@@ -1431,6 +1497,7 @@ function Notebook() {
             preparing={preparing}
             cancelling={cancelling}
             processingConfigured={!!capture.state?.processor}
+            processingApproved={!!capture.state?.approved}
             sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
             sourceSession={sourceApp}
             transcription={state?.transcription}
@@ -1680,31 +1747,46 @@ function Notebook() {
                   Export
                 </button>
                 {!preparing && !finishing && !live && !simulated && (
-                  <>
+                  <div className="session-start-group">
                     {liveStatus?.available && (
-                      <button
-                        className="primary-button"
-                        ref={startButton}
-                        disabled={
-                          busy ||
-                          startPending ||
-                          microphone.active ||
-                          (canChooseSources && !ready(sources))
-                        }
-                        title={
-                          microphone.active
-                            ? 'Stop the microphone check first.'
-                            : canChooseSources && !ready(sources)
-                              ? 'Choose the application first.'
-                              : undefined
-                        }
-                        onClick={startLive}
-                      >
-                        <Play size={15} />
-                        Start live session
-                      </button>
+                      <>
+                        <button
+                          className="primary-button"
+                          ref={startButton}
+                          disabled={
+                            busy ||
+                            startPending ||
+                            microphone.active ||
+                            (canChooseSources && !ready(sources))
+                          }
+                          title={
+                            microphone.active
+                              ? 'Stop the microphone check first.'
+                              : canChooseSources && !ready(sources)
+                                ? 'Choose the application first.'
+                                : undefined
+                          }
+                          onClick={startLive}
+                        >
+                          <Play size={15} />
+                          Start live session
+                        </button>
+                        {startDisclosure(
+                          sources,
+                          canChooseSources,
+                          liveStatus,
+                        ) && (
+                          <p className="session-start-disclosure">
+                            {startDisclosure(
+                              sources,
+                              canChooseSources,
+                              liveStatus,
+                            )}
+                          </p>
+                        )}
+                      </>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             </section>
@@ -2207,8 +2289,8 @@ function Notebook() {
                 <div>
                   <h2>Setup walkthrough</h2>
                   <p>
-                    Review keys, permissions, and how per-session approval
-                    works.
+                    Review keys, permissions, and how live sessions start and
+                    stop.
                   </p>
                 </div>
                 <button
@@ -2428,17 +2510,19 @@ function Notebook() {
                   Start live session in the notebook to get questions from what
                   your microphone hears and, on a Mac, from one application you
                   choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: the session’s audio is sent to
-                  Deepgram with your key once you enable cue processing for that
-                  session. Audio is not recorded by TalkQTE. The transcript
-                  stays in memory until you start another session or close the
-                  app, unless you choose to keep the meeting and export it.
+                  transcribe on this device: pressing Start live session
+                  immediately sends the session’s audio to Deepgram and recent
+                  lines to Anthropic with your keys until you press Stop or turn
+                  off processing. Audio is not recorded by TalkQTE. The
+                  transcript stays in memory until you start another session or
+                  close the app, unless you choose to keep the meeting and
+                  export it.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? `Ready. Audio goes to ${liveStatus.transcription ?? 'the transcription service'} only after you enable cue processing for a session.`
+                      ? `Ready. Pressing Start live session sends audio to ${liveStatus.transcription ?? 'the transcription service'}${liveStatus.cueProvider ? ` and recent lines to ${liveStatus.cueProvider}` : ''} until you stop.`
                       : liveStatus.reason}
                 </p>
               </div>

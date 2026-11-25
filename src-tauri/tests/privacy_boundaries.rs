@@ -144,13 +144,13 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     );
 
     // Everything the companion may do: read, hold and dismiss the cue,
-    // pause, hide, move, and stop. It writes nothing to the notes. A new
-    // entry is a privacy decision to make here and in PRIVACY.md, not a
-    // default. `companion_anchor` returns only "top" or "bottom", from the
-    // window's placement preset and whether it was dragged: no
-    // conversation, note or position. `respond_to_call_prompt` answers a
-    // call-starting offer: Start only brings the notebook forward with the
-    // offer's sources chosen; nothing is started, listed or captured.
+    // pause, turn off processing, hide, move, and stop. It writes nothing
+    // to the notes. A new entry is a privacy decision to make here and in
+    // PRIVACY.md, not a default. `companion_anchor` returns only "top" or
+    // "bottom", from the window's placement preset and whether it was
+    // dragged: no conversation, note or position. `respond_to_call_prompt`
+    // answers a call-starting offer: Start starts listening and cue
+    // processing in one click (or opens the notebook if keys are missing).
     let companion = set(&[
         "core:event:allow-listen",
         "core:event:allow-unlisten",
@@ -161,6 +161,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-inspect-cue",
         "allow-set-overlay",
         "allow-set-live-cues-paused",
+        "allow-turn-off-processing",
         "allow-microphone-snapshot",
         "allow-stop-microphone",
         "allow-stop-live-session",

@@ -32,6 +32,7 @@
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .keep-history-field,
 .history-field {
@@ -85,7 +86,9 @@
 }
 .history-settings {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-12);
+  min-width: 0;
 }
 .history-confirm {
   display: grid;

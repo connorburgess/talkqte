@@ -481,6 +481,9 @@ pub struct Snapshot {
     pub question_size: QuestionSize,
     /// True for a live session fed by transcription.
     pub live: bool,
+    /// True when the live session was started automatically when a call began.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_started: bool,
     /// Live cue suppression only; capture, transcription and the clock continue.
     pub cues_paused: bool,
     /// The person's name, used to notice questions asked of them. Kept in
@@ -579,6 +582,8 @@ pub struct CueSnapshot {
     pub revision: u64,
     pub status: Status,
     pub live: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub auto_started: bool,
     pub cues_paused: bool,
     pub cue: Option<Cue>,
     pub overlay_enabled: bool,
@@ -746,6 +751,7 @@ impl Engine {
                 companion_position: CompanionPosition::BottomRight,
                 question_size: QuestionSize::Standard,
                 live: script.segments.is_empty() && script.duration_ms == u64::MAX,
+                auto_started: false,
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
@@ -796,6 +802,7 @@ impl Engine {
             revision: self.state.revision,
             status: self.state.status,
             live: self.state.live,
+            auto_started: self.state.auto_started,
             cues_paused: self.state.cues_paused,
             cue: self.state.cue.clone(),
             overlay_enabled: self.state.overlay_enabled,
@@ -887,6 +894,7 @@ impl Engine {
         self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
         self.generation += 1;
+        self.state.auto_started = false;
         self.state.cues_paused = false;
         self.cues_after_ms = None;
         self.last_shown.clear();

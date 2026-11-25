@@ -13,31 +13,17 @@ watches two things once a second while it is open:
 - which application is frontmost.
 
 After the microphone has been in use for 3 seconds, with no TalkQTE live
-session starting or running and no microphone check on, the companion shows
-one small offer: "A call seems to be starting in Zoom." with **Start
-session…**, **Not for Zoom**, **Don't ask again** and **Not now**. It goes
-away by itself after 45 seconds or when the microphone stops, and appears
-once per spell of microphone use. After **Not now**, or an offer left to go
-away, the same application is not offered again for 20 minutes, so a call in
-which the microphone briefly stops (a mute, a device change) is asked about
-once. The companion never takes focus, and a
-companion the person hid stays hidden.
+session starting or running and no microphone check on:
 
-**Start session…** brings the notebook forward with **Listen to** set to the
-microphone and, for a meeting application, that application, matched in the
-list by its bundle identifier, not its name. For a browser it sets the
-microphone only: a browser's audio would include every tab, so the person
-adds it deliberately if they want it. Nothing is listed, captured or sent: the
-person still lists applications (the application is chosen when it appears),
-presses Start live session and approves cue processing, as always. TalkQTE
-never starts a session by itself.
+- **Offer in the dock when a call seems to start** (off by default): the companion shows one small offer — `"A call seems to be starting in Zoom."` with **Start**, **Not for Zoom**, **Don't ask again** and **Not now** (a browser call notes that only mic audio is included). Clicking **Start** starts listening and processing in one click (or opens the notebook if keys are missing). It goes away by itself after 45 seconds or when the microphone stops, and appears once per spell of microphone use. After **Not now**, or an offer left to go away, the same application is not offered again for 20 minutes, so a call in which the microphone briefly stops (a mute, a device change) is asked about once. The companion never takes focus, and a companion the person hid stays hidden.
+- **Start automatically when a call begins** (off by default, disabled in lab runs): when a known meeting application or browser activates the microphone for 3 seconds (and keys are configured and no session is running), TalkQTE automatically starts a live microphone session and shows **`Listening · Stop`** in the dock so the session is visible and can be stopped in one click.
 
-Not for *App* skips that application; Don't ask again turns the prompt off.
-Both, and the setting itself, are kept in the [settings file](../PRIVACY.md)
+Not for *App* skips that application; Don't ask again turns the dock offer off.
+Both, and both settings themselves, are kept in the [settings file](../PRIVACY.md)
 and apply at the next launch. Not for *App* is kept as the application's
 bundle identifier only, and only for the known meeting applications and
-browsers below, which Settings names from a fixed list after a restart. The
-setting is **off by default**.
+browsers below, which Settings names from a fixed list after a restart. Both
+settings are **off by default**.
 
 ## Signals assessed
 

@@ -165,8 +165,8 @@ export function ProviderKeys() {
         <p>
           TalkQTE runs on your own accounts. Live sessions need both keys. Each
           is kept in {keyStoreName(status?.store?.kind)} and is never shown
-          again. Nothing is sent to either provider until you approve a
-          session's processing review.
+          again. Nothing is sent until you start a live session (or press Test
+          key).
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (

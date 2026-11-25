@@ -220,6 +220,24 @@ impl Runtime {
     }
 
     pub(crate) fn install_live_start(&mut self, ticket: &StartTicket) -> Result<u64, String> {
+        self.install_live_start_with(ticket, false)
+    }
+
+    pub(crate) fn install_live_start_with(
+        &mut self,
+        ticket: &StartTicket,
+        auto_started: bool,
+    ) -> Result<u64, String> {
+        let next = crate::live_engine(&ticket.sources);
+        self.install_live_start_engine(ticket, next, auto_started)
+    }
+
+    fn install_live_start_engine(
+        &mut self,
+        ticket: &StartTicket,
+        next: engine::Engine,
+        auto_started: bool,
+    ) -> Result<u64, String> {
         if !self.live_start.accepts(&ticket.guard) {
             return Err(CANCELLED.into());
         }
@@ -231,9 +249,10 @@ impl Runtime {
             feature = "lab-evaluator"
         ))]
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
-        let mut engine = carry_over(&self.engine, crate::live_engine(&ticket.sources));
+        let mut engine = carry_over(&self.engine, next);
         engine.start()?;
         engine.set_sources(ticket.sources.clone());
+        engine.state.auto_started = auto_started;
         // The last session's meeting notes, if still being written, stop:
         // their result would belong to a session that is gone.
         self.engine.cancel_meeting_notes();
@@ -246,6 +265,19 @@ impl Runtime {
         self.export = None;
         self.processing_reviews.clear();
         self.engine = engine;
+        // One-click live session start: reuse the single-use review/approval
+        // machinery immediately so transcription and cue processing start with
+        // capture, keeping all safety bounds and revocation intact. Lab runs
+        // keep their explicit manual review sequence.
+        if !crate::settings::lab_run() && !self.engine.is_lab_evaluator() {
+            if let Ok(id) = self.processing_reviews.prepare(
+                &self.engine,
+                engine::ConversationScope::NewSpeechOnly,
+                &[],
+            ) {
+                let _ = self.processing_reviews.approve(&mut self.engine, &id);
+            }
+        }
         self.last_tick = std::time::Instant::now();
         let session = self.engine.session();
         self.live = Some(Live {
@@ -522,5 +554,68 @@ mod tests {
             .engine
             .evaluation_status()
             .is_some_and(|state| state == engine::EvaluationStatus::Idle));
+    }
+
+    fn processor_named(id: &str) -> engine::ProcessorConfiguration {
+        engine::ProcessorConfiguration::new(
+            id.into(),
+            1,
+            "fixture".into(),
+            engine::ProcessingLocation::OnDevice,
+            "fixture-policy".into(),
+            engine::ProcessorDisclosure::new(
+                "Fixture worker".into(),
+                "Fixture in-memory test only.".into(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn live_start_immediately_approves_processing_and_tracks_auto_started() {
+        use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request, Worker};
+        struct Dummy;
+        impl Evaluator for Dummy {
+            fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+                Err(Failure::EvaluatorUnavailable)
+            }
+        }
+        let mut runtime = Runtime::default();
+        let next = engine::Engine::live_with_evaluator(
+            Worker::start(Dummy, Duration::from_secs(1)).unwrap(),
+            processor_named("anthropic-api"),
+        );
+        let ticket = runtime.begin_live_start().unwrap();
+        let session = runtime
+            .install_live_start_engine(&ticket, next, true)
+            .unwrap();
+        assert_eq!(runtime.engine.session(), session);
+        assert!(runtime.engine.has_processing_permission());
+        assert!(runtime.engine.state.auto_started);
+        assert!(runtime.engine.cue_snapshot().auto_started);
+    }
+
+    #[test]
+    fn lab_evaluator_keeps_explicit_manual_review_on_live_start() {
+        use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request, Worker};
+        struct Dummy;
+        impl Evaluator for Dummy {
+            fn evaluate(&mut self, _: &Request, _: &Cancellation) -> Result<String, Failure> {
+                Err(Failure::EvaluatorUnavailable)
+            }
+        }
+        let mut runtime = Runtime::default();
+        let next = engine::Engine::live_with_evaluator(
+            Worker::start(Dummy, Duration::from_secs(1)).unwrap(),
+            processor_named("lab-api"),
+        );
+        let ticket = runtime.begin_live_start().unwrap();
+        let session = runtime
+            .install_live_start_engine(&ticket, next, false)
+            .unwrap();
+        assert_eq!(runtime.engine.session(), session);
+        assert!(!runtime.engine.has_processing_permission());
+        assert!(!runtime.engine.state.auto_started);
     }
 }

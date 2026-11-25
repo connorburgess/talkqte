@@ -80,7 +80,7 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
 test('hosted review names exact selected sources, stays optional, and preserves review across Settings', async ({
   page,
 }) => {
-  await open(page, '?live&processor&hosted');
+  await open(page, '?live&processor&hosted&lab');
   await expect(
     page.getByRole('button', { name: 'Pause cues', exact: true }),
   ).toHaveCount(0);
@@ -131,11 +131,13 @@ test('hosted review names exact selected sources, stays optional, and preserves 
   await expect(stop(page)).toHaveCount(1);
 });
 
-test('pause and disable keep capture on; Stop stays independent of a pending permission command', async ({
+test('pause and turn off keep capture on; Stop stays independent of a pending permission command', async ({
   page,
 }) => {
   await open(page);
-  await enable(page);
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
   await expect(
     page.getByRole('button', { name: 'Pause cues', exact: true }),
   ).toHaveCount(1);
@@ -145,7 +147,9 @@ test('pause and disable keep capture on; Stop stays independent of a pending per
   await expect(panel(page).getByRole('status')).toHaveText('Cues paused');
   await expect(mic(page).getByRole('status')).toHaveText('On');
   await panel(page).getByRole('button', { name: 'Resume cues' }).click();
-  await panel(page).getByRole('button', { name: 'Disable processing' }).click();
+  await panel(page)
+    .getByRole('button', { name: 'Turn off processing' })
+    .click();
   await expect(review(page)).toBeEnabled();
   await expect(mic(page).getByRole('status')).toHaveText('On');
   await enable(page);
@@ -175,7 +179,7 @@ test('pause and disable keep capture on; Stop stays independent of a pending per
 test('cancelling a pending review discards its reply and restores keyboard focus', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, '?live&processor&lab');
   await review(page).click();
   await page.evaluate(() =>
     window.permissionTest.hold('review_processing_scope'),
@@ -203,7 +207,7 @@ test('cancelling a pending review discards its reply and restores keyboard focus
 test('changed notes retire review without stealing focus from Settings', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, '?live&processor&lab');
   await prepare(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Name', exact: true });
@@ -224,7 +228,7 @@ test('changed notes retire review without stealing focus from Settings', async (
 test('approval failure is explicit, private errors stay out of UI, and recovery needs another click', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, '?live&processor&lab');
   await prepare(page);
   await page.evaluate(() =>
     window.permissionTest.fail('approve_processing_scope'),
@@ -260,7 +264,7 @@ test('approval failure is explicit, private errors stay out of UI, and recovery 
 test('Stop during pending approval cannot enable processing after capture ends', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, '?live&processor&lab');
   await prepare(page);
   await page.evaluate(() =>
     window.permissionTest.hold('approve_processing_scope'),
@@ -283,7 +287,7 @@ test('narrow permission review wraps long sources and leaves capture controls re
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await open(page);
+  await open(page, '?live&processor&lab');
   await page.evaluate(() => {
     const state = window.captureTest.state();
     return window.captureTest.send({
@@ -313,7 +317,7 @@ test('narrow permission review wraps long sources and leaves capture controls re
 test('status failure blocks permission changes until refresh without blocking Stop', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, '?live&processor&lab');
   await prepare(page);
   await page.evaluate(() => {
     window.permissionTest.fail('approve_processing_scope');
@@ -380,7 +384,7 @@ test('launch consent is disclosed and a session call cap stops model cues with a
 test('the review names where audio goes beside where lines go, and only when audio will be sent', async ({
   page,
 }) => {
-  await open(page, '?live&processor&hosted&audio');
+  await open(page, '?live&processor&hosted&audio&lab');
   await prepare(page);
   const details = panel(page).locator('dl');
   await expect(details).toContainText(
@@ -389,7 +393,7 @@ test('the review names where audio goes beside where lines go, and only when aud
   await expect(details).toContainText(
     'AudioSent to Example transcription service, for transcription',
   );
-  await open(page, '?live&processor&hosted');
+  await open(page, '?live&processor&hosted&lab');
   await prepare(page);
   await expect(panel(page).locator('dl')).not.toContainText('Audio');
 });
@@ -474,4 +478,37 @@ test('desktop toolbar omits the prototype label and the development group appear
   // Application audio is in every macOS build now: a source alone is no
   // development signal.
   await expect(devHeading).toHaveCount(0);
+});
+
+test('one-click Start live session discloses active sources and immediately enables cues', async ({
+  page,
+}) => {
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/?live&processor&keys=set');
+  await expect(page.locator('.session-start-disclosure')).toHaveText(
+    'Starts immediately: sends your microphone to Deepgram and recent lines to Anthropic until you press Stop.',
+  );
+  await page
+    .getByRole('button', { name: 'Start live session', exact: true })
+    .click();
+  await expect(stop(page)).toBeEnabled();
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
+  await expect(
+    panel(page).getByRole('button', { name: 'Pause cues', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    panel(page).getByRole('button', { name: 'Turn off processing' }),
+  ).toBeEnabled();
 });

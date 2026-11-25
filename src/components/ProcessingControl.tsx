@@ -625,7 +625,7 @@ export function ProcessingControl({
               void act('disable', () => processingApi.disable(snapshot!));
             }}
           >
-            Disable processing
+            Turn off processing
           </button>
         )}
         {!status && (microphone !== 'off' || startup !== 'idle') && (
@@ -657,14 +657,13 @@ export function ProcessingControl({
       {approved && snapshot?.processor?.id === 'anthropic-api' && (
         <p className="processing-muted" id="own-key-pause-help">
           Pause cues stops cue requests only: the session&apos;s audio still
-          goes to Deepgram and is billed to your account. Disable processing or
+          goes to Deepgram and is billed to your account. Turn off processing or
           Stop ends that.
         </p>
       )}
       {approved && (
         <p className="processing-muted">
-          Pause and Disable processing leave the microphone on. Disable
-          processing before choosing different sources.
+          Pause and Turn off processing leave the microphone on until Stop.
           {status && ' Use Stop live session above to release the microphone.'}
         </p>
       )}

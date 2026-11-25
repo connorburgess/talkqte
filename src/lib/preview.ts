@@ -59,6 +59,7 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'start_live_session':
     case 'stop_live_session':
     case 'set_live_cues_paused':
+    case 'turn_off_processing':
       throw new Error('Live sessions are available in the desktop app.');
     case 'respond_to_cue':
     case 'inspect_cue':

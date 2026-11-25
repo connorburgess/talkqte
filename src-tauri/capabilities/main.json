@@ -15,6 +15,7 @@
     "allow-approve-processing-scope",
     "allow-cancel-processing-review",
     "allow-revoke-processing",
+    "allow-turn-off-processing",
     "allow-set-processing-paused",
     "allow-set-live-cues-paused",
     "allow-respond-to-cue",
