@@ -585,11 +585,15 @@ mockIPC(
         await emit('context:changed', await preview.contextItemsNow());
         return;
       case 'live_status': {
+        const provider =
+          providerKeysFixture.providerKeysTest.provider() === 'elevenlabs'
+            ? 'ElevenLabs'
+            : 'Deepgram';
         const value: LiveStatus = liveAvailable
           ? {
               available: true,
               reason: null,
-              transcription: 'Deepgram',
+              transcription: provider,
               cueProvider: 'Anthropic',
             }
           : {

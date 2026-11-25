@@ -24,7 +24,7 @@ use crate::{
     call_prompt,
     engine::{CompanionPosition, QuestionSize, Sensitivity},
     llm_provider::{self, CueProvider},
-    transcription::cloud::Language,
+    transcription::cloud::{Language, Provider as TranscriptionProvider},
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -49,6 +49,7 @@ pub const NOTES_RATIO: (f64, f64) = (0.15, 0.85);
 /// Everything the file can hold, already validated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    pub transcription_provider: TranscriptionProvider,
     pub transcription_language: Language,
     pub cue_provider: CueProvider,
     pub cue_model_override: Option<String>,
@@ -85,6 +86,7 @@ pub struct Panels {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            transcription_provider: TranscriptionProvider::Deepgram,
             transcription_language: Language::English,
             cue_provider: CueProvider::Anthropic,
             cue_model_override: None,
@@ -197,6 +199,11 @@ pub fn parse(bytes: &[u8]) -> Settings {
         }
     }
     Settings {
+        transcription_provider: field(
+            &object,
+            "transcriptionProvider",
+            defaults.transcription_provider,
+        ),
         transcription_language: field(
             &object,
             "transcriptionLanguage",
@@ -227,6 +234,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
 pub fn render(settings: &Settings) -> Vec<u8> {
     let value = json!({
         "version": VERSION,
+        "transcriptionProvider": settings.transcription_provider,
         "transcriptionLanguage": settings.transcription_language,
         "cueProvider": settings.cue_provider,
         "cueModelOverride": settings.cue_model_override,
@@ -520,6 +528,7 @@ mod tests {
 
     fn chosen() -> Settings {
         Settings {
+            transcription_provider: TranscriptionProvider::ElevenLabs,
             transcription_language: Language::Multilingual,
             cue_provider: CueProvider::OpenAi,
             cue_model_override: Some("gpt-5.4-codex".into()),
@@ -592,6 +601,7 @@ mod tests {
                 "questionSize",
                 "sensitivity",
                 "transcriptionLanguage",
+                "transcriptionProvider",
                 "userName",
                 "version"
             ]
@@ -687,6 +697,7 @@ mod tests {
         let parsed = parse(
             br#"{
                 "version": 1,
+                "transcriptionProvider": "other",
                 "transcriptionLanguage": "fr",
                 "cueProvider": "other-provider",
                 "cueModelOverride": "bad model with spaces",

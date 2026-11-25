@@ -59,6 +59,8 @@
     "allow-test-provider-key",
     "allow-remove-provider-key",
     "allow-cue-usage",
+    "allow-transcription-provider",
+    "allow-set-transcription-provider",
     "allow-provider-preferences",
     "allow-set-cue-provider",
     "allow-set-cue-model-override",

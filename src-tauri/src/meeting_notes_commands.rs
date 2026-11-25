@@ -5,7 +5,7 @@
 
 use crate::llm_provider;
 use crate::meeting_notes::{self, Draft, Failure, PlanView};
-use crate::provider_keys::{self, KeyState, Provider};
+use crate::provider_keys::{self, KeyState};
 use crate::AppState;
 
 /// The confirmation's facts, with this session's cue spend so far.
@@ -100,12 +100,7 @@ pub async fn write_meeting_notes(
         let keys = provider_keys::global();
         let read = keys.get(key_provider);
         let status = keys.status();
-        let key_status = match key_provider {
-            Provider::Deepgram => status.deepgram,
-            Provider::Anthropic => status.anthropic,
-            Provider::OpenAi => status.openai,
-            Provider::Gemini => status.gemini,
-        };
+        let key_status = status.of(key_provider);
         let rejected = key_status.state == KeyState::Rejected;
         let key = meeting_notes::key(read, rejected)?;
         Ok::<_, meeting_notes::Refusal>(meeting_notes::write_network(key, &prepared, || {

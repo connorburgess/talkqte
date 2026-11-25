@@ -15,6 +15,7 @@ fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
 
 /// Puts `settings` into effect, all of them at once, under the runtime lock.
 pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
+    crate::transcription::cloud::set_provider(settings.transcription_provider);
     crate::transcription::cloud::set_language(settings.transcription_language);
     // Checked when the file was read; a model no longer offered keeps the
     // default.

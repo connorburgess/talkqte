@@ -17,8 +17,76 @@ use crate::engine::Segment;
 use crate::engine::SessionSources;
 use std::time::Duration;
 
-/// The only provider implemented, as the app names it.
+/// The default provider, as the app names it.
 pub const PROVIDER: &str = "Deepgram";
+
+/// Which cloud transcription provider a session with the person's own key uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    #[default]
+    Deepgram,
+    ElevenLabs,
+}
+
+impl Provider {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Deepgram => "Deepgram",
+            Self::ElevenLabs => "ElevenLabs",
+        }
+    }
+
+    pub fn key_provider(self) -> crate::provider_keys::Provider {
+        match self {
+            Self::Deepgram => crate::provider_keys::Provider::Deepgram,
+            Self::ElevenLabs => crate::provider_keys::Provider::ElevenLabs,
+        }
+    }
+
+    pub fn destination(self) -> &'static str {
+        match self {
+            Self::Deepgram => "Deepgram (US), for transcription of the session's audio",
+            Self::ElevenLabs => "ElevenLabs, for transcription of the session's audio",
+        }
+    }
+}
+
+/// The person's choice for the next live session with their own key, saved
+/// in the settings file; Deepgram until changed.
+static PROVIDER_CHOICE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The provider the next session started with the person's key will use.
+pub fn provider() -> Provider {
+    match PROVIDER_CHOICE.load(std::sync::atomic::Ordering::Acquire) {
+        1 => Provider::ElevenLabs,
+        _ => Provider::Deepgram,
+    }
+}
+
+/// Sets the transcription provider for the next session.
+pub fn set_provider(provider: Provider) {
+    let value = match provider {
+        Provider::Deepgram => 0,
+        Provider::ElevenLabs => 1,
+    };
+    PROVIDER_CHOICE.store(value, std::sync::atomic::Ordering::Release);
+}
+
+/// The active provider for this launch: development launches always use
+/// Deepgram; ordinary launches use the person's saved choice.
+pub fn active_provider() -> Provider {
+    if dev_selected() {
+        Provider::Deepgram
+    } else {
+        provider()
+    }
+}
+
+/// The active provider name for snapshots and disclosures.
+pub fn active_provider_name() -> &'static str {
+    active_provider().name()
+}
 
 /// Fixed failure codes. No provider message ever reaches a log or the UI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -624,11 +692,15 @@ pub enum Language {
 
 impl Language {
     /// How the review names it.
-    fn review_label(self) -> &'static str {
-        match self {
-            Self::English => "English",
-            Self::Multilingual => {
+    fn review_label(self, provider: Provider) -> &'static str {
+        match (provider, self) {
+            (Provider::Deepgram, Self::English) => "English",
+            (Provider::Deepgram, Self::Multilingual) => {
                 "Multilingual, which Deepgram bills at a higher rate than English"
+            }
+            (Provider::ElevenLabs, Self::English) => "English",
+            (Provider::ElevenLabs, Self::Multilingual) => {
+                "Multilingual (automatic language detection)"
             }
         }
     }
@@ -715,22 +787,21 @@ pub fn dev_selected() -> bool {
         && std::env::var_os("TALKQTE_DEV_STT_BACKEND").is_some()
 }
 
-/// Whether live sessions transcribe through Deepgram: the development
-/// selection, or else a stored Deepgram key. Without either, nothing is
-/// transcribed.
+/// Whether live sessions transcribe through cloud STT: the development
+/// selection, or else a stored key for the chosen provider. Without either,
+/// nothing is transcribed.
 pub fn selected() -> bool {
-    dev_selected()
-        || crate::provider_keys::global().is_set(crate::provider_keys::Provider::Deepgram)
+    dev_selected() || crate::provider_keys::global().is_set(provider().key_provider())
 }
 
-/// Where this launch's Deepgram credential comes from.
+/// Where this launch's transcription credential comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
     /// The development token file and launch-wide minute cap.
     Dev(Settings),
     /// The person's own key, read from the Keychain when a stream opens,
     /// with a cap of [`OWN_KEY_MINUTE_CAP`] minutes per session.
-    OwnKey,
+    OwnKey(Provider),
 }
 
 /// Most minutes of audio one live session may send with the person's own
@@ -740,16 +811,22 @@ pub enum Source {
 pub const OWN_KEY_MINUTE_CAP: u32 = 120;
 
 /// The launch's source: development settings when selected (and then only
-/// they, even if invalid), otherwise a stored key.
+/// they, even if invalid), otherwise a stored key for the chosen provider.
 pub fn source() -> Result<Source, ReadinessFailure> {
+    let chosen = provider();
     source_for(
         dev_selected().then(settings),
-        crate::provider_keys::global().status().deepgram.state,
+        chosen,
+        crate::provider_keys::global()
+            .status()
+            .of(chosen.key_provider())
+            .state,
     )
 }
 
 fn source_for(
     dev: Option<Result<Settings, SttFailure>>,
+    provider: Provider,
     key: crate::provider_keys::KeyState,
 ) -> Result<Source, ReadinessFailure> {
     use crate::provider_keys::KeyState;
@@ -757,7 +834,7 @@ fn source_for(
         (Some(settings), _) => settings
             .map(Source::Dev)
             .map_err(|_| ReadinessFailure::Settings),
-        (None, KeyState::Set) => Ok(Source::OwnKey),
+        (None, KeyState::Set) => Ok(Source::OwnKey(provider)),
         (None, KeyState::Rejected) => Err(ReadinessFailure::KeyRejected),
         (None, KeyState::NotSet) => Err(ReadinessFailure::NoKey),
         (None, KeyState::Unreadable) => Err(ReadinessFailure::KeyUnreadable),
@@ -856,7 +933,7 @@ pub enum ReadinessFailure {
 pub fn readiness() -> Result<(), ReadinessFailure> {
     match source()? {
         Source::Dev(settings) => readiness_for(Ok(settings)),
-        Source::OwnKey => Ok(()),
+        Source::OwnKey(_) => Ok(()),
     }
 }
 
@@ -921,7 +998,7 @@ pub fn streams_sharing(budget: Option<Budget>) -> Result<Streams, SttFailure> {
 }
 
 fn joining_streams(source: Source, budget: Option<Budget>) -> Result<Streams, SttFailure> {
-    if matches!(source, Source::OwnKey) && budget.is_none() {
+    if matches!(source, Source::OwnKey(_)) && budget.is_none() {
         return Err(SttFailure::Settings);
     }
     Ok(streams_for(source, budget))
@@ -932,7 +1009,7 @@ fn joining_streams(source: Source, budget: Option<Budget>) -> Result<Streams, St
 fn language_of(source: &Source) -> Language {
     match source {
         Source::Dev(settings) => settings.language,
-        Source::OwnKey => language(),
+        Source::OwnKey(_) => language(),
     }
 }
 
@@ -943,11 +1020,19 @@ fn streams_for(source: Source, shared: Option<Budget>) -> Streams {
             super::deepgram::opener(settings.clone()),
             Some(super::deepgram::reopener(settings)),
         ),
-        Source::OwnKey => {
+        Source::OwnKey(_) => {
             let budget = shared.unwrap_or_else(|| {
                 Budget::new(Duration::from_secs(u64::from(OWN_KEY_MINUTE_CAP) * 60))
             });
-            let (opener, reopener) = super::deepgram::key_streams(budget.clone(), language);
+            let (opener, reopener) = match source {
+                Source::OwnKey(Provider::Deepgram) => {
+                    super::deepgram::key_streams(budget.clone(), language)
+                }
+                Source::OwnKey(Provider::ElevenLabs) => {
+                    super::elevenlabs::key_streams(budget.clone(), language)
+                }
+                Source::Dev(_) => unreachable!(),
+            };
             Streams {
                 budget: Some(budget),
                 ..Streams::new(opener, Some(reopener))
@@ -967,7 +1052,16 @@ pub fn review_sentence(sources: &SessionSources) -> Option<String> {
 /// review's text.
 #[cfg(test)]
 pub(crate) fn review_sentence_for_own_key(language: Language, sources: &SessionSources) -> String {
-    review_sentence_with(&Source::OwnKey, language, sources).expect("always worded")
+    review_sentence_for_own_key_provider(Provider::Deepgram, language, sources)
+}
+
+#[cfg(test)]
+pub(crate) fn review_sentence_for_own_key_provider(
+    provider: Provider,
+    language: Language,
+    sources: &SessionSources,
+) -> String {
+    review_sentence_with(&Source::OwnKey(provider), language, sources).expect("always worded")
 }
 
 fn review_sentence_for(source: &Source, sources: &SessionSources) -> Option<String> {
@@ -993,21 +1087,31 @@ fn review_sentence_with(
     language: Language,
     sources: &SessionSources,
 ) -> Option<String> {
-    let label = language.review_label();
+    let provider = match source {
+        Source::Dev(_) => Provider::Deepgram,
+        Source::OwnKey(provider) => *provider,
+    };
+    let label = language.review_label(provider);
     let audio = audio_of(sources);
-    let sent = format!(
-        "Audio: this approval also sends {audio} to Deepgram (US, model Nova-3, {label}) for transcription"
-    );
-    const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
     const END: &str =
         "If transcription stops, nothing is transcribed and nothing falls back to another service.";
     let both = sources.both_sources();
     Some(match source {
-        Source::Dev(settings) => format!(
-            "{sent}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
-            settings.minute_cap
-        ),
-        Source::OwnKey => {
+        Source::Dev(settings) => {
+            let sent = format!(
+                "Audio: this approval also sends {audio} to Deepgram (US, model Nova-3, {label}) for transcription"
+            );
+            const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
+            format!(
+                "{sent}. {TERMS} At most {} minutes of audio for this whole launch, across sessions and sources. {END}",
+                settings.minute_cap
+            )
+        }
+        Source::OwnKey(Provider::Deepgram) => {
+            let sent = format!(
+                "Audio: this approval also sends {audio} to Deepgram (US, model Nova-3, {label}) for transcription"
+            );
+            const TERMS: &str = "Each request asks Deepgram to opt out of its Model Improvement Program; what Deepgram keeps is set by its terms (https://deepgram.com/terms). Audio captured before this approval is never sent.";
             let across = if both {
                 ", counted across both streams, so two at once use it twice as fast"
             } else {
@@ -1019,15 +1123,31 @@ fn review_sentence_with(
                 if both { ", for both" } else { "" },
             )
         }
+        Source::OwnKey(Provider::ElevenLabs) => {
+            let sent = format!(
+                "Audio: this approval also sends {audio} to ElevenLabs (model Scribe v2 Realtime, {label}) for transcription"
+            );
+            const TERMS: &str = "ElevenLabs handles what is sent under its terms (https://elevenlabs.io/terms). Audio captured before this approval is never sent.";
+            let across = if both {
+                ", counted across both streams, so two at once use it twice as fast"
+            } else {
+                ""
+            };
+            format!(
+                "{sent}, with your own ElevenLabs API key: ElevenLabs bills your account for usage. {TERMS} At most {OWN_KEY_MINUTE_CAP} minutes of audio for this session{across}. Pausing cues does not stop the audio; turning processing off or Stop does{}. {END}",
+                if both { ", for both" } else { "" },
+            )
+        }
     })
 }
 
 /// The audio destination the session review names beside the cue
 /// destination, when cloud transcription is selected.
 pub fn audio_destination() -> Option<String> {
-    source()
-        .ok()
-        .map(|_| "Deepgram (US), for transcription of the session's audio".to_string())
+    source().ok().map(|s| match s {
+        Source::Dev(_) => Provider::Deepgram.destination().to_string(),
+        Source::OwnKey(provider) => provider.destination().to_string(),
+    })
 }
 
 /// Checks the token file without reading the token.
@@ -1678,25 +1798,32 @@ mod tests {
             KeyState::Unreadable,
         ] {
             assert_eq!(
-                source_for(Some(Ok(dev.clone())), key),
+                source_for(Some(Ok(dev.clone())), Provider::Deepgram, key),
                 Ok(Source::Dev(dev.clone()))
             );
             assert_eq!(
-                source_for(Some(Err(SttFailure::Settings)), key),
+                source_for(Some(Err(SttFailure::Settings)), Provider::Deepgram, key),
                 Err(ReadinessFailure::Settings)
             );
         }
-        assert_eq!(source_for(None, KeyState::Set), Ok(Source::OwnKey));
         assert_eq!(
-            source_for(None, KeyState::NotSet),
+            source_for(None, Provider::Deepgram, KeyState::Set),
+            Ok(Source::OwnKey(Provider::Deepgram))
+        );
+        assert_eq!(
+            source_for(None, Provider::ElevenLabs, KeyState::Set),
+            Ok(Source::OwnKey(Provider::ElevenLabs))
+        );
+        assert_eq!(
+            source_for(None, Provider::Deepgram, KeyState::NotSet),
             Err(ReadinessFailure::NoKey)
         );
         assert_eq!(
-            source_for(None, KeyState::Rejected),
+            source_for(None, Provider::ElevenLabs, KeyState::Rejected),
             Err(ReadinessFailure::KeyRejected)
         );
         assert_eq!(
-            source_for(None, KeyState::Unreadable),
+            source_for(None, Provider::Deepgram, KeyState::Unreadable),
             Err(ReadinessFailure::KeyUnreadable)
         );
         // The test build has no development selection and no stored key.
@@ -1711,17 +1838,22 @@ mod tests {
         // The first start's streams, then a second start's (as a start refused
         // at the gate would have made, were they made before it): spending
         // the second's whole budget leaves the first's untouched.
-        let first = streams_for(Source::OwnKey, None);
-        let second = streams_for(Source::OwnKey, None);
+        let first = streams_for(Source::OwnKey(Provider::Deepgram), None);
+        let second = streams_for(Source::OwnKey(Provider::ElevenLabs), None);
         let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
         assert_eq!(second.budget.as_ref().unwrap().reserve(u64::MAX), cap);
         assert_eq!(first.budget.as_ref().unwrap().reserve(u64::MAX), cap);
         assert!(first.reopener.is_some());
+        assert!(second.reopener.is_some());
     }
 
     #[test]
     fn the_review_names_the_persons_key_billing_opt_out_and_session_cap() {
-        let own = review_sentence_for(&Source::OwnKey, &SessionSources::microphone()).unwrap();
+        let own = review_sentence_for(
+            &Source::OwnKey(Provider::Deepgram),
+            &SessionSources::microphone(),
+        )
+        .unwrap();
         for part in [
             "to Deepgram (US, model Nova-3, English)",
             "with your own Deepgram API key",
@@ -1735,6 +1867,24 @@ mod tests {
         ] {
             assert!(own.contains(part), "missing: {part}");
         }
+        let elevenlabs = review_sentence_for(
+            &Source::OwnKey(Provider::ElevenLabs),
+            &SessionSources::microphone(),
+        )
+        .unwrap();
+        for part in [
+            "to ElevenLabs (model Scribe v2 Realtime, English)",
+            "with your own ElevenLabs API key",
+            "ElevenLabs bills your account for usage",
+            "https://elevenlabs.io/terms",
+            "Audio captured before this approval is never sent",
+            "At most 120 minutes of audio for this session",
+            "Pausing cues does not stop the audio",
+            "nothing falls back to another service",
+        ] {
+            assert!(elevenlabs.contains(part), "missing: {part}");
+        }
+        assert!(!elevenlabs.contains("Model Improvement Program"));
         // The development wording is unchanged.
         let dev = review_sentence_for(
             &Source::Dev(Settings {
@@ -1752,7 +1902,12 @@ mod tests {
     #[test]
     fn the_review_names_exactly_the_sessions_sources() {
         let own = |sources: &SessionSources| {
-            review_sentence_with(&Source::OwnKey, Language::English, sources).unwrap()
+            review_sentence_with(
+                &Source::OwnKey(Provider::Deepgram),
+                Language::English,
+                sources,
+            )
+            .unwrap()
         };
         let microphone = own(&SessionSources::microphone());
         assert!(microphone.contains("sends the live audio from your microphone to Deepgram"));
@@ -1780,8 +1935,8 @@ mod tests {
 
     #[test]
     fn a_second_source_spends_the_first_sources_budget() {
-        let first = streams_for(Source::OwnKey, None);
-        let second = streams_for(Source::OwnKey, first.budget());
+        let first = streams_for(Source::OwnKey(Provider::Deepgram), None);
+        let second = streams_for(Source::OwnKey(Provider::Deepgram), first.budget());
         let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
         // The application's stream uses 40 minutes; the microphone's stream
         // has only the rest of the session's 120.
@@ -1791,8 +1946,8 @@ mod tests {
         assert_eq!(second.budget().unwrap().reserve(1), 0);
         // A second source without the session's budget is refused, never
         // given a fresh 120 minutes.
-        assert!(joining_streams(Source::OwnKey, None).is_err());
-        let joined = joining_streams(Source::OwnKey, first.budget()).unwrap();
+        assert!(joining_streams(Source::OwnKey(Provider::Deepgram), None).is_err());
+        let joined = joining_streams(Source::OwnKey(Provider::Deepgram), first.budget()).unwrap();
         assert_eq!(
             joined.budget().unwrap().reserve(1),
             0,
@@ -1803,7 +1958,7 @@ mod tests {
     #[test]
     fn the_language_is_named_in_the_review_and_set_for_the_next_session() {
         let english = review_sentence_with(
-            &Source::OwnKey,
+            &Source::OwnKey(Provider::Deepgram),
             Language::English,
             &SessionSources::microphone(),
         )
@@ -1811,7 +1966,7 @@ mod tests {
         assert!(english.contains("Deepgram (US, model Nova-3, English)"));
         assert!(!english.contains("higher rate"));
         let multi = review_sentence_with(
-            &Source::OwnKey,
+            &Source::OwnKey(Provider::Deepgram),
             Language::Multilingual,
             &SessionSources::microphone(),
         )
@@ -1819,6 +1974,16 @@ mod tests {
         assert!(multi.contains(
             "Deepgram (US, model Nova-3, Multilingual, which Deepgram bills at a higher rate than English)"
         ));
+        let el_multi = review_sentence_with(
+            &Source::OwnKey(Provider::ElevenLabs),
+            Language::Multilingual,
+            &SessionSources::microphone(),
+        )
+        .unwrap();
+        assert!(el_multi.contains(
+            "ElevenLabs (model Scribe v2 Realtime, Multilingual (automatic language detection))"
+        ));
+        assert!(!el_multi.contains("higher rate"));
         // No price is stated.
         assert!(!multi.contains('$'));
         // The setting, as the commands see it: English until changed.
