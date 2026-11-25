@@ -824,6 +824,16 @@ impl EvaluationLifecycle for InApp {
 
 /// What the session processing review shows before anything is sent.
 pub fn cue_data_policy(provider: CueProvider, model_id: &str, custom_model: bool) -> String {
+    cue_data_policy_for(provider, model_id, custom_model, "Deepgram")
+}
+
+/// Same disclosure copy parameterized by active transcription provider (`Deepgram` or `ElevenLabs`).
+pub fn cue_data_policy_for(
+    provider: CueProvider,
+    model_id: &str,
+    custom_model: bool,
+    audio_provider: &str,
+) -> String {
     let cap_text = if custom_model {
         format!(
             "At most {REQUEST_CAP} requests per session. Estimated spend unavailable for custom model; there is no daily cap."
@@ -835,7 +845,7 @@ pub fn cue_data_policy(provider: CueProvider, model_id: &str, custom_model: bool
         )
     };
     format!(
-        "Sends to {}: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. {} Pause cues stops these requests but not the audio to Deepgram; Off and Stop end both. Model {}. It never sends {} audio, the full transcript, your notes, imported notes or focus lines. {} handles what is sent under your API account's terms ({}); lines already sent cannot be recalled. If it fails, no other service is used.",
+        "Sends to {}: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. {} Pause cues stops these requests but not the audio to {audio_provider}; Off and Stop end both. Model {}. It never sends {} audio, the full transcript, your notes, imported notes or focus lines. {} handles what is sent under your API account's terms ({}); lines already sent cannot be recalled. If it fails, no other service is used.",
         provider.cue_account_scope(),
         cap_text,
         model_id,
@@ -855,7 +865,12 @@ pub fn register_cue_engine<E: Evaluator>(
     transcription: Option<String>,
 ) -> crate::engine::Engine {
     use crate::engine::{ProcessingLocation, ProcessorConfiguration, ProcessorDisclosure};
-    let policy = cue_data_policy(provider, model_id, custom_model);
+    let policy = cue_data_policy_for(
+        provider,
+        model_id,
+        custom_model,
+        crate::transcription::cloud::active_provider_name(),
+    );
     let policy = match &transcription {
         Some(transcription) => format!("{policy} {transcription}"),
         None => policy,
@@ -876,10 +891,11 @@ pub fn register_cue_engine<E: Evaluator>(
     if let Some(effort) = effort {
         config = config.with_effort(effort.into());
     }
-    if transcription.is_some() {
-        config = config.with_audio_destination(
-            "Deepgram (US), for transcription of the session's audio".into(),
-        );
+    if let (Some(_), Some(destination)) = (
+        transcription,
+        crate::transcription::cloud::audio_destination(),
+    ) {
+        config = config.with_audio_destination(destination);
     }
     let worker =
         Worker::start(adapter, DEADLINE).expect("the deadline is within the worker's ceiling");

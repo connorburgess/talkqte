@@ -1,5 +1,5 @@
-//! The person's own provider keys: one Deepgram key for transcription, and
-//! API keys for cue decisions and meeting notes (Anthropic, OpenAI, or Gemini).
+//! The person's own provider keys: Deepgram or ElevenLabs for transcription,
+//! and API keys for cue decisions and meeting notes (Anthropic, OpenAI, or Gemini).
 //!
 //! Keys live only in the system's secret store under the service
 //! [`SERVICE`]: the login Keychain on macOS (generic passwords), Windows
@@ -33,18 +33,26 @@ pub const SERVICE: &str = "app.talkqte.provider-key";
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Deepgram,
+    ElevenLabs,
     Anthropic,
     OpenAi,
     Gemini,
 }
 
 impl Provider {
-    pub const ALL: [Self; 4] = [Self::Deepgram, Self::Anthropic, Self::OpenAi, Self::Gemini];
+    pub const ALL: [Self; 5] = [
+        Self::Deepgram,
+        Self::ElevenLabs,
+        Self::Anthropic,
+        Self::OpenAi,
+        Self::Gemini,
+    ];
 
     /// The Keychain account name for this provider's key.
     pub fn account(self) -> &'static str {
         match self {
             Self::Deepgram => "deepgram",
+            Self::ElevenLabs => "elevenlabs",
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Gemini => "gemini",
@@ -54,6 +62,7 @@ impl Provider {
     pub fn name(self) -> &'static str {
         match self {
             Self::Deepgram => "Deepgram",
+            Self::ElevenLabs => "ElevenLabs",
             Self::Anthropic => "Anthropic",
             Self::OpenAi => "OpenAI",
             Self::Gemini => "Gemini",
@@ -63,9 +72,10 @@ impl Provider {
     fn index(self) -> usize {
         match self {
             Self::Deepgram => 0,
-            Self::Anthropic => 1,
-            Self::OpenAi => 2,
-            Self::Gemini => 3,
+            Self::ElevenLabs => 1,
+            Self::Anthropic => 2,
+            Self::OpenAi => 3,
+            Self::Gemini => 4,
         }
     }
 }
@@ -114,6 +124,16 @@ pub fn validate(provider: Provider, text: &str) -> Result<Secret, KeyError> {
         Provider::Deepgram => {
             (32..=128).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_alphanumeric())
         }
+        // ElevenLabs API keys start with `sk_` (current keys) or are 32-64
+        // hexadecimal characters (legacy keys), without stray spaces or prose.
+        Provider::ElevenLabs => {
+            (key.starts_with("sk_")
+                && (32..=256).contains(&key.len())
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')))
+                || ((32..=64).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_hexdigit()))
+        }
         // Standard OpenAI API keys start with `sk-` (including `sk-proj-`, etc.).
         // Reject `sk-ant-` so Anthropic keys are refused here.
         Provider::OpenAi => {
@@ -160,6 +180,9 @@ impl KeyError {
             Self::Shape(Provider::Deepgram) => {
                 "That does not look like a Deepgram API key. It is letters and digits only."
             }
+            Self::Shape(Provider::ElevenLabs) => {
+                "That does not look like an ElevenLabs API key. It starts with sk_ (or is a 32-character hex key)."
+            }
             Self::Shape(Provider::OpenAi) => {
                 "That does not look like an OpenAI API key. It starts with sk-."
             }
@@ -172,6 +195,7 @@ impl KeyError {
             }
             Self::NotSet(Provider::Anthropic) => "No Anthropic key is set.",
             Self::NotSet(Provider::Deepgram) => "No Deepgram key is set.",
+            Self::NotSet(Provider::ElevenLabs) => "No ElevenLabs key is set.",
             Self::NotSet(Provider::OpenAi) => "No OpenAI key is set.",
             Self::NotSet(Provider::Gemini) => "No Gemini key is set.",
             Self::Unreachable(Provider::Anthropic) => {
@@ -179,6 +203,9 @@ impl KeyError {
             }
             Self::Unreachable(Provider::Deepgram) => {
                 "Deepgram could not be reached to check the key. Nothing was changed."
+            }
+            Self::Unreachable(Provider::ElevenLabs) => {
+                "ElevenLabs could not be reached to check the key. Nothing was changed."
             }
             Self::Unreachable(Provider::OpenAi) => {
                 "OpenAI could not be reached to check the key. Nothing was changed."
@@ -373,13 +400,26 @@ pub struct StoreStatus {
 #[serde(rename_all = "camelCase")]
 pub struct KeysStatus {
     pub deepgram: KeyStatus,
+    pub elevenlabs: KeyStatus,
     pub anthropic: KeyStatus,
     pub openai: KeyStatus,
     pub gemini: KeyStatus,
-    /// True when Deepgram is not set or no cue provider key is set: what a
-    /// first-run screen asks for.
+    /// True when no transcription key is set or no cue provider key is set:
+    /// what a first-run screen asks for.
     pub any_missing: bool,
     pub store: StoreStatus,
+}
+
+impl KeysStatus {
+    pub fn of(&self, provider: Provider) -> KeyStatus {
+        match provider {
+            Provider::Deepgram => self.deepgram,
+            Provider::ElevenLabs => self.elevenlabs,
+            Provider::Anthropic => self.anthropic,
+            Provider::OpenAi => self.openai,
+            Provider::Gemini => self.gemini,
+        }
+    }
 }
 
 /// The provider's answer to a key check.
@@ -407,7 +447,7 @@ struct Memo {
 pub struct Keys {
     store: Box<dyn SecretStore>,
     probe: Box<dyn Probe>,
-    memo: Mutex<[Memo; 4]>,
+    memo: Mutex<[Memo; 5]>,
 }
 
 impl Keys {
@@ -415,11 +455,11 @@ impl Keys {
         Self {
             store,
             probe,
-            memo: Mutex::new([Memo::default(); 4]),
+            memo: Mutex::new([Memo::default(); 5]),
         }
     }
 
-    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 4]> {
+    fn memo(&self) -> std::sync::MutexGuard<'_, [Memo; 5]> {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -460,21 +500,26 @@ impl Keys {
             memo.present = None;
         }
         let (deepgram, deepgram_no_store) = self.key_status(Provider::Deepgram);
+        let (elevenlabs, elevenlabs_no_store) = self.key_status(Provider::ElevenLabs);
         let (anthropic, anthropic_no_store) = self.key_status(Provider::Anthropic);
         let (openai, openai_no_store) = self.key_status(Provider::OpenAi);
         let (gemini, gemini_no_store) = self.key_status(Provider::Gemini);
+        let stt_missing =
+            deepgram.state == KeyState::NotSet && elevenlabs.state == KeyState::NotSet;
         let cue_missing = anthropic.state == KeyState::NotSet
             && openai.state == KeyState::NotSet
             && gemini.state == KeyState::NotSet;
         KeysStatus {
             deepgram,
+            elevenlabs,
             anthropic,
             openai,
             gemini,
-            any_missing: deepgram.state == KeyState::NotSet || cue_missing,
+            any_missing: stt_missing || cue_missing,
             store: StoreStatus {
                 kind: self.store.kind(),
                 available: !(deepgram_no_store
+                    || elevenlabs_no_store
                     || anthropic_no_store
                     || openai_no_store
                     || gemini_no_store),
@@ -579,6 +624,10 @@ impl Probe for NetworkProbe {
                     Zeroizing::new(format!("Token {}", key.expose())).as_str(),
                 )
                 .call(),
+            Provider::ElevenLabs => agent
+                .get("https://api.elevenlabs.io/v1/user")
+                .header("xi-api-key", key.expose())
+                .call(),
             Provider::Anthropic => agent
                 .get("https://api.anthropic.com/v1/models?limit=1")
                 .header("x-api-key", key.expose())
@@ -646,6 +695,8 @@ mod tests {
 
     const ANTHROPIC: &str = "sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ";
     const DEEPGRAM: &str = "0123456789abcdef0123456789abcdef01234567";
+    const ELEVENLABS: &str = "sk_fictional0123456789abcdef0123456789abcdef01234567";
+    const ELEVENLABS_HEX: &str = "0123456789abcdef0123456789abcdef";
     const OPENAI: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
     const GEMINI: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
 
@@ -720,6 +771,7 @@ mod tests {
             keys.status(),
             KeysStatus {
                 deepgram: not_set(),
+                elevenlabs: not_set(),
                 anthropic: not_set(),
                 openai: not_set(),
                 gemini: not_set(),
@@ -734,6 +786,7 @@ mod tests {
             serde_json::to_value(keys.status()).unwrap(),
             serde_json::json!({
                 "deepgram": {"state": "notSet", "verified": false},
+                "elevenlabs": {"state": "notSet", "verified": false},
                 "anthropic": {"state": "notSet", "verified": false},
                 "openai": {"state": "notSet", "verified": false},
                 "gemini": {"state": "notSet", "verified": false},
@@ -769,6 +822,7 @@ mod tests {
         let keys = Keys::new(Box::new(NoStore), Box::new(probe.clone()));
         let status = keys.status();
         assert_eq!(status.deepgram.state, KeyState::Unreadable);
+        assert_eq!(status.elevenlabs.state, KeyState::Unreadable);
         assert_eq!(status.anthropic.state, KeyState::Unreadable);
         assert!(!status.any_missing);
         assert_eq!(
@@ -857,6 +911,25 @@ mod tests {
                 Provider::Deepgram,
                 "Token 0123456789abcdef0123456789abcdef01234567",
             ),
+            (Provider::ElevenLabs, ""),
+            (Provider::ElevenLabs, ANTHROPIC),
+            (Provider::ElevenLabs, "sk_short"),
+            (
+                Provider::ElevenLabs,
+                "sk_fictional 0123456789abcdef0123456789abcdef",
+            ),
+            (
+                Provider::ElevenLabs,
+                "not a valid elevenlabs key in prose here",
+            ),
+            (
+                Provider::ElevenLabs,
+                "xi-api-key sk_fictional0123456789abcdef0123456789",
+            ),
+            (
+                Provider::ElevenLabs,
+                "fictionaldeepgramkey0123456789abcdef0123",
+            ),
         ] {
             let error = keys.set(provider, text).unwrap_err();
             assert_eq!(error, KeyError::Shape(provider));
@@ -869,6 +942,43 @@ mod tests {
             "sk-ant-usr-FICTIONALfictional0123456789abcdefghijk"
         )
         .is_ok());
+        assert!(validate(Provider::ElevenLabs, &format!("  {ELEVENLABS}\n")).is_ok());
+        assert!(validate(Provider::ElevenLabs, ELEVENLABS_HEX).is_ok());
+    }
+
+    #[test]
+    fn elevenlabs_keys_store_probe_and_clear_independently_of_deepgram() {
+        let (keys, store, probe) = keys(ProbeResult::Accepted);
+        keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+        let status = keys
+            .set(Provider::ElevenLabs, &format!("  {ELEVENLABS}  "))
+            .unwrap();
+        assert_eq!(status.elevenlabs.state, KeyState::Set);
+        assert!(!status.elevenlabs.verified);
+        assert_eq!(status.deepgram.state, KeyState::NotSet);
+        // Either Deepgram or ElevenLabs with Anthropic satisfies any_missing.
+        assert!(!status.any_missing);
+        assert_eq!(
+            store.inner.get("elevenlabs").unwrap().unwrap().expose(),
+            ELEVENLABS
+        );
+        let checked = keys.test(Provider::ElevenLabs).unwrap();
+        assert_eq!(
+            checked.elevenlabs,
+            KeyStatus {
+                state: KeyState::Set,
+                verified: true
+            }
+        );
+        assert_eq!(
+            *probe.0.lock().unwrap(),
+            [(Provider::ElevenLabs, ELEVENLABS.to_string())]
+        );
+        keys.mark_rejected(Provider::ElevenLabs);
+        assert_eq!(keys.status().elevenlabs.state, KeyState::Rejected);
+        let removed = keys.remove(Provider::ElevenLabs).unwrap();
+        assert_eq!(removed.elevenlabs, not_set());
+        assert!(removed.any_missing);
     }
 
     #[test]

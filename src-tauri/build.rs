@@ -67,6 +67,8 @@ fn main() {
             "test_provider_key",
             "remove_provider_key",
             "cue_usage",
+            "transcription_provider",
+            "set_transcription_provider",
             "provider_preferences",
             "set_cue_provider",
             "set_cue_model_override",
