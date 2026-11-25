@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileText, History, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
+import { setKeptMeetingArchived } from '../lib/meetingHistory';
 import type {
   ContextItem,
   GranolaStatus,
@@ -299,9 +300,10 @@ export function ContextNotes({
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Add files, past meetings (notes only, never transcripts), or
-              Granola notes for context. Held in memory, excluded from Markdown
-              exports, and never sent to a cue provider without approval.
+              Relevant past meetings (notes only, never transcripts) are
+              auto-selected by default. Add files, kept meetings, or Granola
+              notes for context. Held in memory, excluded from Markdown exports,
+              and never sent to a cue provider without approval.
             </span>
           </div>
           <div className="context-controls">
@@ -479,13 +481,20 @@ export function ContextNotes({
             {items.map((item) => (
               <li key={`${item.provider}:${item.sourceId}`}>
                 <div>
-                  <strong>{item.title}</strong>
+                  <div className="context-item-head">
+                    <strong>{item.title}</strong>
+                    {item.autoSelected && (
+                      <span className="context-auto-chip">Auto</span>
+                    )}
+                  </div>
                   <span className="muted small">
                     {item.sourceDate} ·{' '}
                     {item.provider === 'granola'
                       ? 'From Granola'
                       : item.provider === 'history'
-                        ? 'From a kept meeting'
+                        ? item.autoSelected
+                          ? 'Auto-selected from kept meetings'
+                          : 'From a kept meeting'
                         : 'From a file'}
                   </span>
                   {item.provider === 'granola' && (
@@ -497,23 +506,44 @@ export function ContextNotes({
                   )}
                   <p>{item.excerpt}</p>
                 </div>
-                <button
-                  className="icon-button"
-                  aria-label={`Remove ${item.title} (${item.sourceDate})`}
-                  title="Remove"
-                  disabled={busy || working}
-                  onClick={(event) => {
-                    focusBeforeRemoval(event.currentTarget);
-                    void run(() =>
-                      bridge.command('remove_context_item', {
-                        provider: item.provider,
-                        sourceId: item.sourceId,
-                      }),
-                    );
-                  }}
-                >
-                  <X size={15} />
-                </button>
+                <div className="context-item-actions">
+                  {item.provider === 'history' && bridge.desktop && (
+                    <button
+                      type="button"
+                      className="text-button context-archive-button"
+                      aria-label={`Archive ${item.title} (${item.sourceDate}) so it is never auto-selected`}
+                      title="Archive (never include again)"
+                      disabled={busy || working}
+                      onClick={(event) => {
+                        focusBeforeRemoval(event.currentTarget);
+                        void run(async () => {
+                          await setKeptMeetingArchived(item.sourceId, true);
+                          onNotice(`Archived “${item.title}”.`);
+                        });
+                      }}
+                    >
+                      Archive
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remove ${item.title} (${item.sourceDate})`}
+                    title="Remove for this session"
+                    disabled={busy || working}
+                    onClick={(event) => {
+                      focusBeforeRemoval(event.currentTarget);
+                      void run(() =>
+                        bridge.command('remove_context_item', {
+                          provider: item.provider,
+                          sourceId: item.sourceId,
+                        }),
+                      );
+                    }}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
