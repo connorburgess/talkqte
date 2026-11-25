@@ -38,7 +38,6 @@ import {
 } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
-import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
@@ -1005,9 +1004,6 @@ function Notebook() {
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
-  // The setup card: put away for this app session with Not now, or gone
-  // once the required steps are done.
-  const [setupDismissed, setSetupDismissed] = useState(false);
   const [keysAvailable, setKeysAvailable] = useState(false);
   const [initialKeys, setInitialKeys] = useState<KeysStatus | null>(null);
   const [onboardingMode, setOnboardingMode] = useState<
@@ -1021,43 +1017,11 @@ function Notebook() {
   useEffect(() => {
     if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
-  const pendingFocus = useRef<SetupTarget | 'appearance' | null>(null);
-  const goToSetup = (target: SetupTarget) => {
-    if (target === 'focus') {
-      setFocusExpanded(true);
-      // The card only shows in the notebook, so the focus box is already here.
-      setTimeout(() => {
-        focusField.current?.scrollIntoView({ block: 'center' });
-        focusField.current?.focus();
-      }, 0);
-      return;
-    }
-    if (target === 'context') {
-      // The card only shows in the notebook, so the panel is already here.
-      setTab('notes');
-      setTimeout(() => {
-        const panel = document.querySelector<HTMLDetailsElement>(
-          '[aria-label="Prior context"] details',
-        );
-        if (panel) panel.open = true;
-        const add = panel?.querySelector<HTMLElement>(
-          'button.secondary-button',
-        );
-        add?.scrollIntoView({ block: 'center' });
-        add?.focus();
-      }, 0);
-      return;
-    }
-    pendingFocus.current = target;
-    setView('settings');
-  };
+  const pendingFocus = useRef<'appearance' | null>(null);
   useEffect(() => {
-    const target = pendingFocus.current;
-    if (!target) return;
+    if (!pendingFocus.current) return;
     pendingFocus.current = null;
-    const element = document.getElementById(
-      target === 'name' ? 'user-name' : 'question-size',
-    );
+    const element = document.getElementById('question-size');
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
   }, [view, tab]);
@@ -1423,30 +1387,6 @@ function Notebook() {
               Meetings
             </button>
           </nav>
-          {view === 'notebook' && (
-            <div className="meeting-list-content">
-              {state &&
-                !setupDismissed &&
-                !live &&
-                !simulated &&
-                !state.userName && (
-                  <details className="setup-disclosure">
-                    <summary>Set up a live session</summary>
-                    <SetupCard
-                      name={state.userName}
-                      focus={state.focus}
-                      items={contextItems}
-                      busy={busy}
-                      onGoTo={goToSetup}
-                      onDismiss={() => {
-                        setSetupDismissed(true);
-                        notebookNav.current?.focus();
-                      }}
-                    />
-                  </details>
-                )}
-            </div>
-          )}
           <div className="sidebar-bottom">
             <button
               className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
@@ -1500,67 +1440,6 @@ function Notebook() {
               </>
             )}
           </div>
-          {view === 'notebook' &&
-            !showOnboarding &&
-            (listResizable || splitContent) && (
-              <details
-                className="layout-controls"
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.currentTarget.open = false;
-                    event.currentTarget.querySelector('summary')?.focus();
-                  }
-                }}
-              >
-                <summary>Panel sizes</summary>
-                <div className="layout-controls-body">
-                  {listResizable && (
-                    <label>
-                      Sidebar width
-                      <input
-                        type="range"
-                        min={200}
-                        max={listMax}
-                        value={listWidth}
-                        aria-valuetext={`${listWidth} pixels wide`}
-                        onChange={(event) =>
-                          setPreferredListWidth(Number(event.target.value))
-                        }
-                      />
-                    </label>
-                  )}
-                  {splitContent && (
-                    <label>
-                      Notes and transcript width
-                      <input
-                        type="range"
-                        min={260}
-                        max={notesMax}
-                        value={notesWidth}
-                        aria-valuetext={`${notesWidth} pixels wide`}
-                        onChange={(event) =>
-                          resizeNotes(Number(event.target.value))
-                        }
-                      />
-                    </label>
-                  )}
-                  <button
-                    className="secondary-button"
-                    onClick={() => {
-                      setPreferredListWidth(null);
-                      setNotesRatio(defaultNotesRatio);
-                    }}
-                  >
-                    Reset panel sizes
-                  </button>
-                  <p>
-                    TalkQTE remembers these sizes. Narrow windows stack the
-                    panels.
-                  </p>
-                </div>
-              </details>
-            )}
           {!bridge.desktop && (
             <span className="prototype-label">Browser preview</span>
           )}
@@ -1712,38 +1591,38 @@ function Notebook() {
                   </h1>
                   <p>
                     {preparing
-                      ? 'Starting · capture status shown above'
+                      ? 'Starting…'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
                           microphoneNotCapturing(microphone.state)
-                          ? 'Ending the live session. Application audio is shown under Cue processing.'
-                          : 'Waiting for microphone release and remaining transcription.'
+                          ? 'Ending live session. See Cue processing above.'
+                          : 'Releasing microphone and finishing transcription…'
                         : state.live
                           ? live
                             ? state.cuesPaused
                               ? sourceApp
-                                ? 'Application audio and transcript continue. Stop live session to stop listening.'
-                                : 'Microphone and transcript continue. Stop live session to stop listening.'
+                                ? 'App audio and transcript continue. Stop live session when done.'
+                                : 'Microphone and transcript continue. Stop live session when done.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · not saved by TalkQTE`
-                                : 'Your microphone · not saved by TalkQTE'
+                                ? `Audio from ${sourceApp} · audio not recorded`
+                                : 'Your microphone · audio not recorded'
                             : sessionHistory?.kept
-                              ? 'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.'
-                              : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
+                              ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
+                              : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
                             : capture.state?.source?.mayBeCapturing
-                              ? 'No live session. Audio from a selected application may still be captured; see Cue processing above.'
+                              ? 'No live session. Selected app audio may still be capturing; see Cue processing above.'
                               : microphone.active &&
                                   !microphoneNotCapturing(microphone.state)
                                 ? microphone.state?.status === 'error'
-                                  ? 'No live session. The microphone is still being released; see above.'
-                                  : 'No live session. The microphone check above is on; it records and transcribes nothing.'
+                                  ? 'No live session. Releasing microphone; see above.'
+                                  : 'No live session. Mic check is on; nothing is recorded or transcribed.'
                                 : liveStatus?.available
-                                  ? 'Nothing is being captured. Start a live session when your meeting begins.'
+                                  ? 'Nothing is captured until you start a live session.'
                                   : liveStatus?.reason
-                                    ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
-                                    : 'Nothing is being captured.'}
+                                    ? `Nothing is captured. ${liveStatus.reason}`
+                                    : 'Nothing is captured.'}
                   </p>
                   {notMacos(platform) &&
                     !state.live &&
@@ -1983,7 +1862,7 @@ function Notebook() {
                       }}
                     />
                     <div className="editor-footer">
-                      <span>Kept in memory for this session</span>
+                      <span>In memory for this session</span>
                       <span>{notes.length.toLocaleString()} / 20,000</span>
                     </div>
                   </div>
@@ -2068,12 +1947,12 @@ function Notebook() {
                         <p>
                           {live
                             ? sourceApp
-                              ? 'Lines from the application appear here a few seconds after they are heard.'
-                              : 'Lines from your microphone appear here a few seconds after they are spoken.'
+                              ? 'Lines from the app appear a few seconds after they’re heard.'
+                              : 'Lines appear a few seconds after they’re spoken.'
                             : state.live
-                              ? 'No lines were transcribed in this session.'
+                              ? 'No lines transcribed.'
                               : simulated
-                                ? 'Lines of the replay appear here.'
+                                ? 'Replay lines appear here.'
                                 : 'Lines appear here during a live session.'}
                         </p>
                       </div>
@@ -2116,12 +1995,12 @@ function Notebook() {
                       </h3>
                       <p>
                         {state.cuesPaused
-                          ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
+                          ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
                           : live || simulated
-                            ? 'Cues pass quietly. You can keep listening without responding.'
+                            ? 'Cues pass quietly. Keep listening without needing to respond.'
                             : state.live
-                              ? 'Start another session to see cues again.'
-                              : 'During a live session, one cue at a time appears here. In this version cues come from simple phrase rules, not AI.'}
+                              ? 'Start a new session for cues.'
+                              : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
                       </p>
                     </div>
                   }
@@ -2130,11 +2009,11 @@ function Notebook() {
                   <p className="companion-footnote">
                     {state.live && capture.state?.processor
                       ? capture.state.approved
-                        ? 'Cues come from the model, using the lines approved for this session. Pause cues or turn the connection off above at any time.'
-                        : 'Cues are off until you turn on the model connection in Cue processing above.'
+                        ? 'Cues come from the model on approved lines. Pause or turn off processing anytime.'
+                        : 'Cues are off until you enable Cue processing above.'
                       : state.live
-                        ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
-                        : 'This replay is fictional. Its cues were decided before it was played.'}
+                        ? 'Phrase rules only—use a cue or let it pass.'
+                        : 'Fictional replay with pre-authored cues.'}
                   </p>
                 )}
                 <button
@@ -2162,23 +2041,19 @@ function Notebook() {
                   This meeting{' '}
                   <span>
                     {suggesting
-                      ? 'Waiting for Granola…'
+                      ? 'Asking Granola…'
                       : suggestions !== null
                         ? 'Suggestions ready'
                         : focus.trim()
-                          ? 'Review focus'
-                          : 'Add a focus · optional'}
+                          ? 'Edit focus'
+                          : 'Add focus · optional'}
                   </span>
                 </summary>
                 <div className="meeting-focus-heading">
                   <div>
                     <p id="meeting-focus-help" className="small muted">
-                      Up to five short lines on what you want to get to, such as
-                      “agree the launch plan for the newsletter”. A question
-                      about one of them comes through even in the pause after
-                      another; when the meeting is wrapping up, the lines never
-                      touched are listed once. Word matches, kept until you
-                      quit.
+                      Up to 5 short topics you want to cover, word-matched for
+                      this session until you quit.
                     </p>
                   </div>
                   {focus.trim().length > 0 && (
@@ -2260,10 +2135,8 @@ function Notebook() {
                         </p>
                       )}
                       <p className="small muted">
-                        Asks Granola’s assistant one question about your
-                        meetings of the last 30 days and shows its answer for
-                        you to tick. Granola sees the question; nothing else
-                        leaves{' '}
+                        Asks Granola’s assistant once about your last 30 days of
+                        notes. Nothing else leaves{' '}
                         {notMacos(platform) ? 'this computer' : 'this Mac'}.
                       </p>
                     </div>
@@ -2328,9 +2201,8 @@ function Notebook() {
                         </button>
                       </div>
                       <p className="small muted">
-                        A suggestion is Granola’s reading of your notes, not a
-                        fact; it becomes a focus line only when you add it, and
-                        each needs a few specific words.
+                        Suggestions come from Granola; only ticked lines are
+                        added.
                       </p>
                     </fieldset>
                   )}
@@ -2348,12 +2220,12 @@ function Notebook() {
               <ShieldCheck size={15} />
               <p>
                 {live || preparing || finishing
-                  ? 'This live session stays in memory while it runs; non-empty live sessions save locally to your Meetings list when they end unless you change that in Settings.'
+                  ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
                   : state.live
                     ? sessionHistory?.kept
-                      ? 'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.'
-                      : 'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.'
-                    : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
+                      ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
+                      : 'In memory until you quit or start another session, unless you save or export it.'
+                    : 'Notes stay in memory until you quit. Export before closing to keep them.'}
               </p>
             </footer>
           </div>
@@ -2370,9 +2242,9 @@ function Notebook() {
 
         {view === 'settings' && (
           <div className="secondary-page settings-page">
-            <h1>Make room for your conversation.</h1>
+            <h1>Settings</h1>
             <p className="page-description">
-              A few controls to keep questions on your terms.
+              Keys, providers, cues, and storage.
             </p>
             <ProviderKeys
               key={settingsEpoch}
@@ -2401,10 +2273,8 @@ function Notebook() {
               <div>
                 <h2>Your name</h2>
                 <p id="user-name-help">
-                  In a live session, when someone asks you something by name,
-                  such as “Sam, can you take the draft?”, the question is shown
-                  as Asked you and stays while you answer. Questions for other
-                  people stay quiet. TalkQTE remembers your name on{' '}
+                  Highlights questions asked of you by name as Asked you so they
+                  stay while you answer. Saved on{' '}
                   {notMacos(platform) ? 'this computer' : 'this Mac'}.
                 </p>
               </div>
@@ -2454,8 +2324,7 @@ function Notebook() {
               <div>
                 <h2>Glance view</h2>
                 <p>
-                  One complete cue with where it came from. A line shows how
-                  long it stays; Hold keeps it until you dismiss it.
+                  One cue with its source. Hold keeps a cue until dismissed.
                 </p>
                 <p
                   className={`appearance-example question-${state.questionSize}`}
@@ -2486,17 +2355,10 @@ function Notebook() {
               <div>
                 <h2>Companion position</h2>
                 <p>
-                  Place the question near your camera if that feels comfortable,
-                  or drag the companion by its top bar to wherever suits you; it
-                  stays there until you choose a position here. The desktop
-                  companion follows the notebook’s display; move the notebook to
-                  the display you want to use.
-                </p>
-                <p className="small">
-                  No camera access or video changes. TalkQTE remembers the
-                  position you choose here; a place you drag the companion to
-                  lasts until you quit.
-                  {!bridge.desktop && ' Position applies in the desktop app.'}
+                  Where the floating companion sits on the notebook’s display.
+                  Dragging moves it for this session; your selection here is
+                  saved. No camera access or video changes.
+                  {!bridge.desktop && ' Applies in the desktop app.'}
                 </p>
               </div>
               <div className="setting-control">
@@ -2540,12 +2402,9 @@ function Notebook() {
               <div>
                 <h2>Question timing</h2>
                 <p>
-                  Balanced leaves at least 10 seconds between questions. Quiet
-                  leaves 30 seconds after a question passes. Focused shows only
-                  questions about your focus lines (written in the notebook’s
-                  This meeting box), questions asked of you by name, and
-                  reminders of notes you chose; with no focus lines it shows
-                  just the last two.
+                  Balanced waits 10s between cues; Quiet waits 30s. Focused
+                  shows only cues matching your Focus lines, your name, or prior
+                  notes.
                 </p>
               </div>
               <label className="visually-hidden" htmlFor="sensitivity">
@@ -2572,12 +2431,10 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Keep a small companion in your chosen position during a live session or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone. For keyboard controls, use the question in your notebook.'
-                    : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
+                    ? 'Shows the compact companion window during a live session or mic check. Hiding it doesn’t stop the mic.'
+                    : 'Available in the desktop app. The browser preview shows cues inside the notebook.'}
                 </p>
-                <p className="small">
-                  The window may be visible when you share your screen.
-                </p>
+                <p className="small">May appear when sharing your screen.</p>
               </div>
               <input
                 type="checkbox"
@@ -2594,6 +2451,27 @@ function Notebook() {
                 }
               />
             </section>
+            <section className="setting">
+              <div>
+                <h2>Panel sizes</h2>
+                <p>Drag the dividers in the notebook to resize panels.</p>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={
+                  preferredListWidth === null &&
+                  notesRatio === defaultNotesRatio
+                }
+                onClick={() => {
+                  setPreferredListWidth(null);
+                  setNotesRatio(defaultNotesRatio);
+                  setNotice('Panel sizes reset.');
+                }}
+              >
+                Reset panel sizes
+              </button>
+            </section>
             <CallPromptSetting key={settingsEpoch} />
             <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             {!liveCaptureBar && (
@@ -2609,19 +2487,15 @@ function Notebook() {
                   Live transcription
                 </h2>
                 <p>
-                  Start live session in the notebook to get questions from what
-                  your microphone hears and, on a Mac, from one application you
-                  choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: pressing Start live session
-                  immediately sends the session’s audio to{' '}
+                  TalkQTE does not transcribe on this device. Pressing Start
+                  live session sends audio (from your mic or a chosen Mac app)
+                  to{' '}
                   {liveStatus?.transcription ??
                     'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
                   and recent lines to{' '}
                   {liveStatus?.cueProvider ?? 'your chosen cue provider'} with
-                  your keys until you press Stop or turn off processing. Audio
-                  is not recorded by TalkQTE. The transcript stays in memory
-                  until you start another session or close the app, unless you
-                  choose to keep the meeting and export it.
+                  your keys until you stop or turn off processing. Audio is
+                  never written to disk.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus
@@ -2650,15 +2524,11 @@ function Notebook() {
               <div>
                 <h2>Your data</h2>
                 <p>
-                  The optional microphone check retains no audio and does not
-                  transcribe. With cloud transcription or cue processing on,
-                  audio goes to the named transcription service and recent lines
-                  to the cue provider, for that session only. A live session’s
-                  transcript is kept in memory until you quit or start another
-                  session, unless you keep that meeting after it ends or export
-                  it. Notes exist in memory until you close the app. Exports
-                  contain exactly the text you review and are saved to the
-                  location you choose.
+                  Mic check keeps no audio and never transcribes. During a live
+                  session, audio and recent lines go only to your chosen
+                  providers until you stop. Transcripts and notes stay in memory
+                  unless saved to Meetings or exported. Exports contain only the
+                  text you review.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -2672,17 +2542,6 @@ function Notebook() {
                 liveAvailable: liveStatus?.available ?? null,
               })}
             />
-            <section className="coming-next">
-              <h2>What comes next</h2>
-              <p>
-                A guided first-run setup, both sides of a call rather than the
-                microphone alone, and a notebook that remembers your sessions.
-                Integrations with other note-takers are planned for later.
-              </p>
-              <p className="small muted">
-                These features are not available in this prototype.
-              </p>
-            </section>
           </div>
         )}
         <div className="visually-hidden" role="status">
@@ -2693,8 +2552,7 @@ function Notebook() {
         </div>
         <p className="visually-hidden" id="panel-resize-help">
           Drag to resize. Left and right arrows adjust width; Home and End use
-          the limits. Escape cancels a drag. Panel sizes in the toolbar offers
-          sliders and Reset.
+          the limits. Escape cancels a drag.
         </p>
       </main>
       <dialog

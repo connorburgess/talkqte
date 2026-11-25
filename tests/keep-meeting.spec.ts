@@ -42,7 +42,7 @@ test('notes only by default; keeping the meeting is a reviewed choice', async ({
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = exportDialog(page);
   const keep = dialog.getByRole('checkbox', {
-    name: 'Also keep this meeting: its transcript and the cues shown',
+    name: 'Include transcript and shown cues',
   });
   await expect(keep).not.toBeChecked();
   await expect(dialog.locator('pre')).not.toContainText(LINE);
@@ -51,7 +51,7 @@ test('notes only by default; keeping the meeting is a reviewed choice', async ({
   // The preview now shows exactly what will be saved.
   await expect(dialog.locator('pre')).toContainText(LINE);
   await expect(dialog).toContainText(
-    'nothing is written until you choose a destination',
+    'nothing saves until you choose a destination',
   );
   await keep.uncheck();
   await expect(dialog.locator('pre')).not.toContainText(LINE);

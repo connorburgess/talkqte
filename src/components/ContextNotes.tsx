@@ -299,11 +299,9 @@ export function ContextNotes({
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Notes you chose from a file, Granola, or kept meetings (your notes
-              and kept meeting notes only, never transcripts) · not from this
-              conversation · kept in memory · excluded from Markdown exports.
-              Sending selected prior notes to a cue provider requires a separate
-              processing review and approval.
+              Add files, past meetings (notes only, never transcripts), or
+              Granola notes for context. Held in memory, excluded from Markdown
+              exports, and never sent to a cue provider without approval.
             </span>
           </div>
           <div className="context-controls">
@@ -448,15 +446,15 @@ export function ContextNotes({
         )}
         {granola.connected && (
           <p className="muted small connection-terms" role="status">
-            Granola connected as you.{' '}
+            Granola connected.{' '}
             {granola.tools.includes('get_meetings')
-              ? 'TalkQTE may list and read the notes you choose from the last 30 days'
-              : 'This account offers no note access to TalkQTE'}
+              ? 'Reads only notes you select (last 30 days)'
+              : 'No note access on this account'}
             {granola.tools.includes('query_granola_meetings')
-              ? ', and may ask its assistant one question when you press Suggest from Granola'
+              ? ' and answers Suggest from Granola'
               : ''}
-            ; it reads no transcripts and writes nothing back. Disconnect
-            forgets the sign-in; imported notes stay until you remove them.
+            ; no transcripts or writeback. Disconnect forgets sign-in; imported
+            notes stay until removed.
           </p>
         )}
         {signingIn && (
@@ -523,11 +521,10 @@ export function ContextNotes({
           <p className="muted small">
             No prior notes selected.{' '}
             {granola.connected
-              ? 'Choose Granola notes from the last 30 days, or add a file.'
-              : 'Connect Granola to choose from your notes of the last 30 days, or add a file.'}{' '}
-            A file can be one Markdown (.md) or plain-text (.txt) note, such as
-            a summary exported from another note-taker, or a TalkQTE JSON file
-            with a list of notes, each with an id, a date, and text.
+              ? 'Choose Granola notes (last 30 days)'
+              : 'Connect Granola (last 30 days)'}
+            , pick past meetings, or add a Markdown (.md), text (.txt), or
+            TalkQTE JSON notes file.
           </p>
         )}
       </details>
@@ -559,8 +556,8 @@ export function ContextNotes({
           </button>
         </div>
         <p id="context-pick-description">
-          Only the notes you tick are kept, for this session. They are listed
-          under Prior context and never feed a question on their own.
+          Selected notes stay in memory for this session under Prior context and
+          never trigger cues on their own.
         </p>
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">

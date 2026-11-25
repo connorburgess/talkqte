@@ -91,16 +91,16 @@ test('arrow keys move both ways between notebook tabs, which stay a single tab s
   ).toBeFocused();
 });
 
-test('Add your name on the setup card moves keyboard focus to the Name field at 480px', async ({
+test('the Name field in Settings is reachable and fits at 480px', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  const card = page.getByRole('region', { name: 'Before your first meeting' });
-  const add = card.getByRole('button', { name: 'Add your name' });
-  await expectWithinViewport(page, add, 'Add your name');
-  await add.press('Enter');
+  await page
+    .getByRole('button', { name: 'Settings', exact: true })
+    .press('Enter');
   const name = page.getByRole('textbox', { name: 'Name' });
+  await name.scrollIntoViewIfNeeded();
+  await name.focus();
   await expect(name).toBeFocused();
   await expect(name).toBeInViewport();
   await expectWithinViewport(page, name, 'Name field');

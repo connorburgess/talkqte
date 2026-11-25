@@ -39,17 +39,17 @@ const modes: { mode: SourceMode; label: string; hint: string }[] = [
   {
     mode: 'microphone',
     label: 'Microphone',
-    hint: 'Everyone your Mac’s microphone hears, as in a room.',
+    hint: 'Everyone your Mac’s microphone hears.',
   },
   {
     mode: 'both',
     label: 'Microphone and one application',
-    hint: 'For a call: you through the microphone, the other side from the app you choose.',
+    hint: 'For calls: your microphone and audio from one chosen app.',
   },
   {
     mode: 'application',
     label: 'One application only',
-    hint: 'Only the app’s sound, such as a recording. The microphone is not used.',
+    hint: 'Audio from one app only; microphone stays off.',
   },
 ];
 
@@ -177,8 +177,7 @@ export function SessionSources({
               'Audio from all windows of this application may be included.'}{' '}
             The first time you list applications, macOS asks you to allow Screen
             &amp; System Audio Recording for TalkQTE. Nothing is captured or
-            sent until you press Start live session; starting sends the selected
-            source(s) to Deepgram and recent lines to Anthropic until Stop
+            sent until you press Start live session
             {value.mode === 'both'
               ? '; that one start covers the microphone and the application'
               : ''}
@@ -186,9 +185,8 @@ export function SessionSources({
           </p>
           {value.mode === 'both' && (
             <p className="session-sources-headphones">
-              Use headphones if you can. Through speakers the microphone also
-              hears the call; TalkQTE leaves out lines it can tell are repeats,
-              but not all of them.
+              Use headphones if you can—speaker playback can echo into the mic
+              and TalkQTE can’t catch every repeat.
             </p>
           )}
           {listing ? (
@@ -229,10 +227,8 @@ export function SessionSources({
                 ))}
               </fieldset>
               <p className="processing-muted">
-                Only open applications with a window are listed. If yours is
-                missing, open it or one of its windows, then list again. A
-                browser can be listed and still give no sound: browser calls are
-                not yet known to work.
+                Only open apps with a window are listed. Browser calls may not
+                produce audio yet.
               </p>
               <div className="processing-actions">
                 <button

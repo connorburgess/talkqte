@@ -3078,6 +3078,7 @@
                   TalkQTE
                 </div>
                 <div class="nb-nav-item active">Notebook</div>
+                <div class="nb-nav-item">Meetings</div>
                 <div class="nb-sidebar-bottom">
                   <div class="nb-nav-item">Settings</div>
                   <div class="nb-version">
@@ -3088,7 +3089,6 @@
               <div class="nb-main">
                 <div class="nb-toolbar">
                   <span>Notebook &nbsp;›&nbsp; Live session</span>
-                  <div class="nb-toolbar-right"><span>▸ Panel sizes</span></div>
                 </div>
                 <div class="nb-content">
                   <div class="nb-live-bar">
@@ -3109,7 +3109,7 @@
                         <h3>Live session in progress</h3>
                       </div>
                       <p class="nb-session-sub">
-                        Your microphone · not saved by TalkQTE
+                        Your microphone · audio not recorded
                       </p>
                     </div>
                     <div class="nb-session-actions">
@@ -5729,13 +5729,11 @@
           </div>
 
           <div class="panel-grid">
-            <!-- 1. Sidebar & Toolbar with Panel sizes open -->
+            <!-- 1. Sidebar & Toolbar -->
             <article class="panel-card">
               <div class="panel-card-tag mono-label">
                 <span>01 · Sidebar &amp; Toolbar</span
-                ><span
-                  >248px default · Lucide nav icons · Panel sizes open</span
-                >
+                ><span>248px default · Lucide nav icons · Drag dividers</span>
               </div>
               <div
                 style="
@@ -5812,13 +5810,26 @@
                     Notebook
                   </div>
                   <div
-                    style="
-                      padding: 12px 4px 4px;
-                      font-size: 13px;
-                      font-weight: 600;
-                    "
+                    class="nb-nav-item"
+                    style="margin-top: 4px; padding: 8px 10px"
                   >
-                    ▸ Set up a live session
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    Meetings
                   </div>
                   <div
                     class="nb-nav-item"
@@ -5855,23 +5866,16 @@
                     style="padding: 0 0 10px; height: auto; margin-bottom: 12px"
                   >
                     <span>Notebook</span>
-                    <span class="mono-label" style="color: var(--g-ink)"
-                      >▾ Panel sizes</span
-                    >
                   </div>
                   <div class="panel-popover">
-                    <strong style="display: block; font-size: 13px"
-                      >Sidebar width</strong
+                    <strong
+                      style="
+                        display: block;
+                        font-size: 13px;
+                        margin-bottom: 6px;
+                      "
+                      >Panel sizes (Settings)</strong
                     >
-                    <div class="panel-slider-track">
-                      <span class="panel-slider-fill" style="width: 36%"></span>
-                    </div>
-                    <strong style="display: block; font-size: 13px"
-                      >Notes and transcript width</strong
-                    >
-                    <div class="panel-slider-track">
-                      <span class="panel-slider-fill" style="width: 55%"></span>
-                    </div>
                     <span
                       class="nb-btn"
                       style="font-size: 12px; padding: 6px 12px"
@@ -5881,8 +5885,8 @@
                       class="panel-muted"
                       style="margin-top: 10px; font-size: 12px"
                     >
-                      Sizes last until you close the app. Narrow windows stack
-                      the panels.
+                      Resize columns by dragging dividers or using arrow keys.
+                      Narrow windows stack the panels.
                     </p>
                   </div>
                 </div>
@@ -6850,7 +6854,10 @@ Cue processing stopped: -</pre>
                   <div class="sk-input-row">
                     <span
                       class="sk-password"
-                      style="background: var(--g-band); border-color: var(--g-line)"
+                      style="
+                        background: var(--g-band);
+                        border-color: var(--g-line);
+                      "
                       >••••••••••••••••••••••••</span
                     >
                     <span class="sk-btn">Replace key</span>
@@ -7064,7 +7071,9 @@ Cue processing stopped: -</pre>
                 <div class="sk-row">
                   <div class="sk-row-head">
                     <strong style="font-size: 14px">OpenAI</strong>
-                    <span class="sk-chip is-set">✓ Saved · not checked yet</span>
+                    <span class="sk-chip is-set"
+                      >✓ Saved · not checked yet</span
+                    >
                   </div>
                   <p
                     class="panel-muted"
@@ -9401,9 +9410,8 @@ Date: 2026-11-23 · Length: 06:42
                 <code>KeepInHistory.tsx</code> (after a non-empty live session
                 ends: kept confirmation or Update kept meeting under default
                 <code>auto</code>, or keep offer under <code>ask</code>; a
-                failed keep),
-                <code>EndPrompt.tsx</code> (floating dock card on non-empty live
-                session stop: <code>Meeting saved</code> /
+                failed keep), <code>EndPrompt.tsx</code> (floating dock card on
+                non-empty live session stop: <code>Meeting saved</code> /
                 <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
                 list, search, empty/unreadable/lab-run/newer states, read-only

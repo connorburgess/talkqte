@@ -9,48 +9,27 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test('focus is optional and the setup card can finish without it', async ({
+test('focus is optional and your name can be set in Settings without losing notes or focus', async ({
   page,
 }) => {
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  const card = page.getByRole('region', { name: 'Before your first meeting' });
-  await expect(card).toContainText('What matters today · optional');
-  await card.getByRole('button', { name: 'Write the focus' }).click();
-  await expect(page.getByRole('textbox', { name: 'Focus' })).toBeFocused();
+  await page.locator('.focus-disclosure > summary').press('Enter');
   await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
-  await card.getByRole('button', { name: 'Add your name' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Name' });
   await name.fill('Robin');
   await page.getByRole('combobox', { name: 'Question timing' }).focus();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await expect(card).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
 });
 
-test('the setup card sends Choose notes to the prior-context panel without changing view', async ({
+test('Prior context opens from the notebook without moving away from tabs', async ({
   page,
 }) => {
-  await page.locator('.context-disclosure > summary').press('Enter');
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  const card = page.getByRole('region', { name: 'Before your first meeting' });
-  await card.getByRole('button', { name: 'Choose notes' }).click();
   await expect(
     page.getByRole('button', { name: 'Add notes from a file' }),
-  ).toBeFocused();
-  await expect(card).toBeVisible();
-  // An ordinary tab change afterwards does not move focus anywhere.
+  ).toBeVisible();
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tab', { name: /Transcript/ })).toBeFocused();
-});
-
-test('the setup card can be put away for the session', async ({ page }) => {
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  const card = page.getByRole('region', { name: 'Before your first meeting' });
-  await card.getByRole('button', { name: 'Not now' }).click();
-  await expect(card).toHaveCount(0);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await expect(card).toHaveCount(0);
 });
 
 test('export saves exactly the reviewed notes and nothing about a demo', async ({
@@ -84,7 +63,7 @@ test('export saves exactly the reviewed notes and nothing about a demo', async (
   await expect(dialog).not.toBeVisible();
 });
 
-test('the sidebar links to Meetings without an inline list or search, and settings explain the prototype', async ({
+test('the sidebar links to Meetings without an inline list or search, and Settings shows timing and desktop options', async ({
   page,
 }) => {
   const sidebar = page.getByRole('complementary', {
@@ -96,6 +75,9 @@ test('the sidebar links to Meetings without an inline list or search, and settin
     sidebar.getByRole('button', { name: 'Meetings', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Settings', level: 1 }),
+  ).toBeVisible();
   await page
     .getByRole('combobox', { name: 'Question timing' })
     .selectOption('quiet');
@@ -105,9 +87,6 @@ test('the sidebar links to Meetings without an inline list or search, and settin
   await expect(
     page.getByRole('switch', { name: 'Floating question window' }),
   ).toBeDisabled();
-  await expect(
-    page.getByText('These features are not available in this prototype.'),
-  ).toBeVisible();
 });
 
 test('focus lines are written in the notebook, kept for the session, cleared in one step, and a line without identifying words is refused', async ({
@@ -189,9 +168,7 @@ test('the browser preview offers no Granola connection and says where it lives',
 }) => {
   const panel = page.getByRole('region', { name: 'Prior context' });
   await expect(panel.getByRole('button', { name: /Granola/ })).toHaveCount(0);
-  await expect(panel).toContainText(
-    'Connect Granola to choose from your notes',
-  );
+  await expect(panel).toContainText('Connect Granola (last 30 days)');
   await expect(
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeVisible();
@@ -218,7 +195,7 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
   page,
 }) => {
   const panel = page.getByRole('region', { name: 'Prior context' });
-  await expect(panel).toContainText('not from this conversation');
+  await expect(panel).toContainText('excluded from Markdown exports');
   await panel.getByRole('button', { name: 'Add notes from a file' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
   await expect(dialog).toContainText('garden-notes.json');

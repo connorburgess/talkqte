@@ -48,22 +48,19 @@ export function MeetingHistorySettings({
   return (
     <section className="setting" aria-labelledby={`${id}-title`}>
       <div className="history-settings">
-        <h2 id={`${id}-title`}>Kept meetings</h2>
+        <h2 id={`${id}-title`}>Meetings</h2>
         {status.availability === 'labRun' && (
-          <p className="history-help">
-            This is a lab run: kept meetings are not read or written.
-          </p>
+          <p className="history-help">Lab runs don’t read or save meetings.</p>
         )}
         {status.availability === 'unavailable' && (
           <p className="history-help">
-            Kept meetings are not available in this launch.
+            Meetings are not available in this launch.
           </p>
         )}
         {status.availability === 'newer' && (
           <p className="history-help">
-            Your kept meetings were saved by a newer version of TalkQTE. This
-            version leaves them exactly as they are. Delete all meetings still
-            removes them.
+            Your meetings were saved by a newer version of TalkQTE and are left
+            as they are. Delete all meetings still removes them.
           </p>
         )}
         {!off && (
@@ -91,27 +88,22 @@ export function MeetingHistorySettings({
                     .finally(() => setBusy(false));
                 }}
               >
-                <option value="auto">Auto-save to Meetings (default)</option>
+                <option value="auto">Save automatically (default)</option>
                 <option value="ask">Ask each time</option>
-                <option value="off">Don’t keep automatically or ask</option>
+                <option value="off">Don’t save</option>
               </select>
             </div>
             <p className="history-help" id={`${id}-offer`}>
-              By default, non-empty live sessions save automatically to your
-              Meetings list when they stop (without storing any application
-              name). Choose Ask each time to confirm in the dock or notebook
-              first, or Don’t keep to leave ended sessions in memory until you
-              quit or start another.
+              Non-empty live sessions save to Meetings on stop (without the app
+              name). Ask each time confirms first; Don’t save leaves ended
+              sessions in memory until you quit or start another.
             </p>
             <p className="history-help">
-              A kept meeting holds its title, date, length, the sources used,
-              the transcript, your notes, the cues shown and any meeting notes
-              you kept. Never audio or keys. Kept meetings are stored
-              unencrypted on this Mac under your account, in{' '}
-              <code>{where}</code>, readable only by you; FileVault, if it is
-              on, encrypts the disk. A deleted meeting is removed from that
-              folder, but a backup made earlier, such as Time Machine, may still
-              hold a copy.
+              Saves title, date, length, sources, transcript, notes, cues, and
+              kept meeting notes—never audio or keys. Stored unencrypted in{' '}
+              <code>{where}</code>, readable only by your account (FileVault
+              encrypts the disk); earlier backups like Time Machine may keep
+              copies after deletion.
             </p>
             {!confirming && (
               <div className="history-actions">
@@ -127,10 +119,10 @@ export function MeetingHistorySettings({
                 </button>
                 <span className="history-help">
                   {count === 0
-                    ? 'No meetings are kept.'
+                    ? 'No saved meetings.'
                     : count === 1
-                      ? '1 meeting is kept.'
-                      : `${count} meetings are kept.`}
+                      ? '1 saved meeting.'
+                      : `${count} saved meetings.`}
                 </span>
               </div>
             )}
@@ -154,7 +146,7 @@ export function MeetingHistorySettings({
             aria-labelledby={`${id}-confirm`}
           >
             <p id={`${id}-confirm`}>
-              Delete every kept meeting from this Mac? This cannot be undone.
+              Delete all saved meetings from this Mac? This cannot be undone.
               Export any you want to keep first.
             </p>
             <div className="history-actions">
@@ -167,7 +159,7 @@ export function MeetingHistorySettings({
                   deleteAllKeptMeetings()
                     .then(() => {
                       setConfirming(false);
-                      setNotice('Every kept meeting was deleted.');
+                      setNotice('All saved meetings deleted.');
                       onDeleted?.();
                       return refresh();
                     })

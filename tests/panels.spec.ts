@@ -157,7 +157,7 @@ test('a cancelled pointer restores the width and releases the drag', async ({
   await expect(divider).toHaveAttribute('aria-valuenow', before!);
 });
 
-test('clickable sliders and reset work and widths survive Settings navigation only for the session', async ({
+test('panel widths survive Settings navigation, Reset panel sizes in Settings restores defaults, and widths forget on reload', async ({
   page,
 }) => {
   const divider = page.getByRole('separator', {
@@ -173,21 +173,14 @@ test('clickable sliders and reset work and widths survive Settings navigation on
     .getByRole('button', { name: 'Notebook', exact: true })
     .press('Enter');
   await expect(divider).toHaveAttribute('aria-valuenow', '400');
-  await page.locator('.layout-controls summary').press('Enter');
-  const slider = page.getByRole('slider', {
-    name: 'Sidebar width',
-    exact: true,
-  });
-  const box = (await slider.boundingBox())!;
-  await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
-  await expect
-    .poll(async () => Number(await divider.getAttribute('aria-valuenow')))
-    .toBeLessThan(300);
+  await page
+    .getByRole('button', { name: 'Settings', exact: true })
+    .press('Enter');
   await page.getByRole('button', { name: 'Reset panel sizes' }).press('Enter');
+  await page
+    .getByRole('button', { name: 'Notebook', exact: true })
+    .press('Enter');
   await expect(divider).toHaveAttribute('aria-valuenow', '248');
-  await slider.press('Escape');
-  await expect(page.locator('.layout-controls summary')).toBeFocused();
-  await expect(slider).not.toBeVisible();
   await divider.press('End');
   await page.reload();
   await expect(divider).toHaveAttribute('aria-valuenow', '248');

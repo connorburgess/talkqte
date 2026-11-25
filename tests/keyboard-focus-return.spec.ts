@@ -52,7 +52,7 @@ test('Cue appearance and timing opens Settings with focus on the first appearanc
     .getByRole('button', { name: 'Cue appearance and timing' })
     .press('Enter');
   await expect(
-    page.getByRole('heading', { name: 'Make room for your conversation.' }),
+    page.getByRole('heading', { name: 'Settings', level: 1 }),
   ).toBeVisible();
   const size = page.locator('#question-size');
   await expect(size).toBeFocused();

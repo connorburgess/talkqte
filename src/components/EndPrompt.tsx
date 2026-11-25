@@ -47,8 +47,8 @@ export function EndPrompt({
       </p>
       <p className="call-prompt-detail">
         {prompt.state === 'ask'
-          ? `${detail} · Keep in your Meetings list?`
-          : `${detail} · Saved to your Meetings list.`}
+          ? `${detail} · Save to Meetings?`
+          : `${detail} · Saved to Meetings.`}
       </p>
       {prompt.error && (
         <p role="alert" className="end-prompt-error">

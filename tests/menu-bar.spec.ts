@@ -35,7 +35,7 @@ test('both are off by default, and Settings says what off and on mean', async ({
   await expect(keep).not.toBeChecked();
   await expect(login).not.toBeChecked();
   await expect(section).toContainText(
-    'Off by default: closing the notebook quits TalkQTE, as it always has.',
+    'Off by default: closing the notebook quits TalkQTE.',
   );
   await expect(section).toContainText(
     'nothing starts from the menu bar by itself',
