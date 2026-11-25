@@ -7135,6 +7135,94 @@ Cue processing stopped: -</pre>
                   >Diagnostics.tsx</span
                 >
               </div>
+              <div class="panel-setting-row">
+                <div style="max-width: 56ch">
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      flex-wrap: wrap;
+                    "
+                  >
+                    <strong class="panel-h3">Updates</strong>
+                    <span class="sk-chip">v0.1.0</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 4px">
+                    Checks signed GitHub Releases for newer versions. Updates
+                    never check, prompt, or restart during a live session,
+                    microphone check, or voice dictation.
+                  </p>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                    "
+                  >
+                    <span class="panel-box is-checked">✓</span>
+                    <span style="font-size: 13px"
+                      >Check for updates on launch</span
+                    >
+                  </div>
+                  <p class="panel-muted" style="margin-top: 8px">
+                    State 1 (idle / up to date):
+                    <strong>Check for updates</strong>
+                    (secondary) + "TalkQTE is up to date." State 2
+                    (unconfigured): "Updates are not configured in this build".
+                  </p>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 12px;
+                      background: var(--g-band, #f3f5f7);
+                      border: 1px solid var(--g-border, #737f90);
+                      border-radius: 2px;
+                    "
+                  >
+                    <strong class="panel-h3">Update available: v0.2.0</strong>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 4px; font-size: 13px"
+                    >
+                      State 3 (offer): brief release notes, note that restarting
+                      quits TalkQTE, download progress bar, and
+                      <strong>Download and restart</strong> (primary).
+                    </p>
+                  </div>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 10px 12px;
+                      background: var(--g-band, #f3f5f7);
+                      border: 1px solid var(--g-border, #737f90);
+                      border-radius: 2px;
+                      font-size: 13px;
+                    "
+                  >
+                    State 4 (active session, mic check, or dictation): Update
+                    paused until this session ends
+                  </div>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 10px 12px;
+                      background: var(--g-error-surface, #fdf3f0);
+                      border: 1px solid var(--g-error-ink, #9c3418);
+                      border-radius: 2px;
+                      color: var(--g-error-ink, #9c3418);
+                      font-size: 13px;
+                    "
+                  >
+                    State 5 (error recovery): plain error message; retry stays
+                    enabled.
+                  </div>
+                </div>
+                <span class="mono-label" style="color: var(--g-muted)"
+                  >UpdateSettings.tsx</span
+                >
+              </div>
             </article>
 
             <!-- 11. Settings · Your API keys (merged ProviderKeys.tsx + Transcription language) -->

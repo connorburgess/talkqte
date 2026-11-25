@@ -69,6 +69,9 @@ export const TAURI_SIGNING_VARIABLES = [
   'APPLE_API_ISSUER',
   'APPLE_API_KEY_PATH',
   'APPLE_PROVIDER_SHORT_NAME',
+  'TAURI_SIGNING_PRIVATE_KEY',
+  'TAURI_SIGNING_PRIVATE_KEY_PATH',
+  'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
 ];
 
 export function parseArguments(argv) {
@@ -440,6 +443,42 @@ export function release(options, tools) {
   run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip], {
     what: 'making the zip',
   });
+  const extraFiles = [];
+  const hasUpdaterKey = Boolean(
+    env.TAURI_SIGNING_PRIVATE_KEY?.trim() ||
+    env.TAURI_SIGNING_PRIVATE_KEY_PATH?.trim(),
+  );
+  if (hasUpdaterKey) {
+    step('Package and sign the updater archive');
+    const tarGz = join(out, `${stem}.app.tar.gz`);
+    run('tar', ['-czf', tarGz, '-C', work, `${productName}.app`], {
+      env: { ...env, COPYFILE_DISABLE: '1' },
+      what: 'making the updater archive',
+    });
+    run('npx', ['tauri', 'signer', 'sign', tarGz], {
+      env,
+      shown: ['npx', 'tauri', 'signer', 'sign', tarGz],
+      what: 'signing the updater archive',
+    });
+    const sigPath = `${tarGz}.sig`;
+    const signature = tools.fs.read(sigPath).trim();
+    const assetUrl = `https://github.com/connorburgess/talkqte/releases/download/v${version}/${basename(tarGz)}`;
+    const platformKeys =
+      arch === 'universal'
+        ? ['darwin-aarch64', 'darwin-x86_64']
+        : [arch === 'x86_64' ? 'darwin-x86_64' : 'darwin-aarch64'];
+    const latestJson = join(out, 'latest.json');
+    const latest = {
+      version,
+      notes: `${productName} ${version}`,
+      pub_date: new Date().toISOString(),
+      platforms: Object.fromEntries(
+        platformKeys.map((key) => [key, { signature, url: assetUrl }]),
+      ),
+    };
+    tools.fs.write(latestJson, `${JSON.stringify(latest, null, 2)}\n`);
+    extraFiles.push(tarGz, sigPath, latestJson);
+  }
   const staging = join(work, 'dmg');
   tools.fs.reset(staging);
   run('ditto', [app, join(staging, `${productName}.app`)], {
@@ -542,7 +581,7 @@ export function release(options, tools) {
 
   // 7. Checksums and the manifest.
   step('Checksums');
-  const files = [dmg, zip].map((path) => ({
+  const files = [dmg, zip, ...extraFiles].map((path) => ({
     name: basename(path),
     bytes: tools.fs.size(path),
     sha256: tools.fs.sha256(path),
@@ -597,6 +636,7 @@ function realTools() {
         if (!remove) mkdirSync(dir, { recursive: true });
       },
       write: (path, text) => writeFileSync(path, text),
+      read: (path) => readFileSync(path, 'utf8'),
       sha256,
       size: (path) => statSync(path).size,
     },
@@ -618,6 +658,7 @@ export function dryRunTools(log = (text) => console.log(text)) {
     fs: {
       reset: () => {},
       write: (path) => log(`  would write ${path}`),
+      read: () => '(dry run signature)',
       sha256: () => '(dry run)',
       size: () => 0,
     },

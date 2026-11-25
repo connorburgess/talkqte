@@ -117,6 +117,11 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-set-keep-running-in-menu-bar",
         "allow-set-open-at-login",
         "allow-open-login-items",
+        // In-app updates are managed by the notebook alone, never the companion.
+        "allow-update-status",
+        "allow-set-check-for-updates-at-launch",
+        "allow-check-for-updates",
+        "allow-download-and-install-update",
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",

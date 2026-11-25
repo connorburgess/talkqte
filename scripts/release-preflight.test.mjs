@@ -311,13 +311,30 @@ test('a committed signing identity or disabled hardened runtime fails', (t) => {
   assert.match(problems[1], /^hardened runtime: .*notarization requires it/);
 });
 
-test('an updater without https endpoints and a key fails; none is a note', (t) => {
+test('an updater without https endpoints and a key fails; none or empty key is a note', (t) => {
   const { root } = fixture(t, {
     config: (config) => {
       config.plugins = { updater: { endpoints: ['http://updates.example/x'] } };
     },
   });
   assert.match(failures(preflight({ root }))[0], /^updater: needs/);
+
+  const unkeyed = fixture(t, {
+    config: (config) => {
+      config.plugins = {
+        updater: {
+          endpoints: ['https://updates.example/latest.json'],
+          pubkey: '',
+        },
+      };
+    },
+  });
+  assert.deepEqual(failures(preflight({ root: unkeyed.root })), []);
+  const unkeyedFinding = preflight({ root: unkeyed.root }).findings.find(
+    (finding) => finding.check === 'updater',
+  );
+  assert.equal(unkeyedFinding.level, 'note');
+
   const plain = fixture(t);
   const updater = preflight({ root: plain.root }).findings.find(
     (finding) => finding.check === 'updater',

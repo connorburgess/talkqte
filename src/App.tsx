@@ -74,6 +74,7 @@ import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
+import { UpdateSettings } from './components/UpdateSettings';
 import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
 import {
   type EchoLine,
@@ -2813,6 +2814,7 @@ function Notebook() {
               key={`history-${settingsEpoch}`}
               onDeleted={() => setHistoryRevision((r) => r + 1)}
             />
+            <UpdateSettings key={`updates-${settingsEpoch}`} />
             <SavedSettings
               onReset={() => {
                 setPreferredListWidth(null);
