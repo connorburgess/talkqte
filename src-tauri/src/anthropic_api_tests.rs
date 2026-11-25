@@ -472,6 +472,52 @@ fn the_review_names_the_provider_key_billing_caps_and_both_destinations() {
     assert!(text.contains("Claude (your Anthropic API key)"));
     assert!(text.contains("Deepgram (US), for transcription"));
     assert!(!text.contains(KEY));
+
+    // ElevenLabs review wording also fits within the policy bound and names
+    // ElevenLabs honestly in both policy and audio destination.
+    let el_multi = crate::transcription::cloud::review_sentence_for_own_key_provider(
+        crate::transcription::cloud::Provider::ElevenLabs,
+        Language::Multilingual,
+        &crate::engine::SessionSources::both(("W".repeat(200).as_str(), "fictional-long")),
+    );
+    let el_longest = format!("{} {el_multi}", data_policy_for(haiku(), "ElevenLabs"));
+    assert!(
+        el_longest.len() <= 2_048,
+        "the ElevenLabs review's bound: {}",
+        el_longest.len()
+    );
+    let elevenlabs = crate::transcription::cloud::review_sentence_for_own_key_provider(
+        crate::transcription::cloud::Provider::ElevenLabs,
+        Language::English,
+        &crate::engine::SessionSources::microphone(),
+    );
+    let el_engine = registered_with(
+        AnthropicApi::new(
+            haiku(),
+            Scripted::default(),
+            Box::new(|| Err(KeyError::NotSet(Provider::Anthropic))),
+            Box::new(|| {}),
+            Arc::default(),
+        ),
+        haiku(),
+        Some(elevenlabs),
+        Some(
+            crate::transcription::cloud::Provider::ElevenLabs
+                .destination()
+                .into(),
+        ),
+        "ElevenLabs",
+    );
+    let el_snapshot =
+        serde_json::to_value(el_engine.processing_snapshot(crate::engine::CaptureState::Off, 0))
+            .unwrap();
+    let el_text = el_snapshot["processor"].to_string();
+    assert!(el_text.contains("ElevenLabs (model Scribe v2 Realtime, English)"));
+    assert!(el_text.contains("with your own ElevenLabs API key"));
+    assert!(el_text.contains(
+        "Pause cues stops these requests but not the audio to ElevenLabs; Off and Stop end both"
+    ));
+    assert!(el_text.contains("ElevenLabs, for transcription of the session's audio"));
 }
 
 // ---- in the engine ----

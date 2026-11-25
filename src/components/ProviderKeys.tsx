@@ -1,9 +1,11 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Check, TriangleAlert } from 'lucide-react';
 import {
   CURATED_CUE_MODELS,
   cueProviderName,
   cueUsage,
   defaultCueModel,
+  keyStoreLabel,
   keyStoreName,
   keysStatus,
   providerPreferences,
@@ -12,8 +14,10 @@ import {
   setCueProvider,
   setKey,
   setTranscriptionLanguage,
+  setTranscriptionProvider,
   testKey,
   transcriptionLanguage,
+  transcriptionProvider,
   watchKeys,
   watchPreviewPreferences,
   type CueProvider,
@@ -24,6 +28,7 @@ import {
   type KeysStatus,
   type ProviderPreferences,
   type TranscriptionLanguage,
+  type TranscriptionProvider,
 } from '../lib/providerKeys';
 import { MeetingNotesModel } from './MeetingNotesModel';
 import './provider-keys.css';
@@ -39,6 +44,12 @@ const providers: {
     name: 'Deepgram',
     role: "Transcribes a live session's audio. Billed by Deepgram per minute, at most 120 minutes per session.",
     whereToGet: 'Deepgram Console (console.deepgram.com) → API Keys',
+  },
+  {
+    id: 'elevenlabs',
+    name: 'ElevenLabs',
+    role: "Alternative to Deepgram: transcribes a live session's audio using Scribe v2 Realtime. Billed by ElevenLabs per your account, at most 120 minutes per session.",
+    whereToGet: 'ElevenLabs (elevenlabs.io) → Developers → API Keys',
   },
   {
     id: 'anthropic',
@@ -73,6 +84,7 @@ export function isKeysStatus(value: unknown): value is KeysStatus {
     !!candidate &&
     typeof candidate === 'object' &&
     key(candidate.deepgram) &&
+    (candidate.elevenlabs === undefined || key(candidate.elevenlabs)) &&
     key(candidate.anthropic) &&
     (!candidate.openai || key(candidate.openai)) &&
     (!candidate.gemini || key(candidate.gemini))
@@ -91,20 +103,28 @@ function unreadableText(store: KeyStore | undefined) {
   }
 }
 
+const SAVED_KEY_MASK = '••••••••••••••••••••••••';
+const SAVED_KEY_PLACEHOLDER = 'Paste a new key to replace the saved one';
+const REJECTED_KEY_PLACEHOLDER = 'Paste a new key to replace the rejected one';
+const UNREADABLE_KEY_PLACEHOLDER = 'Paste a key to save it again';
+
 function stateText(
   name: string,
   status: KeyStatus | undefined,
   store: KeyStore | undefined,
+  unavailable = false,
 ) {
+  if (unavailable) return 'Unavailable';
   if (!status) return 'Checking…';
   if (status.state === 'notSet') return 'Not set';
   if (status.state === 'unreadable') return unreadableText(store);
   if (status.state === 'rejected')
     return `Rejected by ${name}. Replace it with a new key.`;
-  return status.verified ? 'Set and checked' : 'Set, not checked yet';
+  return status.verified ? 'Saved · checked' : 'Saved · not checked yet';
 }
 
-function stateClass(status: KeyStatus | undefined) {
+function stateClass(status: KeyStatus | undefined, unavailable = false) {
+  if (unavailable) return 'is-unreadable';
   if (!status) return 'is-checking';
   if (status.state === 'notSet') return 'is-not-set';
   if (status.state === 'set') return 'is-set';
@@ -133,36 +153,46 @@ function NoKeyStore({ store }: { store: KeyStore | undefined }) {
       Keys cannot be saved on this system yet. TalkQTE keeps them only in{' '}
       {keyStoreName(store.kind)}, and none answered for this login. On Ubuntu,
       sign in to a desktop session with GNOME Keyring (Passwords and Keys)
-      unlocked, then reopen Settings. Live sessions need both keys.
+      unlocked, then reopen Settings. Live sessions need a transcription key and
+      an Anthropic key.
     </p>
   );
 }
 
 const dollars = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 
-function useProviderKeysData(includeUsage: boolean) {
+function useProviderKeysData(
+  includeUsage: boolean,
+  onKeysChanged?: () => void,
+) {
   const [status, setStatus] = useState<KeysStatus>();
   const [unavailable, setUnavailable] = useState(false);
   const [usage, setUsage] = useState<CueUsage | null>(null);
+  const onKeysChangedRef = useRef(onKeysChanged);
+  onKeysChangedRef.current = onKeysChanged;
 
   useEffect(() => {
     let live = true;
     let stop: (() => void) | undefined;
-    const receive = (next: unknown) => {
+    const receive = (next: unknown, fromWatch: boolean) => {
       if (!live) return;
       if (isKeysStatus(next)) {
         setStatus(next);
         setUnavailable(false);
+        if (fromWatch) onKeysChangedRef.current?.();
       } else setUnavailable(true);
     };
-    keysStatus().then(receive, () => live && setUnavailable(true));
+    keysStatus().then(
+      (next) => receive(next, false),
+      () => live && setUnavailable(true),
+    );
     if (includeUsage) {
       cueUsage().then(
         (next) => live && setUsage(next ?? null),
         () => {},
       );
     }
-    watchKeys(receive).then(
+    watchKeys((next) => receive(next, true)).then(
       (unlisten) => (live ? (stop = unlisten) : unlisten()),
       () => {},
     );
@@ -175,16 +205,20 @@ function useProviderKeysData(includeUsage: boolean) {
   return { status, setStatus, unavailable, setUnavailable, usage };
 }
 
-/** The person's own provider keys, active cue/notes provider & model choices,
- * and this session's use of them. Keys go to the secret store through Rust
- * and are never shown again; only their state comes back. */
+/** The person's own provider keys, active transcription & cue/notes provider &
+ * model choices, and this session's use of them. Keys go to the secret store
+ * through Rust and are never shown again; only their state comes back. */
 export function ProviderKeys({
   onPreferencesChange,
+  onKeysChanged,
 }: {
   onPreferencesChange?: () => void;
+  onKeysChanged?: () => void;
 }) {
   const { status, setStatus, unavailable, setUnavailable, usage } =
-    useProviderKeysData(true);
+    useProviderKeysData(true, onKeysChanged);
+  const [selectedSttProvider, setSelectedSttProvider] =
+    useState<TranscriptionProvider>('deepgram');
   const [prefs, setPrefs] = useState<ProviderPreferences | null>(null);
 
   useEffect(() => {
@@ -231,11 +265,11 @@ export function ProviderKeys({
       <div className="provider-keys-intro">
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
-          TalkQTE runs on your own accounts. Live sessions need a Deepgram key
-          and a key for your chosen cue provider. Each is kept in{' '}
-          {keyStoreName(status?.store?.kind)} and is never shown again. Nothing
-          is sent to any provider until you approve a session's processing
-          review.
+          TalkQTE runs on your own accounts. Live sessions need a transcription
+          key (Deepgram or ElevenLabs) and a key for your chosen cue provider.
+          Each is kept in {keyStoreName(status?.store?.kind)} and is never shown
+          again. Nothing is sent to any provider until you approve a session's
+          processing review.
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (
@@ -251,17 +285,26 @@ export function ProviderKeys({
             provider={provider}
             status={status?.[provider.id]}
             store={status?.store}
+            unavailable={unavailable}
             onStatus={(next) => {
               setStatus(next);
               setUnavailable(false);
+              onKeysChanged?.();
+              onPreferencesChange?.();
             }}
           />
         ))}
         <p className="provider-keys-usage" role="status">
           {usageLine()}
         </p>
+        <ProviderChoice
+          onChanged={(next) => {
+            setSelectedSttProvider(next);
+            onPreferencesChange?.();
+          }}
+        />
         <CueProviderAndModelChoice prefs={prefs} onChange={applyPrefs} />
-        <LanguageChoice />
+        <LanguageChoice provider={selectedSttProvider} />
         <MeetingNotesModel
           provider={activeProvider}
           prefs={prefs}
@@ -464,11 +507,13 @@ function CueProviderAndModelChoice({
  * and controls to Settings -> Your API keys. */
 export function ProviderKeysRows({
   showWhereToGet = false,
+  onKeysChanged,
 }: {
   showWhereToGet?: boolean;
+  onKeysChanged?: () => void;
 }) {
   const { status, setStatus, unavailable, setUnavailable } =
-    useProviderKeysData(false);
+    useProviderKeysData(false, onKeysChanged);
 
   return (
     <div className="provider-keys-list provider-keys-embedded">
@@ -484,11 +529,13 @@ export function ProviderKeysRows({
           provider={provider}
           status={status?.[provider.id]}
           store={status?.store}
+          unavailable={unavailable}
           showWhereToGet={showWhereToGet}
           embedded
           onStatus={(next) => {
             setStatus(next);
             setUnavailable(false);
+            onKeysChanged?.();
           }}
         />
       ))}
@@ -500,6 +547,7 @@ function KeyRow({
   provider,
   status,
   store,
+  unavailable = false,
   showWhereToGet = false,
   embedded = false,
   onStatus,
@@ -507,6 +555,7 @@ function KeyRow({
   provider: (typeof providers)[number];
   status: KeyStatus | undefined;
   store: KeyStore | undefined;
+  unavailable?: boolean;
   showWhereToGet?: boolean;
   /** In setup, directly under the step's level-one heading. */
   embedded?: boolean;
@@ -514,31 +563,92 @@ function KeyRow({
 }) {
   const id = useId();
   const Heading = embedded ? 'h2' : 'h3';
+  const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const replaceButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingFocusRef = useRef<'input' | 'replace' | null>(null);
   const [draft, setDraft] = useState('');
+  const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const noStore = !!store && !store.available;
   const stored = !!status && status.state !== 'notSet' && !noStore;
+  const badgeClass =
+    busy === 'test' ? 'is-checking' : stateClass(status, unavailable);
+  const isSaved = status?.state === 'set' && !noStore && !unavailable;
+  const isRejected = status?.state === 'rejected' && !noStore && !unavailable;
+  const isWarningBadge =
+    badgeClass === 'is-rejected' || badgeClass === 'is-unreadable';
+  const showInput = !isSaved || replacing;
+  const inputPlaceholder = noStore
+    ? 'Cannot be saved on this system yet'
+    : isSaved
+      ? SAVED_KEY_PLACEHOLDER
+      : isRejected
+        ? REJECTED_KEY_PLACEHOLDER
+        : status?.state === 'unreadable' && !unavailable
+          ? UNREADABLE_KEY_PLACEHOLDER
+          : undefined;
+
+  useEffect(() => {
+    if (!isSaved) setReplacing(false);
+  }, [isSaved]);
+
+  useEffect(() => {
+    const target = pendingFocusRef.current;
+    if (!target || busy !== null) return;
+    if (target === 'input' && showInput && inputRef.current) {
+      pendingFocusRef.current = null;
+      inputRef.current.focus();
+    } else if (target === 'replace' && !showInput && replaceButtonRef.current) {
+      pendingFocusRef.current = null;
+      replaceButtonRef.current.focus();
+    }
+  }, [showInput, busy]);
+
+  const startReplace = () => {
+    pendingFocusRef.current = 'input';
+    setReplacing(true);
+    setError('');
+    setNote('');
+  };
+
+  const cancelReplace = () => {
+    pendingFocusRef.current = 'replace';
+    setReplacing(false);
+    setDraft('');
+    setError('');
+  };
 
   const run = async (
     action: 'save' | 'test' | 'remove',
     work: () => Promise<KeysStatus>,
     done: (status: KeysStatus) => string,
   ) => {
+    const focusInRow = !!formRef.current?.contains(document.activeElement);
+    if (action === 'save' && focusInRow) {
+      pendingFocusRef.current = 'replace';
+    }
     setBusy(action);
     setError('');
     setNote('');
     try {
       const next = await work();
-      if (action === 'save') setDraft('');
+      if (action === 'save') {
+        setDraft('');
+        setReplacing(false);
+      }
       if (isKeysStatus(next)) {
         onStatus(next);
         setNote(done(next));
       }
     } catch (failure) {
-      // A refused key is not kept on screen or in memory longer than needed.
-      if (action === 'save') setDraft('');
+      if (action === 'save') {
+        pendingFocusRef.current = null;
+        // A refused key is not kept on screen or in memory longer than needed.
+        setDraft('');
+      }
       setError(message(failure, 'Nothing was changed. Try again.'));
     } finally {
       setBusy(null);
@@ -557,21 +667,25 @@ function KeyRow({
 
   return (
     <form
+      ref={formRef}
       className="provider-key"
       aria-labelledby={`${id}-name`}
       onSubmit={save}
     >
       <div className="provider-key-head">
         <Heading id={`${id}-name`}>{provider.name}</Heading>
-        <p
-          id={`${id}-state`}
-          className={`provider-key-state ${
-            busy === 'test' ? 'is-checking' : stateClass(status)
-          }`}
-        >
-          {busy === 'test'
-            ? 'Checking…'
-            : stateText(provider.name, status, store)}
+        <p id={`${id}-state`} className={`provider-key-state ${badgeClass}`}>
+          {badgeClass === 'is-set' && (
+            <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+          )}
+          {isWarningBadge && (
+            <TriangleAlert size={14} strokeWidth={2.25} aria-hidden="true" />
+          )}
+          <span>
+            {busy === 'test'
+              ? 'Checking…'
+              : stateText(provider.name, status, store, unavailable)}
+          </span>
         </p>
       </div>
       <p id={`${id}-role`} className="provider-key-role">
@@ -582,29 +696,72 @@ function KeyRow({
           <strong>Where to get one:</strong> {provider.whereToGet}
         </p>
       )}
-      <label htmlFor={`${id}-input`}>
-        {stored ? `Replace ${provider.name} key` : `${provider.name} API key`}
-      </label>
-      <input
-        id={`${id}-input`}
-        type="password"
-        value={draft}
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        maxLength={512}
-        disabled={noStore}
-        aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
-        onChange={(event) => setDraft(event.target.value)}
-      />
+      {showInput ? (
+        <>
+          <label htmlFor={`${id}-input`}>
+            {stored
+              ? `Replace ${provider.name} key`
+              : `${provider.name} API key`}
+          </label>
+          <input
+            ref={inputRef}
+            id={`${id}-input`}
+            type="password"
+            className={isRejected ? 'is-rejected' : undefined}
+            value={draft}
+            placeholder={inputPlaceholder}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            maxLength={512}
+            disabled={noStore}
+            aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </>
+      ) : (
+        <div className="provider-key-stored">
+          <span className="provider-key-mask" aria-hidden="true">
+            {SAVED_KEY_MASK}
+          </span>
+          <span className="provider-key-stored-note">
+            <span className="visually-hidden">{provider.name} key </span>
+            Stored in {keyStoreLabel(store?.kind)}
+          </span>
+        </div>
+      )}
       <div className="provider-key-actions">
-        <button
-          type="submit"
-          className="primary-button provider-key-btn"
-          disabled={noStore || !draft.trim() || busy !== null}
-        >
-          {busy === 'save' ? 'Saving…' : 'Save key'}
-        </button>
+        {showInput ? (
+          <>
+            <button
+              type="submit"
+              className="primary-button provider-key-btn"
+              disabled={noStore || !draft.trim() || busy !== null}
+            >
+              {busy === 'save' ? 'Saving…' : 'Save key'}
+            </button>
+            {isSaved && (
+              <button
+                type="button"
+                className="secondary-button provider-key-btn"
+                disabled={busy !== null}
+                onClick={cancelReplace}
+              >
+                Cancel
+              </button>
+            )}
+          </>
+        ) : (
+          <button
+            ref={replaceButtonRef}
+            type="button"
+            className="secondary-button provider-key-btn"
+            disabled={busy !== null}
+            onClick={startReplace}
+          >
+            Replace key
+          </button>
+        )}
         <button
           type="button"
           className="secondary-button provider-key-btn"
@@ -614,7 +771,7 @@ function KeyRow({
               'test',
               () => testKey(provider.id),
               (next) =>
-                next[provider.id].state === 'rejected'
+                next[provider.id]?.state === 'rejected'
                   ? `${provider.name} rejected the key.`
                   : `${provider.name} accepted the key.`,
             )
@@ -651,10 +808,78 @@ function KeyRow({
   );
 }
 
-/** One plain control: which language Deepgram transcribes in the next live
- * session. Deepgram cannot switch by itself on a live stream, so the choice
- * is made before a session starts. */
-function LanguageChoice() {
+/** Which cloud service transcribes the next live session. */
+function ProviderChoice({
+  onChanged,
+}: {
+  onChanged: (provider: TranscriptionProvider) => void;
+}) {
+  const id = useId();
+  const [provider, setProvider] = useState<TranscriptionProvider>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    transcriptionProvider().then(
+      (value) => {
+        if (!live) return;
+        const normalized = value === 'elevenlabs' ? 'elevenlabs' : 'deepgram';
+        setProvider(normalized);
+        onChanged(normalized);
+      },
+      () => live && setProvider('deepgram'),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <div className="provider-key provider-language">
+      <label htmlFor={`${id}-provider`}>Transcription provider</label>
+      <select
+        id={`${id}-provider`}
+        value={provider ?? 'deepgram'}
+        disabled={provider === undefined}
+        aria-describedby={`${id}-provider-help${error ? ` ${id}-provider-error` : ''}`}
+        onChange={(event) => {
+          const next =
+            event.target.value === 'elevenlabs' ? 'elevenlabs' : 'deepgram';
+          setError('');
+          setTranscriptionProvider(next).then(
+            (value) => {
+              setProvider(value);
+              onChanged(value);
+            },
+            (failure) =>
+              setError(
+                message(failure, 'The transcription provider was not changed.'),
+              ),
+          );
+        }}
+      >
+        <option value="deepgram">Deepgram</option>
+        <option value="elevenlabs">ElevenLabs</option>
+      </select>
+      <p id={`${id}-provider-help`} className="provider-key-role">
+        Choose which service transcribes your audio (Deepgram Nova-3 or
+        ElevenLabs Scribe v2 Realtime); saved in Settings and used from the next
+        live session.
+      </p>
+      {error && (
+        <p
+          id={`${id}-provider-error`}
+          className="provider-keys-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One plain control: which language the active provider transcribes in the
+ * next live session. */
+function LanguageChoice({ provider }: { provider: TranscriptionProvider }) {
   const id = useId();
   const [language, setLanguage] = useState<TranscriptionLanguage>();
   const [error, setError] = useState('');
@@ -690,12 +915,13 @@ function LanguageChoice() {
         <option value="multi">Multilingual</option>
       </select>
       <p id={`${id}-language-help`} className="provider-key-role">
-        Applies to the next live session, never one already running.
-        Multilingual follows several languages and switches between them, and
-        Deepgram bills it at a higher rate than English. Phrase-rule cues
-        understand English only; a question that opens with your name and ends
-        in a question mark is noticed in any language; model cues work on what
-        the model understands.
+        Applies to the next live session, never one already running.{' '}
+        {provider === 'elevenlabs'
+          ? 'English sets language_code=en; Multilingual lets ElevenLabs Scribe v2 Realtime detect languages automatically.'
+          : 'Multilingual follows several languages and switches between them, and Deepgram bills it at a higher rate than English.'}{' '}
+        Phrase-rule cues understand English only; a question that opens with
+        your name and ends in a question mark is noticed in any language; model
+        cues work on what the model understands.
       </p>
       {error && (
         <p

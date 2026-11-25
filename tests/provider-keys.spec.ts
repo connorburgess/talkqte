@@ -11,6 +11,7 @@ const ANTHROPIC = 'sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ';
 const OPENAI = 'sk-proj-FICTIONALfictional0123456789abcdef';
 const GEMINI = 'AIzaFictionalGeminiKey0123456789abcdefXYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
+const ELEVENLABS = 'sk_fictional0123456789abcdef0123456789abcdef01234567';
 
 async function openNative(page: Page) {
   await page.route('**/*', async (route) => {
@@ -31,6 +32,8 @@ async function openNative(page: Page) {
 const row = (page: Page, name: string) =>
   page.getByRole('form', { name, exact: true });
 
+const SAVED_MASK = '••••••••••••••••••••••••';
+
 test('browser preview fake: a new install shows both keys as not set, with what each is for', async ({
   page,
 }) => {
@@ -39,7 +42,7 @@ test('browser preview fake: a new install shows both keys as not set, with what 
   const keys = page.getByRole('region', { name: 'Your API keys' });
   await expect(keys).toBeVisible();
   await expect(keys).toContainText("kept in your Mac's Keychain");
-  for (const name of ['Deepgram', 'Anthropic']) {
+  for (const name of ['Deepgram', 'ElevenLabs', 'Anthropic']) {
     await expect(row(page, name)).toContainText('Not set');
     await expect(
       row(page, name).getByRole('button', { name: 'Test key' }),
@@ -49,6 +52,7 @@ test('browser preview fake: a new install shows both keys as not set, with what 
     ).toBeDisabled();
   }
   await expect(row(page, 'Deepgram')).toContainText('per minute');
+  await expect(row(page, 'ElevenLabs')).toContainText('Scribe v2 Realtime');
   await expect(row(page, 'Anthropic')).toContainText('per token');
   await expect(keys).toContainText(
     'No session has used your Anthropic key yet.',
@@ -74,10 +78,38 @@ test('browser preview fake: a key is entered, hidden, cleared after saving or re
   await expect(input).toHaveValue('');
   await input.fill(ANTHROPIC);
   await anthropic.getByRole('button', { name: 'Save key' }).click();
-  await expect(anthropic).toContainText('Set, not checked yet');
+  await expect(anthropic).toContainText('Saved · not checked yet');
+  await expect(
+    anthropic.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
   await expect(anthropic).toContainText('Anthropic key saved.');
-  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveValue('');
+  // Saved state hides the blank input behind a non-editable masked display + Replace key.
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(anthropic.locator('.provider-key-stored')).toContainText(
+    'Stored in macOS Keychain',
+  );
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveCount(0);
+  await expect(
+    anthropic.getByRole('button', { name: 'Replace key' }),
+  ).toBeEnabled();
   await expect(page.locator('body')).not.toContainText(ANTHROPIC);
+
+  // Clicking Replace key reveals the empty replacement input + Save key + Cancel.
+  await anthropic.getByRole('button', { name: 'Replace key' }).click();
+  const replaceInput = anthropic.getByLabel('Replace Anthropic key');
+  await expect(replaceInput).toBeFocused();
+  await expect(replaceInput).toHaveValue('');
+  await expect(replaceInput).toHaveAttribute(
+    'placeholder',
+    'Paste a new key to replace the saved one',
+  );
+  await expect(
+    anthropic.getByRole('button', { name: 'Save key' }),
+  ).toBeDisabled();
+  await anthropic.getByRole('button', { name: 'Cancel' }).click();
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toHaveCount(0);
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+
   // The browser preview checks nothing.
   await anthropic.getByRole('button', { name: 'Test key' }).click();
   await expect(anthropic.getByRole('alert')).toContainText(
@@ -85,7 +117,9 @@ test('browser preview fake: a key is entered, hidden, cleared after saving or re
   );
   await anthropic.getByRole('button', { name: 'Remove key' }).click();
   await expect(anthropic).toContainText('Not set');
-  await expect(anthropic.getByLabel('Anthropic API key')).toBeVisible();
+  const clearedInput = anthropic.getByLabel('Anthropic API key');
+  await expect(clearedInput).toBeVisible();
+  await expect(clearedInput).not.toHaveAttribute('placeholder', /.+/);
 });
 
 test('browser preview fake: the keyboard reaches every key control in order', async ({
@@ -98,17 +132,37 @@ test('browser preview fake: the keyboard reaches every key control in order', as
   await input.focus();
   await page.keyboard.type(DEEPGRAM);
   await page.keyboard.press('Enter');
-  await expect(row(page, 'Deepgram')).toContainText('Set, not checked yet');
+  await expect(row(page, 'Deepgram')).toContainText('Saved · not checked yet');
   // macOS WebKit follows Safari's Tab setting; Option-Tab reaches buttons.
   const tab =
     browserName === 'webkit' && process.platform === 'darwin'
       ? 'Alt+Tab'
       : 'Tab';
-  await row(page, 'Deepgram').getByLabel('Replace Deepgram key').focus();
+  const replaceBtn = row(page, 'Deepgram').getByRole('button', {
+    name: 'Replace key',
+  });
+  await expect(replaceBtn).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Test key' }),
+  ).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Remove key' }),
+  ).toBeFocused();
+  await replaceBtn.focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    row(page, 'Deepgram').getByLabel('Replace Deepgram key'),
+  ).toBeFocused();
   await page.keyboard.type(DEEPGRAM);
   await page.keyboard.press(tab);
   await expect(
     row(page, 'Deepgram').getByRole('button', { name: 'Save key' }),
+  ).toBeFocused();
+  await page.keyboard.press(tab);
+  await expect(
+    row(page, 'Deepgram').getByRole('button', { name: 'Cancel' }),
   ).toBeFocused();
   await page.keyboard.press(tab);
   await expect(
@@ -129,17 +183,37 @@ test('native fixture: the key crosses IPC once and only its state comes back', a
   await expect(deepgram).toContainText('Not set');
   await deepgram.getByLabel('Deepgram API key').fill(DEEPGRAM);
   await deepgram.getByRole('button', { name: 'Save key' }).click();
-  await expect(deepgram).toContainText('Set, not checked yet');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await deepgram.getByRole('button', { name: 'Test key' }).click();
-  await expect(deepgram).toContainText('Set and checked');
+  await expect(deepgram).toContainText('Saved · checked');
+  await expect(
+    deepgram.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(deepgram.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toHaveCount(0);
   await expect(deepgram).toContainText('Deepgram accepted the key.');
   await anthropic.getByLabel('Anthropic API key').fill(ANTHROPIC);
   await anthropic.getByRole('button', { name: 'Save key' }).click();
+  // Different-length keys share the exact same fixed-length masked display.
+  await expect(anthropic.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await anthropic.getByRole('button', { name: 'Test key' }).click();
   await expect(anthropic).toContainText(
     'Rejected by Anthropic. Replace it with a new key.',
   );
-  await expect(anthropic.getByLabel('Replace Anthropic key')).toBeVisible();
+  await expect(
+    anthropic.locator('.provider-key-state.is-rejected svg'),
+  ).toBeVisible();
+  // Rejected state shows the replace input directly with zero extra clicks.
+  const replaceAnthropic = anthropic.getByLabel('Replace Anthropic key');
+  await expect(replaceAnthropic).toBeVisible();
+  await expect(replaceAnthropic).toHaveAttribute(
+    'placeholder',
+    'Paste a new key to replace the rejected one',
+  );
   const { sent, replies } = await page.evaluate(() => ({
     sent: window.providerKeysTest.sent,
     replies: window.providerKeysTest.replies,
@@ -247,6 +321,54 @@ test('native fixture: the language is sent as en or multi, and a running session
   await expect(choice).toHaveValue('multi');
 });
 
+test('native fixture: ElevenLabs key entry, test, removal, and Transcription provider selector work', async ({
+  page,
+}) => {
+  await openNative(page);
+  const elevenlabs = row(page, 'ElevenLabs');
+  await expect(elevenlabs).toContainText('Not set');
+  await elevenlabs.getByLabel('ElevenLabs API key').fill('not-an-el-key');
+  await elevenlabs.getByRole('button', { name: 'Save key' }).click();
+  await expect(elevenlabs.getByRole('alert')).toContainText(
+    'That does not look like an ElevenLabs API key.',
+  );
+  await elevenlabs.getByLabel('ElevenLabs API key').fill(ELEVENLABS);
+  await elevenlabs.getByRole('button', { name: 'Save key' }).click();
+  await expect(elevenlabs).toContainText('Saved · not checked yet');
+  await expect(
+    elevenlabs.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(elevenlabs.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(page.locator('body')).not.toContainText(ELEVENLABS);
+  await elevenlabs.getByRole('button', { name: 'Test key' }).click();
+  await expect(elevenlabs).toContainText('Saved · checked');
+  await expect(
+    elevenlabs.locator('.provider-key-state.is-set svg'),
+  ).toBeVisible();
+  await expect(elevenlabs.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
+  await expect(elevenlabs).toContainText('ElevenLabs accepted the key.');
+
+  const providerChoice = page.getByLabel('Transcription provider');
+  await expect(providerChoice).toHaveValue('deepgram');
+  await providerChoice.selectOption('elevenlabs');
+  await expect
+    .poll(() => page.evaluate(() => window.providerKeysTest.provider()))
+    .toBe('elevenlabs');
+  await expect(page.locator('body')).toContainText(
+    'detect languages automatically',
+  );
+
+  await page.evaluate(() => window.providerKeysTest.setSessionRunning(true));
+  await providerChoice.selectOption('deepgram');
+  await expect(page.getByRole('alert')).toHaveText(
+    'Change the transcription provider when no live session is running.',
+  );
+  await expect(providerChoice).toHaveValue('elevenlabs');
+
+  await elevenlabs.getByRole('button', { name: 'Remove key' }).click();
+  await expect(elevenlabs).toContainText('Not set');
+});
+
 test('native fixture: openai and gemini keys validate, cross IPC once, and remove cleanly', async ({
   page,
 }) => {
@@ -263,7 +385,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   );
   await openai.getByLabel('OpenAI API key').fill(OPENAI);
   await openai.getByRole('button', { name: 'Save key' }).click();
-  await expect(openai).toContainText('Set, not checked yet');
+  await expect(openai).toContainText('Saved · not checked yet');
+  await expect(openai.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await openai.getByRole('button', { name: 'Test key' }).click();
   await expect(openai).toContainText(
     'Rejected by OpenAI. Replace it with a new key.',
@@ -280,7 +403,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   await gemini.getByLabel('Gemini API key').fill(GEMINI);
   await gemini.getByRole('button', { name: 'Save key' }).click();
   await gemini.getByRole('button', { name: 'Test key' }).click();
-  await expect(gemini).toContainText('Set and checked');
+  await expect(gemini).toContainText('Saved · checked');
+  await expect(gemini.locator('.provider-key-mask')).toHaveText(SAVED_MASK);
   await expect(gemini).toContainText('Gemini accepted the key.');
 
   const { sent, replies } = await page.evaluate(() => ({
@@ -363,16 +487,23 @@ test('native fixture: cue provider switching, custom model validation, and hones
   await expect(notesSelect).toHaveValue('gemini-2.5-pro');
 });
 
-test('browser preview fake: narrow 390px viewport fits all four providers and custom model controls', async ({
+test('browser preview fake: narrow 390px viewport fits all five providers and custom model controls', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 740 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  for (const name of ['Deepgram', 'Anthropic', 'OpenAI', 'Gemini']) {
+  for (const name of [
+    'Deepgram',
+    'ElevenLabs',
+    'Anthropic',
+    'OpenAI',
+    'Gemini',
+  ]) {
     await expect(row(page, name)).toBeVisible();
   }
+  await expect(page.getByLabel('Transcription provider')).toBeVisible();
   await expect(page.getByLabel('Cue & notes provider')).toBeVisible();
   await expect(page.getByLabel('Custom cue model ID (optional)')).toBeVisible();
   const overflow = await page.evaluate(

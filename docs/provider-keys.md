@@ -1,10 +1,11 @@
 # Provider keys
 
-TalkQTE runs on the person's own provider accounts: one Deepgram API key for
-transcription and an API key for the chosen cue provider (`Anthropic`, `OpenAI`,
-or `Gemini`). This page describes how the keys are stored and the commands the
-notebook uses. Live sessions use the Deepgram key for
-[transcription](cloud-transcription.md) and the selected provider's key for
+TalkQTE runs on the person's own provider accounts: a transcription key (your
+**Deepgram** API key, the default, or your **ElevenLabs** API key) and an API
+key for the chosen cue provider (`Anthropic`, `OpenAI`, or `Gemini`). This page
+describes how the keys are stored and the commands the notebook uses. Live
+sessions use the chosen transcription provider's key for
+[transcription](cloud-transcription.md) and the selected cue provider's key for
 [cue decisions](own-key-cues.md). After a session, that same selected provider's
 key can also write [meeting notes](meeting-notes.md), one confirmed request per
 meeting.
@@ -12,15 +13,21 @@ meeting.
 ## In Settings
 
 **Settings → Your API keys** (`src/components/ProviderKeys.tsx`) has one form
-per provider: what the key is for and how it is billed, its state (**Not
-set**, **Set, not checked yet**, **Set and checked**, **Rejected by …
-Replace it with a new key.**, or **Could not be read from the Keychain**), a password field that is cleared after
-saving or after a refused save, and **Save key**, **Test key** and **Remove key**. Errors are the
-fixed messages below, announced as alerts. Below the key forms, the current session's cue requests and estimated spend are
-shown as `"This session: 12 of 400 cue requests, about $0.03 of $0.50 (an estimate, not your bill), model claude-haiku-5-5."`
-for built-in models, or `"This session: 7 of 400 cue requests. Estimated spend unavailable for custom model …."`
-when a custom model ID is used, read when Settings opens. Below the usage line,
-Settings also holds **Cue & notes provider** (`Anthropic`, `OpenAI`, or
+per provider (`deepgram`, `elevenlabs`, `anthropic`, `openai`, `gemini`): what
+the key is for and how it is billed, its state (**Not set**, **Saved · not
+checked yet**, **Saved · checked**, **Rejected by … Replace it with a new
+key.**, **Could not be read from the Keychain**, or **Unavailable**), a
+non-editable fixed-length masked display with **Replace key** (revealing the
+password field with **Save key** and **Cancel**) when a key is saved, or the
+password field directly when not set, rejected, or unreadable, plus **Test key**
+and **Remove key**. Errors are the fixed messages below, announced as alerts.
+Below the key forms, the current session's cue requests and estimated spend are
+shown as `"This session: 12 of 400 cue requests, about $0.03 of $0.50 (an
+estimate, not your bill), model claude-haiku-5-5."` for built-in models, or
+`"This session: 7 of 400 cue requests. Estimated spend unavailable for custom
+model …."` when a custom model ID is used, read when Settings opens. Below the
+usage line, Settings also holds **Transcription provider** (**Deepgram**,
+default, or **ElevenLabs**), **Cue & notes provider** (`Anthropic`, `OpenAI`, or
 `Gemini`), **Cue model** + **Custom cue model ID (optional)**, **Transcription
 language**, and **Model for meeting notes** + **Custom meeting notes model ID
 (optional)**. The browser preview keeps fictional keys in memory and cannot check
@@ -31,13 +38,15 @@ one.
 ## Storage
 
 - Keys are kept only in the system's secret store, under the service
-  `app.talkqte.provider-key` with the accounts `deepgram`, `anthropic`, `openai`,
-  and `gemini` (`src-tauri/src/provider_keys.rs`). TalkQTE writes no key to a file.
+  `app.talkqte.provider-key` with the accounts `deepgram`, `elevenlabs`,
+  `anthropic`, `openai`, and `gemini` (`src-tauri/src/provider_keys.rs`). TalkQTE
+  writes no key to a file.
   - **macOS:** the login Keychain, as generic passwords. The Keychain encrypts
     them.
   - **Windows:** Credential Manager, as generic credentials named
-    `app.talkqte.provider-key/deepgram`, `app.talkqte.provider-key/anthropic`,
-    `app.talkqte.provider-key/openai`, and `app.talkqte.provider-key/gemini`,
+    `app.talkqte.provider-key/deepgram`, `app.talkqte.provider-key/elevenlabs`,
+    `app.talkqte.provider-key/anthropic`, `app.talkqte.provider-key/openai`, and
+    `app.talkqte.provider-key/gemini`,
     persisted for this user on this computer (not the roaming "enterprise"
     persistence). Windows protects them with the user's logon credentials
     (DPAPI). They are visible and removable in **Control Panel → Credential
@@ -63,8 +72,10 @@ one.
   credentials are refused), 40 to 256 characters of letters, digits, `-` and
   `_`. OpenAI: a standard API key starting `sk-` (excluding `sk-ant-`), 20 to
   256 characters of letters, digits, `-` and `_`. Gemini: a Google AI Studio key
-  starting `AIza`, 30 to 256 characters of letters, digits, `-` and `_`. Deepgram:
-  32 to 128 letters and digits. Whitespace around a pasted key is removed;
+  starting `AIza`, 30 to 128 characters of letters, digits, `-` and `_`.
+  Deepgram: 32 to 128 letters and digits. ElevenLabs: a key starting with `sk_`
+  followed by letters, digits, `-` and `_` (32 to 256 characters total), or a
+  32-to-64-character hexadecimal key. Whitespace around a pasted key is removed;
   anything else is refused without quoting what was pasted.
 - Whether a key was checked or rejected is kept in memory for the app run.
 - Checking whether a key is set does not unlock the Linux keyring: it searches
@@ -76,25 +87,28 @@ one.
 
 ## Commands
 
-All four are main-window commands and return the same status payload. The
-first-run screen reads `provider_keys_status` at launch.
+These commands are main-window commands (`provider_keys_*` return the same
+status payload). The first-run screen reads `provider_keys_status` at launch.
 
-| Command                    | Arguments           | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider_keys_status`     | none                | Reads which keys are stored. Sends nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `set_provider_key`         | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `test_provider_key`        | `{ provider }`      | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`), `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`), `GET https://api.openai.com/v1/models` (`Authorization: Bearer …`), or `GET https://generativelanguage.googleapis.com/v1beta/models?pageSize=1` (`x-goog-api-key` header only, never in the URL query string). None is billed. HTTP 200 marks the key checked; 401 or 403 (or 400 `API_KEY_INVALID` on Gemini) marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read (except the bounded Gemini 400 error reason check). |
-| `remove_provider_key`      | `{ provider }`      | Deletes the key from the Keychain.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `provider_preferences`     | none                | Reads active cue & notes provider and model selections/overrides. Sends nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `set_cue_provider`         | `{ provider }`      | Selects `"anthropic"`, `"openai"`, or `"gemini"` between live sessions and clears provider-specific custom model overrides.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `set_cue_model_override`   | `{ model }`         | Sets or clears an optional cue model ID (`[A-Za-z0-9._:/-]+`, max 96 chars, no `..`) between live sessions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `set_notes_model_override` | `{ model }`         | Sets or clears an optional meeting notes model ID (`[A-Za-z0-9._:/-]+`, max 96 chars, no `..`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Command                      | Arguments           | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider_keys_status`       | none                | Reads which keys are stored. Sends nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `set_provider_key`           | `{ provider, key }` | Checks the shape, then stores or replaces the key. Sends nothing to the provider.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `test_provider_key`          | `{ provider }`      | One read-only request with the stored key: `GET https://api.deepgram.com/v1/projects` (`Authorization: Token …`), `GET https://api.elevenlabs.io/v1/user` (`xi-api-key: …`), `GET https://api.anthropic.com/v1/models?limit=1` (`x-api-key`, `anthropic-version: 2026-10-21`), `GET https://api.openai.com/v1/models` (`Authorization: Bearer …`), or `GET https://generativelanguage.googleapis.com/v1beta/models?pageSize=1` (`x-goog-api-key` header only, never in the URL query string). None is billed. HTTP 200 marks the key checked; 401 or 403 (or 400 `API_KEY_INVALID` on Gemini) marks it rejected; anything else is reported as unreachable and changes nothing. The response body is never read (except the bounded Gemini 400 error reason check). |
+| `remove_provider_key`        | `{ provider }`      | Deletes the key from the Keychain.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `transcription_provider`     | none                | Returns the saved transcription provider (`"deepgram"` or `"elevenlabs"`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `set_transcription_provider` | `{ provider }`      | Saves the transcription provider in `settings.json` when no live session is starting, running, or finishing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `provider_preferences`       | none                | Reads active cue & notes provider and model selections/overrides. Sends nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `set_cue_provider`           | `{ provider }`      | Selects `"anthropic"`, `"openai"`, or `"gemini"` between live sessions and clears provider-specific custom model overrides.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `set_cue_model_override`     | `{ model }`         | Sets or clears an optional cue model ID (`[A-Za-z0-9._:/-]+`, max 96 chars, no `..`) between live sessions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `set_notes_model_override`   | `{ model }`         | Sets or clears an optional meeting notes model ID (`[A-Za-z0-9._:/-]+`, max 96 chars, no `..`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-`provider` for key commands is `"deepgram"`, `"anthropic"`, `"openai"`, or `"gemini"`. The payload:
+`provider` for key commands is `"deepgram"`, `"elevenlabs"`, `"anthropic"`, `"openai"`, or `"gemini"`. The payload:
 
 ```json
 {
   "deepgram": { "state": "notSet", "verified": false },
+  "elevenlabs": { "state": "notSet", "verified": false },
   "anthropic": { "state": "set", "verified": true },
   "openai": { "state": "notSet", "verified": false },
   "gemini": { "state": "notSet", "verified": false },
@@ -110,7 +124,8 @@ exist on the system. `state` is `notSet`, `set`, `rejected` or `unreadable`
 it, and it does not count as missing). Each status call reads the Keychain
 again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
-rejected. `anyMissing` is true while either key is not set: the "no keys set"
+rejected. `anyMissing` is true while neither `deepgram` nor `elevenlabs` is
+set, or none of `anthropic`, `openai`, or `gemini` is set: the "no keys set"
 state a first-run screen asks for. A failed command returns one fixed message,
 for example "That does not look like an Anthropic API key. It starts with
 sk-ant-api." or "Deepgram could not be reached to check the key. Nothing was

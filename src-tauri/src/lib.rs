@@ -745,23 +745,25 @@ struct LiveStatus {
 }
 
 /// Why a live session cannot start, if it cannot. Audio is sent to
-/// Deepgram only once a cue review is approved, so a start needs both a cue
-/// connection and a Deepgram credential: the person's own keys, or in a
-/// development launch the lab's or Claude Code connection and a token file.
+/// the chosen transcription provider only once a cue review is approved, so a
+/// start needs both a cue connection and a transcription credential: the
+/// person's own keys, or in a development launch the lab's or Claude Code
+/// connection and a token file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LiveUnavailable {
     /// No Anthropic key is stored and no development cue connection exists.
     Build,
     /// The provider refused the stored Anthropic key.
     CueKeyRejected,
-    /// No Deepgram key is stored and no development launch selects one.
-    Selection,
+    /// No transcription key is stored for the selected provider and no
+    /// development launch selects one.
+    Selection(transcription::cloud::Provider),
     Settings,
     TokenMetadata,
-    /// Deepgram refused the stored key.
-    KeyRejected,
-    /// The Keychain could not be read for the Deepgram key.
-    KeyUnreadable,
+    /// The transcription provider refused the stored key.
+    KeyRejected(transcription::cloud::Provider),
+    /// The Keychain could not be read for the transcription key.
+    KeyUnreadable(transcription::cloud::Provider),
     /// The Keychain could not be read for the Anthropic key.
     CueKeyUnreadable,
 }
@@ -774,6 +776,7 @@ impl LiveUnavailable {
 
     fn message_for(self, provider: llm_provider::CueProvider) -> &'static str {
         use llm_provider::CueProvider;
+        use transcription::cloud::Provider as SttProvider;
         match self {
             Self::Build => match provider {
                 CueProvider::Anthropic => {
@@ -797,15 +800,26 @@ impl LiveUnavailable {
                     "Gemini rejected your API key. Replace it in Settings to start a live session."
                 }
             },
-            Self::Selection => "Add your Deepgram API key in Settings to start a live session.",
+            Self::Selection(SttProvider::Deepgram) => {
+                "Add your Deepgram API key in Settings to start a live session."
+            }
+            Self::Selection(SttProvider::ElevenLabs) => {
+                "Add your ElevenLabs API key in Settings to start a live session."
+            }
             Self::Settings | Self::TokenMetadata => {
                 "The cloud transcription settings are not usable."
             }
-            Self::KeyRejected => {
+            Self::KeyRejected(SttProvider::Deepgram) => {
                 "Deepgram rejected your API key. Replace it in Settings to start a live session."
             }
-            Self::KeyUnreadable if cfg!(windows) => {
+            Self::KeyRejected(SttProvider::ElevenLabs) => {
+                "ElevenLabs rejected your API key. Replace it in Settings to start a live session."
+            }
+            Self::KeyUnreadable(SttProvider::Deepgram) if cfg!(windows) => {
                 "Your Deepgram key could not be read from Windows Credential Manager. Check it in Settings."
+            }
+            Self::KeyUnreadable(SttProvider::ElevenLabs) if cfg!(windows) => {
+                "Your ElevenLabs key could not be read from Windows Credential Manager. Check it in Settings."
             }
             Self::CueKeyUnreadable if cfg!(windows) => match provider {
                 CueProvider::Anthropic => {
@@ -818,8 +832,11 @@ impl LiveUnavailable {
                     "Your Gemini key could not be read from Windows Credential Manager. Check it in Settings."
                 }
             },
-            Self::KeyUnreadable if cfg!(target_os = "linux") => {
+            Self::KeyUnreadable(SttProvider::Deepgram) if cfg!(target_os = "linux") => {
                 "Your Deepgram key could not be read from the keyring. Check it in Settings."
+            }
+            Self::KeyUnreadable(SttProvider::ElevenLabs) if cfg!(target_os = "linux") => {
+                "Your ElevenLabs key could not be read from the keyring. Check it in Settings."
             }
             Self::CueKeyUnreadable if cfg!(target_os = "linux") => match provider {
                 CueProvider::Anthropic => {
@@ -832,8 +849,11 @@ impl LiveUnavailable {
                     "Your Gemini key could not be read from the keyring. Check it in Settings."
                 }
             },
-            Self::KeyUnreadable => {
+            Self::KeyUnreadable(SttProvider::Deepgram) => {
                 "Your Deepgram key could not be read from the Keychain. Check it in Settings."
+            }
+            Self::KeyUnreadable(SttProvider::ElevenLabs) => {
+                "Your ElevenLabs key could not be read from the Keychain. Check it in Settings."
             }
             Self::CueKeyUnreadable => match provider {
                 CueProvider::Anthropic => {
@@ -885,6 +905,7 @@ pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
         cue_connection(),
         transcription::cloud::selected,
         transcription::cloud::readiness,
+        transcription::cloud::active_provider(),
     )
 }
 
@@ -892,17 +913,22 @@ fn classify_live_availability(
     cue_connection: Result<(), LiveUnavailable>,
     selected: impl FnOnce() -> bool,
     readiness: impl FnOnce() -> Result<(), transcription::cloud::ReadinessFailure>,
+    provider: transcription::cloud::Provider,
 ) -> Result<(), LiveUnavailable> {
     cue_connection?;
     if !selected() {
-        return Err(LiveUnavailable::Selection);
+        return Err(LiveUnavailable::Selection(provider));
     }
     readiness().map_err(|failure| match failure {
         transcription::cloud::ReadinessFailure::Settings => LiveUnavailable::Settings,
         transcription::cloud::ReadinessFailure::TokenMetadata => LiveUnavailable::TokenMetadata,
-        transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection,
-        transcription::cloud::ReadinessFailure::KeyRejected => LiveUnavailable::KeyRejected,
-        transcription::cloud::ReadinessFailure::KeyUnreadable => LiveUnavailable::KeyUnreadable,
+        transcription::cloud::ReadinessFailure::NoKey => LiveUnavailable::Selection(provider),
+        transcription::cloud::ReadinessFailure::KeyRejected => {
+            LiveUnavailable::KeyRejected(provider)
+        }
+        transcription::cloud::ReadinessFailure::KeyUnreadable => {
+            LiveUnavailable::KeyUnreadable(provider)
+        }
     })
 }
 
@@ -919,7 +945,8 @@ fn live_status() -> LiveStatus {
     LiveStatus {
         available: reason.is_none(),
         reason,
-        transcription: transcription::cloud::selected().then_some(transcription::cloud::PROVIDER),
+        transcription: transcription::cloud::selected()
+            .then_some(transcription::cloud::active_provider_name()),
     }
 }
 
@@ -1933,6 +1960,8 @@ pub fn run() {
             provider_key_commands::test_provider_key,
             provider_key_commands::remove_provider_key,
             provider_key_commands::cue_usage,
+            provider_key_commands::transcription_provider,
+            provider_key_commands::set_transcription_provider,
             provider_key_commands::provider_preferences,
             provider_key_commands::set_cue_provider,
             provider_key_commands::set_cue_model_override,
@@ -2710,7 +2739,7 @@ mod session_clock_tests {
 #[cfg(test)]
 mod live_readiness_diagnostics_tests {
     use super::*;
-    use transcription::cloud::ReadinessFailure;
+    use transcription::cloud::{Provider as SttProvider, ReadinessFailure};
 
     #[test]
     fn readiness_preserves_short_circuit_order_and_public_refusals() {
@@ -2718,7 +2747,8 @@ mod live_readiness_diagnostics_tests {
             classify_live_availability(
                 Err(LiveUnavailable::Build),
                 || panic!("selection read"),
-                || panic!("metadata read")
+                || panic!("metadata read"),
+                SttProvider::Deepgram,
             ),
             Err(LiveUnavailable::Build)
         );
@@ -2726,13 +2756,28 @@ mod live_readiness_diagnostics_tests {
             classify_live_availability(
                 Err(LiveUnavailable::CueKeyRejected),
                 || panic!("selection read"),
-                || panic!("metadata read")
+                || panic!("metadata read"),
+                SttProvider::Deepgram,
             ),
             Err(LiveUnavailable::CueKeyRejected)
         );
         assert_eq!(
-            classify_live_availability(Ok(()), || false, || panic!("metadata read")),
-            Err(LiveUnavailable::Selection)
+            classify_live_availability(
+                Ok(()),
+                || false,
+                || panic!("metadata read"),
+                SttProvider::Deepgram,
+            ),
+            Err(LiveUnavailable::Selection(SttProvider::Deepgram))
+        );
+        assert_eq!(
+            classify_live_availability(
+                Ok(()),
+                || false,
+                || panic!("metadata read"),
+                SttProvider::ElevenLabs,
+            ),
+            Err(LiveUnavailable::Selection(SttProvider::ElevenLabs))
         );
         for (ready, expected) in [
             (
@@ -2745,20 +2790,20 @@ mod live_readiness_diagnostics_tests {
             ),
             (
                 Err(ReadinessFailure::NoKey),
-                Err(LiveUnavailable::Selection),
+                Err(LiveUnavailable::Selection(SttProvider::Deepgram)),
             ),
             (
                 Err(ReadinessFailure::KeyRejected),
-                Err(LiveUnavailable::KeyRejected),
+                Err(LiveUnavailable::KeyRejected(SttProvider::Deepgram)),
             ),
             (
                 Err(ReadinessFailure::KeyUnreadable),
-                Err(LiveUnavailable::KeyUnreadable),
+                Err(LiveUnavailable::KeyUnreadable(SttProvider::Deepgram)),
             ),
             (Ok(()), Ok(())),
         ] {
             assert_eq!(
-                classify_live_availability(Ok(()), || true, || ready),
+                classify_live_availability(Ok(()), || true, || ready, SttProvider::Deepgram),
                 expected
             );
         }
@@ -2771,12 +2816,20 @@ mod live_readiness_diagnostics_tests {
             "Anthropic rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
-            LiveUnavailable::Selection.message(),
+            LiveUnavailable::Selection(SttProvider::Deepgram).message(),
             "Add your Deepgram API key in Settings to start a live session."
         );
         assert_eq!(
-            LiveUnavailable::KeyRejected.message(),
+            LiveUnavailable::Selection(SttProvider::ElevenLabs).message(),
+            "Add your ElevenLabs API key in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::KeyRejected(SttProvider::Deepgram).message(),
             "Deepgram rejected your API key. Replace it in Settings to start a live session."
+        );
+        assert_eq!(
+            LiveUnavailable::KeyRejected(SttProvider::ElevenLabs).message(),
+            "ElevenLabs rejected your API key. Replace it in Settings to start a live session."
         );
         assert_eq!(
             LiveUnavailable::Settings.message(),

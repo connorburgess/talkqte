@@ -251,6 +251,7 @@ const delayed = new URLSearchParams(location.search).has('delay-microphone');
 const liveAvailable = ['live', 'cloud'].some((key) =>
   new URLSearchParams(location.search).has(key),
 );
+const liveFromKeys = new URLSearchParams(location.search).has('live-from-keys');
 Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 
 async function send(value: Partial<MicrophoneSnapshot>) {
@@ -616,8 +617,16 @@ mockIPC(
         await emit('context:changed', await preview.contextItemsNow());
         return;
       case 'live_status': {
-        const value: LiveStatus = liveAvailable
-          ? { available: true, reason: null, transcription: 'Deepgram' }
+        const stt = providerKeysFixture.providerKeysTest.provider();
+        const provider = stt === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
+        const keyStatus = providerKeysFixture.providerKeysTest.status();
+        const available =
+          liveAvailable ||
+          (liveFromKeys &&
+            keyStatus[stt]?.state === 'set' &&
+            keyStatus.anthropic.state === 'set');
+        const value: LiveStatus = available
+          ? { available: true, reason: null, transcription: provider }
           : {
               available: false,
               reason: 'This build has no live transcription.',
