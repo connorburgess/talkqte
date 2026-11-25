@@ -7,8 +7,10 @@
 //! A dedicated worker thread drains and resamples to 16 kHz mono and feeds the
 //! `Them` cloud transcription stream alongside the microphone (`You`).
 
+#[cfg(any(target_os = "macos", test))]
+use crate::audio_tap::TapInput;
 use crate::{
-    audio_tap::{Chunker, TapInput},
+    audio_tap::Chunker,
     live::DRAIN_EVERY,
     transcription::{cloud::CloudFeed, AudioChunk, SAMPLE_RATE},
 };
@@ -56,6 +58,7 @@ pub trait TapStream: Send {
 }
 
 /// Raw planar or interleaved f32 buffer view for downmixing without allocation.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) struct RawF32Buffer {
     pub channels: u32,
     pub data: *const f32,
@@ -68,6 +71,7 @@ pub(crate) struct RawF32Buffer {
 /// # Safety
 /// Every `RawF32Buffer` with non-null `data` and `floats > 0` must point to at
 /// least `floats` readable `f32` values for the duration of this call.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) unsafe fn push_f32_buffers(
     input: &mut TapInput,
     buffers: &[RawF32Buffer],
