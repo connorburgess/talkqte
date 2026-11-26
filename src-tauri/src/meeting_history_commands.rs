@@ -358,6 +358,68 @@ pub(crate) async fn rename_kept_meeting_speaker(
 }
 
 #[tauri::command]
+pub(crate) async fn create_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    blocking(&app, move |store| store.create_folder(&name))
+        .await?
+        .map_err(message)
+}
+
+#[tauri::command]
+pub(crate) async fn rename_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    let folders = blocking(&app, move |store| store.rename_folder(&old_name, &new_name))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(folders)
+}
+
+#[tauri::command]
+pub(crate) async fn delete_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    let folders = blocking(&app, move |store| store.delete_folder(&name))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(folders)
+}
+
+#[tauri::command]
+pub(crate) async fn set_kept_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    folder: Option<String>,
+) -> Result<Summary, String> {
+    main_only(&window)?;
+    let summary = blocking(&app, move |store| store.set_folder(&id, folder.as_deref()))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
 pub(crate) async fn set_kept_meeting_archived(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
@@ -946,6 +1008,10 @@ mod speaker_sync_tests {
                 engine.keepable_meeting(false).unwrap(),
             )
             .unwrap();
+        store.create_folder("Fictional garden").unwrap();
+        store
+            .set_folder(&saved.id, Some("Fictional garden"))
+            .unwrap();
         drop(store);
         let reopened = Store::open(Some(folder.clone()), false);
         let renamed = reopened
@@ -965,6 +1031,8 @@ mod speaker_sync_tests {
             Some("Priya Patel")
         );
         assert_eq!(updated.content.notes, "Bring the spare garden key.");
+        assert_eq!(updated.folder.as_deref(), Some("Fictional garden"));
+        assert_eq!(reopened.list(None).folders, ["Fictional garden"]);
         assert_eq!(engine.state.transcript[0].speaker, "Priya Patel");
         assert!(updated
             .markdown()

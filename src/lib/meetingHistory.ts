@@ -17,6 +17,7 @@ export interface KeptSummary {
   durationMs: number;
   sources: MeetingSources;
   hasMeetingNotes: boolean;
+  folder?: string;
   archived?: boolean;
 }
 
@@ -42,6 +43,7 @@ export interface KeptMeeting {
   id: string;
   title: string;
   revision: number;
+  folder?: string;
   startedAtMs: number;
   durationMs: number;
   sources: MeetingSources;
@@ -59,6 +61,7 @@ export interface KeptMeeting {
 export interface KeptListing {
   availability: HistoryAvailability;
   meetings: KeptSummary[];
+  folders: string[];
   /** Kept meetings that could not be read; not shown, never changed. */
   unreadable: number;
 }
@@ -116,6 +119,7 @@ export function keptMeetings(query?: string): Promise<KeptListing> {
     return Promise.resolve({
       availability: 'unavailable',
       meetings: [],
+      folders: [],
       unreadable: 0,
     });
   return invoke<KeptListing>('kept_meetings', { query: query || null });
@@ -142,6 +146,26 @@ export function renameKeptMeetingSpeaker(
     speakerId,
     name,
   });
+}
+
+export function createMeetingFolder(name: string) {
+  if (!desktop) return browserOnly();
+  return invoke<string[]>('create_meeting_folder', { name });
+}
+
+export function renameMeetingFolder(oldName: string, newName: string) {
+  if (!desktop) return browserOnly();
+  return invoke<string[]>('rename_meeting_folder', { oldName, newName });
+}
+
+export function deleteMeetingFolder(name: string) {
+  if (!desktop) return browserOnly();
+  return invoke<string[]>('delete_meeting_folder', { name });
+}
+
+export function setKeptMeetingFolder(id: string, folder: string | null) {
+  if (!desktop) return browserOnly();
+  return invoke<KeptSummary>('set_kept_meeting_folder', { id, folder });
 }
 
 export function setKeptMeetingArchived(id: string, archived: boolean) {

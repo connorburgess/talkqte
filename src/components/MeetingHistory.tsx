@@ -3,14 +3,18 @@ import {
   ArrowDownToLine,
   ArrowLeft,
   ArrowUpRight,
+  ChevronRight,
   Pencil,
+  Plus,
   Search,
   Trash2,
   X,
 } from 'lucide-react';
 import { desktop } from '../lib/bridge';
 import {
+  createMeetingFolder,
   deleteKeptMeeting,
+  deleteMeetingFolder,
   exportKeptMeeting,
   failure,
   historyStatus,
@@ -21,11 +25,14 @@ import {
   openKeptMeeting,
   renameKeptMeeting,
   renameKeptMeetingSpeaker,
+  renameMeetingFolder,
+  setKeptMeetingFolder,
   setKeptMeetingArchived,
   sourceNames,
   type AfterSessionKeep,
   type KeptListing,
   type KeptMeeting,
+  type KeptSummary,
 } from '../lib/meetingHistory';
 import { clockTime } from '../lib/types';
 import { SpeakerChip } from './SpeakerChip';
@@ -73,6 +80,30 @@ export function MeetingHistory({
 
   // Delete confirmation for the opened meeting.
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Optional collapsible folder state.
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const newFolderInput = useRef<HTMLInputElement>(null);
+  const newFolderButton = useRef<HTMLButtonElement>(null);
+  const folderHeaders = useRef(new Map<string, HTMLElement>());
+  const folderSelectors = useRef(new Map<string, HTMLSelectElement>());
+  const focusFolder = (name: string) =>
+    requestAnimationFrame(() => folderHeaders.current.get(name)?.focus());
+  const focusNewFolder = () =>
+    requestAnimationFrame(() => newFolderButton.current?.focus());
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [draftFolderName, setDraftFolderName] = useState('');
+  const renameFolderInput = useRef<HTMLInputElement>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(
+    null,
+  );
+  const [collapsedFolders, setCollapsedFolders] = useState<
+    Record<string, boolean>
+  >({});
+  const [searchCollapsed, setSearchCollapsed] = useState<
+    Record<string, boolean>
+  >({});
 
   // Export review modal for the opened meeting.
   const [exportPreview, setExportPreview] = useState<string | null>(null);
@@ -143,6 +174,14 @@ export function MeetingHistory({
   useEffect(() => {
     if (renaming) renameInput.current?.focus();
   }, [renaming]);
+
+  useEffect(() => {
+    if (creatingFolder) newFolderInput.current?.focus();
+  }, [creatingFolder]);
+
+  useEffect(() => {
+    if (renamingFolder !== null) renameFolderInput.current?.focus();
+  }, [renamingFolder]);
 
   const openMeeting = async (meetingId: string) => {
     const request = ++openRequestRef.current;
@@ -298,6 +337,114 @@ export function MeetingHistory({
       setBusy(false);
     }
   };
+
+  const submitCreateFolder = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await createMeetingFolder(newFolderName);
+      const createdName = updated[updated.length - 1] ?? newFolderName.trim();
+      setCreatingFolder(false);
+      setNewFolderName('');
+      setNotice(`Created folder “${createdName}”.`);
+      await loadList(query);
+      focusFolder(createdName);
+    } catch (problem) {
+      setError(failure(problem, 'The folder could not be created.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitRenameFolder = async () => {
+    if (!renamingFolder) return;
+    const oldName = renamingFolder;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await renameMeetingFolder(oldName, draftFolderName);
+      const nextName =
+        updated.find(
+          (f) =>
+            f.toLowerCase() ===
+            draftFolderName.trim().replace(/\s+/g, ' ').toLowerCase(),
+        ) ?? draftFolderName.trim();
+      setCollapsedFolders((prev) => {
+        if (!Object.hasOwn(prev, oldName)) return prev;
+        const next = { ...prev };
+        next[nextName] = prev[oldName];
+        if (nextName !== oldName) delete next[oldName];
+        return next;
+      });
+      setRenamingFolder(null);
+      setDraftFolderName('');
+      setNotice(`Renamed folder to “${nextName}”.`);
+      await loadList(query);
+      focusFolder(nextName);
+    } catch (problem) {
+      setError(failure(problem, 'The folder could not be renamed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitDeleteFolder = async () => {
+    if (!confirmDeleteFolder) return;
+    const target = confirmDeleteFolder;
+    setBusy(true);
+    setError('');
+    try {
+      await deleteMeetingFolder(target);
+      setCollapsedFolders((prev) => {
+        if (!Object.hasOwn(prev, target)) return prev;
+        const next = { ...prev };
+        delete next[target];
+        return next;
+      });
+      setConfirmDeleteFolder(null);
+      setNotice(
+        `Deleted folder “${target}”. Any meetings inside moved to the top.`,
+      );
+      await loadList(query);
+      focusNewFolder();
+    } catch (problem) {
+      setError(failure(problem, 'The folder could not be deleted.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const moveMeeting = async (meetingId: string, folder: string | null) => {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await setKeptMeetingFolder(meetingId, folder);
+      setSelected((current) =>
+        current && current.id === updated.id
+          ? {
+              ...current,
+              folder: updated.folder,
+              revision: updated.revision,
+            }
+          : current,
+      );
+      setNotice(
+        updated.folder
+          ? `Moved to “${updated.folder}”.`
+          : 'Moved to Unfiled / Top.',
+      );
+      await loadList(query);
+    } catch (problem) {
+      setError(failure(problem, 'The meeting could not be moved.'));
+    } finally {
+      setBusy(false);
+      requestAnimationFrame(() =>
+        folderSelectors.current.get(meetingId)?.focus(),
+      );
+    }
+  };
+
+  const folders = listing?.folders ?? [];
 
   if (selected) {
     const both = selected.sources === 'both';
@@ -465,6 +612,32 @@ export function MeetingHistory({
             )}
             {selected.archived && <span className="history-tag">Archived</span>}
           </p>
+          {(folders.length > 0 || selected.folder) && (
+            <div className="history-detail-folder">
+              <label
+                className="history-folder-label"
+                htmlFor={`${id}-detail-folder`}
+              >
+                Folder
+                <select
+                  id={`${id}-detail-folder`}
+                  className="history-folder-select"
+                  value={selected.folder ?? ''}
+                  disabled={busy}
+                  onChange={(event) =>
+                    void moveMeeting(selected.id, event.target.value || null)
+                  }
+                >
+                  <option value="">Unfiled / Top</option>
+                  {folders.map((folder) => (
+                    <option key={folder} value={folder}>
+                      {folder}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </header>
 
         <section
@@ -656,6 +829,88 @@ export function MeetingHistory({
   const visibleMeetings = (listing?.meetings ?? []).filter(
     (item) => showArchived || !item.archived,
   );
+  const searching = query.trim().length > 0;
+  const canonicalFolder = new Map(folders.map((f) => [f.toLowerCase(), f]));
+  const unfiledMeetings: KeptSummary[] = [];
+  const meetingsByFolder = new Map<string, KeptSummary[]>(
+    folders.map((folder) => [folder, []]),
+  );
+  for (const item of visibleMeetings) {
+    const matched = item.folder
+      ? canonicalFolder.get(item.folder.toLowerCase())
+      : undefined;
+    if (matched) {
+      meetingsByFolder.get(matched)!.push(item);
+    } else {
+      unfiledMeetings.push(item);
+    }
+  }
+  const visibleFolders = searching
+    ? folders.filter(
+        (folder) => (meetingsByFolder.get(folder)?.length ?? 0) > 0,
+      )
+    : folders;
+
+  const renderMeetingRow = (item: KeptSummary) => {
+    const button = (
+      <button
+        type="button"
+        className="history-item"
+        disabled={busy}
+        onClick={() => void openMeeting(item.id)}
+      >
+        <span className="history-item-title">{item.title}</span>
+        <span className="history-meta">
+          <span>{meetingDate(item.startedAtMs)}</span>
+          <span>{minutes(item.durationMs)}</span>
+          <span>{sourceNames[item.sources]}</span>
+          {item.hasMeetingNotes && (
+            <span className="history-tag">Meeting notes</span>
+          )}
+          {item.archived && <span className="history-tag">Archived</span>}
+        </span>
+      </button>
+    );
+    return (
+      <li
+        key={item.id}
+        className={`history-row${item.archived ? ' is-archived' : ''}`}
+      >
+        {button}
+        <button
+          type="button"
+          className="secondary-button history-archive-button"
+          aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
+          disabled={busy}
+          onClick={() => void toggleArchived(item.id, !item.archived)}
+        >
+          {item.archived ? 'Unarchive' : 'Archive'}
+        </button>
+        {folders.length > 0 && (
+          <select
+            ref={(node) => {
+              if (node) folderSelectors.current.set(item.id, node);
+              else folderSelectors.current.delete(item.id);
+            }}
+            className="history-row-folder"
+            aria-label={`Folder for ${item.title}`}
+            value={item.folder ?? ''}
+            disabled={busy}
+            onChange={(event) =>
+              void moveMeeting(item.id, event.target.value || null)
+            }
+          >
+            <option value="">Unfiled / Top</option>
+            {folders.map((folder) => (
+              <option key={folder} value={folder}>
+                {folder}
+              </option>
+            ))}
+          </select>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div className="history">
@@ -687,30 +942,108 @@ export function MeetingHistory({
         </p>
       ) : (
         <>
-          <div className="history-search">
-            <label className="visually-hidden" htmlFor={`${id}-search`}>
-              Search meetings
-            </label>
-            <Search size={16} aria-hidden="true" />
-            <input
-              id={`${id}-search`}
-              type="search"
-              value={query}
-              maxLength={200}
-              placeholder="Search meetings…"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {query && (
+          <div className="history-controls">
+            <div className="history-search">
+              <label className="visually-hidden" htmlFor={`${id}-search`}>
+                Search meetings
+              </label>
+              <Search size={16} aria-hidden="true" />
+              <input
+                id={`${id}-search`}
+                type="search"
+                value={query}
+                maxLength={200}
+                placeholder="Search meetings…"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setSearchCollapsed({});
+                }}
+              />
+              {query && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setQuery('');
+                    setSearchCollapsed({});
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {!creatingFolder && (
               <button
                 type="button"
-                className="secondary-button"
-                onClick={() => setQuery('')}
+                ref={newFolderButton}
+                className="secondary-button history-new-folder-btn"
+                disabled={busy}
+                onClick={() => {
+                  setError('');
+                  setNotice('');
+                  setRenamingFolder(null);
+                  setConfirmDeleteFolder(null);
+                  setNewFolderName('');
+                  setCreatingFolder(true);
+                }}
               >
-                Clear
+                <Plus size={15} aria-hidden="true" />
+                New folder
               </button>
             )}
           </div>
 
+          {creatingFolder && (
+            <form
+              className="history-folder-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitCreateFolder();
+              }}
+            >
+              <label className="history-field" htmlFor={`${id}-new-folder`}>
+                Folder name
+                <input
+                  ref={newFolderInput}
+                  id={`${id}-new-folder`}
+                  type="text"
+                  value={newFolderName}
+                  maxLength={80}
+                  placeholder="e.g. Client A"
+                  disabled={busy}
+                  onChange={(event) => setNewFolderName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setCreatingFolder(false);
+                      setNewFolderName('');
+                      focusNewFolder();
+                    }
+                  }}
+                />
+              </label>
+              <div className="history-actions">
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={busy || !newFolderName.trim()}
+                >
+                  Create folder
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                    focusNewFolder();
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
           {(archivedCount > 0 || showArchived) && (
             <div className="history-filter-row">
               <label className="history-check">
@@ -732,9 +1065,11 @@ export function MeetingHistory({
             </p>
           )}
 
-          {listing && visibleMeetings.length === 0 ? (
+          {listing &&
+          visibleMeetings.length === 0 &&
+          (searching || folders.length === 0) ? (
             <div className="history-empty">
-              {query.trim() ? (
+              {searching ? (
                 <>
                   <p>No meetings match “{query.trim()}”.</p>
                   <button
@@ -771,43 +1106,214 @@ export function MeetingHistory({
               )}
             </div>
           ) : (
-            <ul className="history-list" aria-label="Meetings">
-              {visibleMeetings.map((item) => (
-                <li
-                  key={item.id}
-                  className={`history-row${item.archived ? ' is-archived' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="history-item"
-                    disabled={busy}
-                    onClick={() => void openMeeting(item.id)}
-                  >
-                    <span className="history-item-title">{item.title}</span>
-                    <span className="history-meta">
-                      <span>{meetingDate(item.startedAtMs)}</span>
-                      <span>{minutes(item.durationMs)}</span>
-                      <span>{sourceNames[item.sources]}</span>
-                      {item.hasMeetingNotes && (
-                        <span className="history-tag">Meeting notes</span>
-                      )}
-                      {item.archived && (
-                        <span className="history-tag">Archived</span>
-                      )}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button history-archive-button"
-                    aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
-                    disabled={busy}
-                    onClick={() => void toggleArchived(item.id, !item.archived)}
-                  >
-                    {item.archived ? 'Unarchive' : 'Archive'}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              {unfiledMeetings.length > 0 && (
+                <ul className="history-list" aria-label="Meetings">
+                  {unfiledMeetings.map(renderMeetingRow)}
+                </ul>
+              )}
+
+              {visibleFolders.map((folder) => {
+                const folderMeetings = meetingsByFolder.get(folder) ?? [];
+                const isEditingFolder =
+                  renamingFolder === folder || confirmDeleteFolder === folder;
+                const isOpen = isEditingFolder
+                  ? true
+                  : searching
+                    ? !(
+                        Object.hasOwn(searchCollapsed, folder) &&
+                        searchCollapsed[folder]
+                      )
+                    : !(
+                        Object.hasOwn(collapsedFolders, folder) &&
+                        collapsedFolders[folder]
+                      );
+                const countWord =
+                  folderMeetings.length === 1 ? 'meeting' : 'meetings';
+                return (
+                  <div key={folder} className="history-folder-group">
+                    <details className="history-folder" open={isOpen}>
+                      <summary
+                        ref={(node) => {
+                          if (node) folderHeaders.current.set(folder, node);
+                          else folderHeaders.current.delete(folder);
+                        }}
+                        className="history-folder-summary"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (isEditingFolder) return;
+                          if (searching) {
+                            setSearchCollapsed((prev) => ({
+                              ...prev,
+                              [folder]: isOpen,
+                            }));
+                          } else {
+                            setCollapsedFolders((prev) => ({
+                              ...prev,
+                              [folder]: isOpen,
+                            }));
+                          }
+                        }}
+                      >
+                        <ChevronRight
+                          size={16}
+                          className="history-folder-chevron"
+                          aria-hidden="true"
+                        />
+                        <span className="history-folder-name">{folder}</span>
+                        <span className="history-folder-sep" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="history-folder-count">
+                          {folderMeetings.length}
+                        </span>
+                        <span className="visually-hidden"> {countWord}</span>
+                      </summary>
+                      <div className="history-folder-body">
+                        {renamingFolder === folder && (
+                          <form
+                            className="history-folder-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void submitRenameFolder();
+                            }}
+                          >
+                            <label
+                              className="history-field"
+                              htmlFor={`${id}-rename-folder`}
+                            >
+                              Folder name
+                              <input
+                                ref={renameFolderInput}
+                                id={`${id}-rename-folder`}
+                                type="text"
+                                value={draftFolderName}
+                                maxLength={80}
+                                disabled={busy}
+                                onChange={(event) =>
+                                  setDraftFolderName(event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Escape') {
+                                    setRenamingFolder(null);
+                                    setDraftFolderName('');
+                                    focusFolder(folder);
+                                  }
+                                }}
+                              />
+                            </label>
+                            <div className="history-actions">
+                              <button
+                                type="submit"
+                                className="primary-button"
+                                disabled={busy || !draftFolderName.trim()}
+                              >
+                                Save folder
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setRenamingFolder(null);
+                                  setDraftFolderName('');
+                                  focusFolder(folder);
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        )}
+
+                        {confirmDeleteFolder === folder && (
+                          <div
+                            className="history-confirm"
+                            role="group"
+                            aria-labelledby={`${id}-delete-folder-title`}
+                          >
+                            <p id={`${id}-delete-folder-title`}>
+                              Delete folder “{folder}”? Any meetings in this
+                              folder will move to unfiled at the top (none will
+                              be deleted).
+                            </p>
+                            <div className="history-actions">
+                              <button
+                                type="button"
+                                className="secondary-button history-danger"
+                                disabled={busy}
+                                onClick={() => void submitDeleteFolder()}
+                              >
+                                Delete folder
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setConfirmDeleteFolder(null);
+                                  focusFolder(folder);
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {folderMeetings.length === 0 ? (
+                          <p className="history-help">
+                            No meetings in this folder yet.
+                          </p>
+                        ) : (
+                          <ul
+                            className="history-list"
+                            aria-label={`Meetings in ${folder}`}
+                          >
+                            {folderMeetings.map(renderMeetingRow)}
+                          </ul>
+                        )}
+                      </div>
+                    </details>
+                    <div className="history-folder-actions">
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Rename folder ${folder}`}
+                        title="Rename folder"
+                        disabled={busy}
+                        onClick={() => {
+                          setError('');
+                          setNotice('');
+                          setCreatingFolder(false);
+                          setConfirmDeleteFolder(null);
+                          setDraftFolderName(folder);
+                          setRenamingFolder(folder);
+                        }}
+                      >
+                        <Pencil size={15} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button history-danger-icon"
+                        aria-label={`Delete folder ${folder}`}
+                        title="Delete folder"
+                        disabled={busy}
+                        onClick={() => {
+                          setError('');
+                          setNotice('');
+                          setCreatingFolder(false);
+                          setRenamingFolder(null);
+                          setConfirmDeleteFolder(folder);
+                        }}
+                      >
+                        <Trash2 size={15} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
           )}
 
           {loading && !listing && (
