@@ -392,6 +392,7 @@ test('the end of a session and the first marked echo are each said once, politel
 
 test('every control in a live session is reached by Tab with a visible focus indicator, and Tab never gets stuck', async ({
   page,
+  browserName,
 }) => {
   await liveSession(page);
   await page.evaluate(
@@ -401,8 +402,10 @@ test('every control in a live session is reached by Tab with a visible focus ind
   await page.locator('body').click({ position: { x: 1, y: 1 } });
   const seen: string[] = [];
   const unmarked: string[] = [];
+  // Match the full-control traversal used by the narrow keyboard checks:
+  // WebKit's default Tab skips buttons; Option-Tab includes all controls.
   for (let press = 0; press < 80; press++) {
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
     const focused = await page.evaluate(() => {
       const element = document.activeElement as HTMLElement | null;
       if (!element || element === document.body) return null;

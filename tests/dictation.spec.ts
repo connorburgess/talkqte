@@ -5,7 +5,7 @@ import { standIn, startLive } from './fixtures/stand-in';
 async function openNotebook(page: Page, query = '/?live&keys=set') {
   await standIn(page, query);
   await expect(
-    page.getByRole('heading', { name: 'No session yet', level: 1 }),
+    page.getByRole('heading', { name: 'Ready for a meeting', level: 1 }),
   ).toBeVisible();
 }
 

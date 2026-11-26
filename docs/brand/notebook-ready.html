@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notebook states · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <style>
+      @font-face {
+        font-family: 'Manrope Variable';
+        font-style: normal;
+        font-weight: 200 800;
+        src: url('./fonts/manrope-latin-wght-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 400;
+        src: url('./fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+      }
+      body {
+        padding: var(--space-24);
+      }
+      main {
+        max-width: 1100px;
+        margin: auto;
+      }
+      main > p {
+        max-width: 68ch;
+        margin-top: var(--space-12);
+      }
+      article {
+        margin-top: var(--space-48);
+      }
+      article > h2 {
+        margin-bottom: var(--space-16);
+        font-size: 18px;
+      }
+      .specimen {
+        border: 1px solid var(--line);
+        padding: var(--space-24);
+      }
+      .specimen .notebook-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .specimen .companion {
+        grid-column: 2;
+        grid-row: 1;
+      }
+      @media (max-width: 760px) {
+        body,
+        .specimen {
+          padding: var(--space-16);
+        }
+        .specimen .notebook-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .specimen .companion {
+          grid-column: auto;
+          grid-row: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Notebook states</h1>
+      <p>
+        Built React surface · Direction C. Fictional, static specimens using
+        shared app tokens and styles. Buttons illustrate available states; they
+        do not start capture, call a provider, or save content. Responsive
+        ready, active and recovery behavior is checked separately in the browser
+        fixture.
+      </p>
+      <article id="ready">
+        <h2>Ready</h2>
+        <div class="specimen notebook-idle">
+          <section class="session-strip" aria-label="ready session">
+            <div class="session-state">
+              <div>
+                <h1>Ready for a meeting</h1>
+                <p>Nothing is captured until you start a live session.</p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="primary-button">
+                  Start live session
+                </button>
+                <p class="session-start-disclosure">
+                  Starts immediately: sends your microphone and system audio to
+                  Deepgram and recent lines to Anthropic until you press Stop.
+                </p>
+              </div>
+            </div>
+          </section>
+          <div class="notebook-grid">
+            <section class="editor-section">
+              <div class="editor-heading">
+                <div
+                  class="tabs"
+                  role="tablist"
+                  aria-label="Illustrated meeting content"
+                >
+                  <button
+                    role="tab"
+                    aria-selected="true"
+                    id="specimen-notes-tab"
+                    aria-controls="specimen-notes"
+                  >
+                    Notes</button
+                  ><button role="tab" aria-selected="false" tabindex="-1">
+                    Transcript <span class="tab-count">0</span>
+                  </button>
+                </div>
+                <button type="button" class="text-button notebook-export">
+                  Export
+                </button>
+              </div>
+              <div
+                role="tabpanel"
+                id="specimen-notes"
+                aria-labelledby="specimen-notes-tab"
+              >
+                <label class="visually-hidden" for="specimen-working-copy"
+                  >Meeting notes</label
+                ><textarea
+                  class="note-editor"
+                  id="specimen-working-copy"
+                  placeholder="What would you like to remember?"
+                ></textarea>
+                <div class="editor-footer">
+                  <span>Working copy</span><span>0 / 20,000</span>
+                </div>
+              </div>
+            </section>
+            <aside class="companion">
+              <div class="companion-heading"><h2>Cues</h2></div>
+              <div class="question-idle">
+                <h3>Cues follow the conversation.</h3>
+                <p>
+                  During a session, Anthropic can offer a source-backed cue when
+                  there’s something useful to add. Silence is normal.
+                </p>
+              </div>
+              <button type="button" class="text-button companion-settings">
+                Cue appearance and timing
+              </button>
+            </aside>
+          </div>
+          <section class="meeting-focus">
+            <details class="focus-disclosure">
+              <summary>This meeting <span>Add focus · optional</span></summary>
+              <p class="small muted">
+                Up to 5 short topics you want to cover, word-matched for this
+                session until you quit.
+              </p>
+              <label for="specimen-focus">Focus · optional</label
+              ><textarea id="specimen-focus" rows="3"></textarea>
+            </details>
+          </section>
+          <details class="focus-disclosure">
+            <summary>Prior context <span>0 notes selected</span></summary>
+            <p class="small muted">
+              Importing notes does not approve sending them to a cue provider.
+              Review processing separately.
+            </p>
+          </details>
+          <footer class="notebook-footer">
+            <p>
+              Working notes stay here until you quit. Live meetings save locally
+              on Stop by default; change this in Settings.
+            </p>
+          </footer>
+        </div>
+      </article>
+      <article id="unavailable">
+        <h2>Unavailable</h2>
+        <div class="specimen notebook-idle">
+          <section class="session-strip" aria-label="unavailable session">
+            <div class="session-state">
+              <div>
+                <h1>No session yet</h1>
+                <p>
+                  Nothing is captured. This build has no live transcription.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group"></div>
+            </div>
+          </section>
+          <aside class="companion">
+            <div class="companion-heading"><h2>Cues</h2></div>
+            <div class="question-idle">
+              <h3>Live cues are unavailable.</h3>
+              <p>
+                Check Settings for provider status and live-session setup
+                requirements.
+              </p>
+            </div>
+            <button type="button" class="text-button companion-settings">
+              Cue appearance and timing
+            </button>
+          </aside>
+        </div>
+      </article>
+      <article id="preparing">
+        <h2>Preparing</h2>
+        <div class="specimen">
+          <section class="session-strip" aria-label="preparing session">
+            <div class="session-state">
+              <div>
+                <h1>Preparing live session</h1>
+                <p>Starting…</p>
+                <p>
+                  Capture controls remain above the Notebook in the running app.
+                  Preparing and cancellation remain retryable.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="secondary-button">
+                  Cancel start
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
+      <article id="active">
+        <h2>Active</h2>
+        <div class="specimen">
+          <section class="session-strip" aria-label="active session">
+            <div class="session-state">
+              <div>
+                <h1>Live session in progress</h1>
+                <p>Your microphone and system audio · audio not recorded</p>
+                <p>
+                  Capture controls remain above the Notebook in the running app.
+                  Stop remains available independently of note editing.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="secondary-button">
+                  Stop live session
+                </button>
+              </div>
+            </div>
+          </section>
+          <aside class="companion">
+            <div class="companion-heading"><h2>Cues</h2></div>
+            <div class="question-idle">
+              <h3>A little room to think.</h3>
+              <p>
+                Cues pass quietly. Keep listening without needing to respond.
+              </p>
+            </div>
+            <button type="button" class="text-button companion-settings">
+              Cue appearance and timing
+            </button>
+          </aside>
+        </div>
+      </article>
+      <article id="paused">
+        <h2>Paused</h2>
+        <div class="specimen">
+          <section class="session-strip" aria-label="paused session">
+            <div class="session-state">
+              <div>
+                <h1>Cues paused · session continues</h1>
+                <p>
+                  Microphone and transcript continue. Stop live session when
+                  done.
+                </p>
+                <p>
+                  Capture controls remain above the Notebook in the running app.
+                  Stop remains available independently of note editing.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="secondary-button">
+                  Stop live session</button
+                ><button type="button" class="secondary-button">
+                  Resume cues
+                </button>
+              </div>
+            </div>
+          </section>
+          <aside class="companion">
+            <div class="companion-heading"><h2>Cues</h2></div>
+            <div class="question-idle">
+              <h3>Cues are paused.</h3>
+              <p>
+                Resume cues when you want suggestions again. Speech during the
+                pause won’t trigger cues.
+              </p>
+            </div>
+            <button type="button" class="text-button companion-settings">
+              Cue appearance and timing
+            </button>
+          </aside>
+        </div>
+      </article>
+      <article id="stopping">
+        <h2>Stopping</h2>
+        <div class="specimen">
+          <section class="session-strip" aria-label="stopping session">
+            <div class="session-state">
+              <div>
+                <h1>Finishing live session</h1>
+                <p>Releasing microphone and finishing transcription…</p>
+                <p>
+                  Capture controls remain above the Notebook in the running app.
+                  Stop remains available independently of note editing.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="secondary-button">
+                  Stop live session
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
+      <article id="error">
+        <h2>Error</h2>
+        <div class="specimen notebook-idle">
+          <div class="error-banner" role="alert">
+            The cloud transcription settings are not usable.
+            <button type="button" class="text-button">Dismiss</button>
+          </div>
+          <section class="session-strip" aria-label="error session">
+            <div class="session-state">
+              <div>
+                <h1>Ready for a meeting</h1>
+                <p>Nothing is captured until you start a live session.</p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="primary-button">
+                  Start live session
+                </button>
+                <p class="session-start-disclosure">
+                  Starts immediately: sends your microphone and system audio to
+                  Deepgram and recent lines to Anthropic until you press Stop.
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
+      <article id="ended">
+        <h2>Ended</h2>
+        <div class="specimen">
+          <section class="session-strip" aria-label="ended session">
+            <div class="session-state">
+              <div>
+                <h1>Live session ended</h1>
+                <p>
+                  Saved to Meetings. Notes stay here until you start another
+                  session or quit.
+                </p>
+              </div>
+            </div>
+            <div class="session-actions">
+              <div class="session-start-group">
+                <button type="button" class="primary-button">
+                  Start live session
+                </button>
+              </div>
+            </div>
+          </section>
+          <footer class="notebook-footer">
+            <p>
+              Saved to Meetings on this computer until you delete it. Exports
+              and backups have their own lifecycle.
+            </p>
+          </footer>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
