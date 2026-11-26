@@ -24,6 +24,7 @@
     "allow-set-sensitivity",
     "allow-set-user-name",
     "allow-set-focus",
+    "allow-set-session-mode",
     "allow-set-overlay",
     "allow-export-markdown",
     "allow-export-preview",

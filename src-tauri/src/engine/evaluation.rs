@@ -540,6 +540,7 @@ impl Engine {
                 sources,
                 existing.clone(),
             )?
+            .with_session_mode(self.state.session_mode)?
             .with_listener(self.state.user_name.clone(), state.earlier.clone())
         };
         let mut request = make_request(sources)?;

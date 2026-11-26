@@ -38,6 +38,7 @@ fn main() {
             "set_sensitivity",
             "set_user_name",
             "set_focus",
+            "set_session_mode",
             "set_overlay",
             "export_markdown",
             "export_preview",

@@ -28,6 +28,7 @@ const state: Snapshot = {
   sensitivity: 'balanced',
   userName: null,
   focus: [],
+  sessionMode: 'meeting',
   overlayEnabled: true,
   companionPosition: 'bottomRight',
   questionSize: 'standard',
@@ -107,6 +108,13 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
       state.notes = notes;
       break;
     }
+    case 'set_session_mode':
+      if (state.status === 'running' || state.status === 'paused')
+        return Promise.reject(
+          new Error('Stop the session before changing its mode.'),
+        );
+      state.sessionMode = (args as Commands['set_session_mode']).mode;
+      break;
     case 'set_user_name':
       // Stored only; the preview raises no cue that could use the name.
       state.userName = (args as Commands['set_user_name']).name?.trim() || null;

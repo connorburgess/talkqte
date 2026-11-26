@@ -45,6 +45,7 @@ import { MeetingHistory } from './components/MeetingHistory';
 import { SpeakerChip } from './components/SpeakerChip';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
+import { SessionMode } from './components/SessionMode';
 import type { HistoryStatus } from './lib/meetingHistory';
 import {
   PanelDivider,
@@ -2046,6 +2047,12 @@ function Notebook() {
               </div>
             </section>
 
+            <SessionMode
+              mode={state.sessionMode}
+              locked={live || simulated || preparing || finishing}
+              busy={busy || startPending}
+              onChange={(mode) => bridge.command('set_session_mode', { mode })}
+            />
             <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
             <KeepInHistory
               snapshot={state}

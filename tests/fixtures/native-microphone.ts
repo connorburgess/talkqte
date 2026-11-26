@@ -781,6 +781,16 @@ mockIPC(
           message: null,
         });
         return;
+      case 'set_session_mode': {
+        if (new URLSearchParams(location.search).has('reject-session-mode'))
+          throw new Error('Session type could not be changed. Try again.');
+        if (session.status === 'running' || session.status === 'paused')
+          throw new Error('Stop the session before changing its mode.');
+        const mode = (args as Commands['set_session_mode']).mode;
+        preview.command('set_session_mode', { mode });
+        if (session.revision >= 1_000) await publish({ sessionMode: mode });
+        return;
+      }
       case 'set_focus': {
         const { lines } = args as Commands['set_focus'];
         focusSubmissions.push([...lines]);

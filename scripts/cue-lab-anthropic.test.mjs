@@ -230,7 +230,7 @@ test('live quality policy fingerprint preserves cue-state selection and anonymou
     const params = buildAnthropicParams('claude-opus-5-5', request);
     assert.equal(
       createHash('sha256').update(params.system[0].text).digest('hex'),
-      '559ae463a0bd5b9b8dcdd932cf08116bff4473e0705bccbe4c434c4777ccd635',
+      'cfcbdc33557244246b66e7ba43bb4bd56d555be42c0361fefe34e31b37b4d060',
     );
     // Preserve asked identity in the real wire input, so the prompt's generic
     // ownership distinction cannot accidentally apply to an asked question.
