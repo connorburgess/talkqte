@@ -192,13 +192,6 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
   },
   {
     file: 'src/styles.css',
-    selector: '.setup-disclosure',
-    property: 'border-top',
-    kind: 'hairline',
-    reason: 'Full-width 1px neutral section divider above setup disclosure.',
-  },
-  {
-    file: 'src/styles.css',
     selector: '.tabs',
     property: 'border-bottom',
     kind: 'hairline',

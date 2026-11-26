@@ -13,13 +13,16 @@ import {
   deleteKeptMeeting,
   exportKeptMeeting,
   failure,
+  historyStatus,
   keptMeetingExportPreview,
   keptMeetings,
   meetingDate,
   minutes,
   openKeptMeeting,
   renameKeptMeeting,
+  setKeptMeetingArchived,
   sourceNames,
+  type AfterSessionKeep,
   type KeptListing,
   type KeptMeeting,
 } from '../lib/meetingHistory';
@@ -48,7 +51,9 @@ export function MeetingHistory({
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [listing, setListing] = useState<KeptListing | null>(null);
+  const [afterKeep, setAfterKeep] = useState<AfterSessionKeep>('auto');
   const [selected, setSelected] = useState<KeptMeeting | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,8 +71,13 @@ export function MeetingHistory({
   // Export review modal for the opened meeting.
   const [exportPreview, setExportPreview] = useState<string | null>(null);
   const [exportError, setExportError] = useState('');
+  const [showEchoes, setShowEchoes] = useState(false);
   const exportDialog = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setShowEchoes(false);
+  }, [selected?.id]);
 
   const listRequest = useRef(0);
   const openRequestRef = useRef(0);
@@ -78,15 +88,19 @@ export function MeetingHistory({
     const request = ++listRequest.current;
     setLoading(true);
     try {
-      const next = await keptMeetings(search.trim() || undefined);
+      const [next, status] = await Promise.all([
+        keptMeetings(search.trim() || undefined),
+        historyStatus().catch(() => null),
+      ]);
       if (request !== listRequest.current) return;
       setListing(next);
+      if (status) setAfterKeep(status.afterSessionKeep);
       if (next.availability !== 'on') {
         setSelected(null);
       }
     } catch (problem) {
       if (request !== listRequest.current) return;
-      setError(failure(problem, 'Kept meetings could not be read.'));
+      setError(failure(problem, 'Meetings could not be read.'));
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
@@ -168,6 +182,40 @@ export function MeetingHistory({
       await loadList(query);
     } catch (problem) {
       setError(failure(problem, 'The meeting could not be renamed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleArchived = async (meetingId: string, archived: boolean) => {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await setKeptMeetingArchived(meetingId, archived);
+      setSelected((current) =>
+        current && current.id === updated.id
+          ? {
+              ...current,
+              archived: updated.archived,
+              revision: updated.revision,
+            }
+          : current,
+      );
+      setNotice(
+        archived
+          ? `Archived “${updated.title}”.`
+          : `Unarchived “${updated.title}”.`,
+      );
+      await loadList(query);
+    } catch (problem) {
+      setError(
+        failure(
+          problem,
+          archived
+            ? 'The meeting could not be archived.'
+            : 'The meeting could not be unarchived.',
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -267,6 +315,16 @@ export function MeetingHistory({
             >
               <ArrowUpRight size={16} />
               Export…
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() =>
+                void toggleArchived(selected.id, !selected.archived)
+              }
+            >
+              {selected.archived ? 'Unarchive' : 'Archive'}
             </button>
             {!confirmDelete && (
               <button
@@ -374,6 +432,7 @@ export function MeetingHistory({
             {selected.transcribedBy && (
               <span>Transcribed by {selected.transcribedBy}</span>
             )}
+            {selected.archived && <span className="history-tag">Archived</span>}
           </p>
         </header>
 
@@ -385,7 +444,7 @@ export function MeetingHistory({
           {selected.notes.trim() ? (
             <pre className="history-text">{selected.notes}</pre>
           ) : (
-            <p className="history-help">No notes were written.</p>
+            <p className="history-help">No notes.</p>
           )}
         </section>
 
@@ -405,7 +464,7 @@ export function MeetingHistory({
         >
           <h2 id={`${id}-cues-heading`}>Cues shown ({selected.cues.length})</h2>
           {selected.cues.length === 0 ? (
-            <p className="history-help">No cues were shown in this meeting.</p>
+            <p className="history-help">No cues shown.</p>
           ) : (
             <ul className="history-cues">
               {selected.cues.map((cue, index) => (
@@ -424,37 +483,65 @@ export function MeetingHistory({
           )}
         </section>
 
-        <section
-          className="history-section"
-          aria-labelledby={`${id}-transcript-heading`}
-        >
-          <h2 id={`${id}-transcript-heading`}>
-            Transcript ({selected.transcript.length})
-          </h2>
-          {selected.transcript.length === 0 ? (
-            <p className="history-help">No transcript lines.</p>
-          ) : (
-            <div className="transcript">
-              {selected.transcript.map((line, index) => (
-                <article
-                  key={`${line.atMs}-${index}`}
-                  className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
-                >
-                  <div className="transcript-segment-head">
-                    {both && (
-                      <span>{line.label === 'them' ? 'Them' : 'You'}</span>
-                    )}
-                    {line.echo && (
-                      <span className="transcript-echo-label">Likely echo</span>
-                    )}
-                    <time>{clockTime(line.atMs)}</time>
-                  </div>
-                  <p>{line.text}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+        {(() => {
+          const spokenTranscript = selected.transcript.filter(
+            (line) => !line.echo,
+          );
+          const echoCount =
+            selected.transcript.length - spokenTranscript.length;
+          const visibleTranscript = showEchoes
+            ? selected.transcript
+            : spokenTranscript;
+          return (
+            <section
+              className="history-section"
+              aria-labelledby={`${id}-transcript-heading`}
+            >
+              <div className="history-section-head">
+                <h2 id={`${id}-transcript-heading`}>
+                  Transcript ({spokenTranscript.length})
+                </h2>
+                {echoCount > 0 && (
+                  <button
+                    type="button"
+                    className="transcript-echo-toggle"
+                    aria-expanded={showEchoes}
+                    onClick={() => setShowEchoes((open) => !open)}
+                  >
+                    {showEchoes
+                      ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                      : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
+                  </button>
+                )}
+              </div>
+              {selected.transcript.length === 0 ? (
+                <p className="history-help">No transcript lines.</p>
+              ) : visibleTranscript.length === 0 ? null : (
+                <div className="transcript">
+                  {visibleTranscript.map((line, index) => (
+                    <article
+                      key={`${line.atMs}-${index}`}
+                      className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
+                    >
+                      <div className="transcript-segment-head">
+                        {both && (
+                          <span>{line.label === 'them' ? 'Them' : 'You'}</span>
+                        )}
+                        {line.echo && (
+                          <span className="transcript-echo-label">
+                            Likely echo
+                          </span>
+                        )}
+                        <time>{clockTime(line.atMs)}</time>
+                      </div>
+                      <p>{line.text}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })()}
 
         <dialog
           ref={exportDialog}
@@ -506,14 +593,17 @@ export function MeetingHistory({
     );
   }
 
+  const archivedCount = (listing?.meetings ?? []).filter(
+    (item) => item.archived,
+  ).length;
+  const visibleMeetings = (listing?.meetings ?? []).filter(
+    (item) => showArchived || !item.archived,
+  );
+
   return (
     <div className="history">
-      <h1>Kept meetings</h1>
-      <p className="page-description">
-        Kept meetings on this Mac, newest first. By default, non-empty live
-        sessions save here when they end; you can change this in Settings → Kept
-        meetings.
-      </p>
+      <h1>Meetings</h1>
+      <p className="page-description">Saved on this Mac, newest first.</p>
 
       <p className="visually-hidden" role="status">
         {notice}
@@ -523,27 +613,26 @@ export function MeetingHistory({
 
       {!desktop && listing?.availability !== 'on' ? (
         <p className="history-help">
-          Kept meetings are available in the desktop app.
+          Meetings are available in the desktop app.
         </p>
       ) : listing?.availability === 'labRun' ? (
         <p className="history-help" role="status">
-          This is a lab run: kept meetings are not read or written.
+          Lab runs don’t read or save meetings.
         </p>
       ) : listing?.availability === 'unavailable' ? (
         <p className="history-help" role="status">
-          Kept meetings are not available in this launch.
+          Meetings are not available in this launch.
         </p>
       ) : listing?.availability === 'newer' ? (
         <p className="history-help" role="status">
-          Your kept meetings were saved by a newer version of TalkQTE. This
-          version leaves them as they are; Settings → Kept meetings → Delete all
-          meetings still removes them.
+          Your meetings were saved by a newer version of TalkQTE and are left as
+          they are. Delete all meetings in Settings removes them.
         </p>
       ) : (
         <>
           <div className="history-search">
             <label className="visually-hidden" htmlFor={`${id}-search`}>
-              Search kept meetings
+              Search meetings
             </label>
             <Search size={16} aria-hidden="true" />
             <input
@@ -551,7 +640,7 @@ export function MeetingHistory({
               type="search"
               value={query}
               maxLength={200}
-              placeholder="Search titles, notes, cues, or transcripts"
+              placeholder="Search meetings…"
               onChange={(event) => setQuery(event.target.value)}
             />
             {query && (
@@ -565,19 +654,32 @@ export function MeetingHistory({
             )}
           </div>
 
+          {(archivedCount > 0 || showArchived) && (
+            <div className="history-filter-row">
+              <label className="history-check">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                <span>Show archived ({archivedCount})</span>
+              </label>
+            </div>
+          )}
+
           {listing && listing.unreadable > 0 && (
             <p className="history-help" role="status">
               {listing.unreadable === 1
-                ? '1 kept meeting could not be read and was left untouched.'
-                : `${listing.unreadable} kept meetings could not be read and were left untouched.`}
+                ? '1 meeting could not be read and was left untouched.'
+                : `${listing.unreadable} meetings could not be read and were left untouched.`}
             </p>
           )}
 
-          {listing && listing.meetings.length === 0 ? (
+          {listing && visibleMeetings.length === 0 ? (
             <div className="history-empty">
               {query.trim() ? (
                 <>
-                  <p>No kept meetings match “{query.trim()}”.</p>
+                  <p>No meetings match “{query.trim()}”.</p>
                   <button
                     type="button"
                     className="secondary-button"
@@ -586,17 +688,38 @@ export function MeetingHistory({
                     Clear search
                   </button>
                 </>
+              ) : archivedCount > 0 && !showArchived ? (
+                <>
+                  <p>
+                    {archivedCount === 1
+                      ? '1 archived meeting is hidden from the list and from auto prior context.'
+                      : `${archivedCount} archived meetings are hidden from the list and from auto prior context.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setShowArchived(true)}
+                  >
+                    Show archived
+                  </button>
+                </>
               ) : (
                 <p>
-                  No meetings kept yet. Non-empty live sessions save here when
-                  they end unless you change Kept meetings in Settings.
+                  {afterKeep === 'ask'
+                    ? 'No meetings yet. Choose Keep meeting after a session ends to save one here.'
+                    : afterKeep === 'off'
+                      ? 'No meetings yet. Auto-save is off in Settings.'
+                      : 'No meetings yet. Ended sessions save here automatically.'}
                 </p>
               )}
             </div>
           ) : (
-            <ul className="history-list" aria-label="Kept meetings">
-              {(listing?.meetings ?? []).map((item) => (
-                <li key={item.id}>
+            <ul className="history-list" aria-label="Meetings">
+              {visibleMeetings.map((item) => (
+                <li
+                  key={item.id}
+                  className={`history-row${item.archived ? ' is-archived' : ''}`}
+                >
                   <button
                     type="button"
                     className="history-item"
@@ -611,7 +734,19 @@ export function MeetingHistory({
                       {item.hasMeetingNotes && (
                         <span className="history-tag">Meeting notes</span>
                       )}
+                      {item.archived && (
+                        <span className="history-tag">Archived</span>
+                      )}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button history-archive-button"
+                    aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
+                    disabled={busy}
+                    onClick={() => void toggleArchived(item.id, !item.archived)}
+                  >
+                    {item.archived ? 'Unarchive' : 'Archive'}
                   </button>
                 </li>
               ))}
@@ -620,7 +755,7 @@ export function MeetingHistory({
 
           {loading && !listing && (
             <p className="history-help" role="status">
-              Loading kept meetings…
+              Loading meetings…
             </p>
           )}
         </>

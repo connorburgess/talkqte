@@ -6,12 +6,10 @@ import {
   keepMeetingNotes,
   meetingNotesPlan,
   meetingNotesResult,
-  notesModelsByProvider,
   planChanged,
   writeMeetingNotes,
   type CheckItem,
   type MeetingNotesDraft,
-  type MeetingNotesPlan,
   type MeetingNotesResult,
 } from '../lib/meetingNotes';
 import type { Snapshot } from '../lib/types';
@@ -30,11 +28,9 @@ function message(error: unknown, fallback: string) {
   return fallback;
 }
 
-/** After a live session with a transcript has ended: the person may ask,
- * once, for meeting notes written by a model with their own Anthropic key.
- * Nothing is sent until they confirm a plan that says what goes where and
- * roughly what it costs. The checked notes are editable and join the export
- * only if the person keeps them. */
+/** After a live session with a transcript has ended: the person may generate
+ * meeting notes in one click using their configured cue & notes provider key.
+ * Checked notes are editable and join the export when kept. */
 export function MeetingNotes({
   snapshot,
   openPlanTrigger = 0,
@@ -48,14 +44,12 @@ export function MeetingNotes({
     snapshot.live &&
     snapshot.status === 'ended' &&
     snapshot.transcript.length > 0;
-  const [plan, setPlan] = useState<MeetingNotesPlan | null>(null);
   const [includeNotes, setIncludeNotes] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<MeetingNotesResult | null>(null);
   const [text, setText] = useState('');
   const sectionRef = useRef<HTMLElement>(null);
-  const confirmHeading = useRef<HTMLHeadingElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const writeButton = useRef<HTMLButtonElement>(null);
   const session = useRef(phase);
@@ -66,7 +60,6 @@ export function MeetingNotes({
   // A new session (phase back to none) clears whatever was on screen.
   useEffect(() => {
     if (phase === 'none' && session.current !== 'none') {
-      setPlan(null);
       setResult(null);
       setText('');
       setError('');
@@ -93,33 +86,18 @@ export function MeetingNotes({
     };
   }, [phase]);
 
-  // Focus the confirmation when it opens, not when it is re-planned.
-  const planOpen = plan !== null;
-  useEffect(() => {
-    if (planOpen) confirmHeading.current?.focus();
-  }, [planOpen]);
-
   // Triggered when the person clicks Write notes from the floating dock.
   useEffect(() => {
     if (!openPlanTrigger || openPlanTrigger <= handledTrigger.current) return;
     if (!ended) return;
     handledTrigger.current = openPlanTrigger;
     sectionRef.current?.scrollIntoView({ block: 'center' });
-    if (phase === 'none' && !plan) {
-      void openPlan(false);
-    } else if (phase === 'none' && plan) {
-      confirmHeading.current?.focus();
+    if (phase === 'none') {
+      requestAnimationFrame(() => writeButton.current?.focus());
     } else if (phase === 'draft') {
       resultHeading.current?.focus();
     }
-  }, [openPlanTrigger, ended, phase, plan]);
-
-  // The person's notes changed while they are set to be sent: show the
-  // plan for what would now be sent.
-  const notesText = snapshot.notes;
-  useEffect(() => {
-    if (planOpen && includeNotes) void openPlan(true);
-  }, [notesText]);
+  }, [openPlanTrigger, ended, phase]);
 
   useEffect(() => {
     if (focusResult.current && resultHeading.current) {
@@ -128,45 +106,30 @@ export function MeetingNotes({
     }
   });
 
-  const openPlan = async (notes: boolean) => {
-    setBusy(true);
-    setError('');
-    try {
-      setPlan(await meetingNotesPlan(notes));
-    } catch (failure) {
-      setPlan(null);
-      setError(
-        message(
-          failure,
-          'The request could not be prepared. Nothing was sent.',
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const send = async () => {
-    if (!plan) return;
+  const generate = async () => {
     setBusy(true);
     setError('');
     const notes = includeNotes;
-    const confirmed = plan.fingerprint;
-    setPlan(null);
     try {
-      const draft: MeetingNotesDraft = await writeMeetingNotes(
-        notes,
-        confirmed,
-      );
+      const plan = await meetingNotesPlan(notes);
+      let draft: MeetingNotesDraft;
+      try {
+        draft = await writeMeetingNotes(notes, plan.fingerprint);
+      } catch (failure) {
+        const failureText = message(failure, 'No notes were written.');
+        if (failureText.startsWith(planChanged)) {
+          const refreshed = await meetingNotesPlan(notes);
+          draft = await writeMeetingNotes(notes, refreshed.fingerprint);
+        } else {
+          throw failure;
+        }
+      }
       setResult({ draft, spentMicroUsd: draft.spentMicroUsd });
       setText(draft.markdown);
       focusResult.current = true;
     } catch (failure) {
-      const text = message(failure, 'No notes were written.');
-      setError(text);
-      // What would be sent changed: show the new plan to confirm again.
-      if (text.startsWith(planChanged)) await openPlan(notes);
-      else requestAnimationFrame(() => writeButton.current?.focus());
+      setError(message(failure, 'No notes were written.'));
+      requestAnimationFrame(() => writeButton.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -184,14 +147,6 @@ export function MeetingNotes({
     }
   };
 
-  const care = (modelId: string, custom?: boolean) => {
-    if (custom) return 'Custom';
-    for (const list of Object.values(notesModelsByProvider)) {
-      const found = list.find((model) => model.id === modelId);
-      if (found) return found.label;
-    }
-    return 'Custom';
-  };
   const providerConsole = (providerName?: string) => {
     switch (providerName) {
       case 'OpenAI':
@@ -207,25 +162,23 @@ export function MeetingNotes({
   const resultCustom = result?.customModel ?? result?.draft?.customModel;
   const cost =
     result?.spentMicroUsd !== undefined && result?.spentMicroUsd !== null
-      ? ` Estimated cost of this request: about ${dollars(result.spentMicroUsd)} (an estimate, not your bill).`
+      ? ` Estimated cost: about ${dollars(result.spentMicroUsd)}.`
       : resultCustom
-        ? ` Estimated cost unavailable for custom model; your ${providerConsole(resultProvider)} shows it.`
-        : ` The API did not report what this request cost; your ${providerConsole(resultProvider)} shows it.`;
+        ? ` Estimated cost unavailable for custom model; check ${providerConsole(resultProvider)}.`
+        : '';
 
   const chip =
     phase === 'writing'
-      ? { label: 'Writing notes…', tone: 'is-checking' }
+      ? { label: 'Generating…', tone: 'is-checking' }
       : phase === 'draft'
         ? { label: 'Editable draft', tone: 'is-set' }
         : phase === 'kept'
-          ? { label: 'Kept', tone: 'is-set' }
+          ? { label: 'Saved', tone: 'is-set' }
           : phase === 'failed'
             ? { label: 'Failed', tone: 'is-failed' }
             : phase === 'discarded'
               ? { label: 'Discarded', tone: '' }
-              : plan
-                ? { label: 'Nothing sent yet', tone: '' }
-                : null;
+              : null;
 
   return (
     <section
@@ -245,118 +198,33 @@ export function MeetingNotes({
         )}
       </div>
 
-      {phase === 'none' && !plan && (
+      {phase === 'none' && (
         <>
           <p className="meeting-notes-help">
-            A model can write a short summary, decisions, action items and open
-            questions from this meeting's transcript, using your chosen API key.
-            You see what will be sent and an estimated cost first; nothing is
-            sent until you confirm. Each meeting gets one request.
+            Summary, decisions, action items, and open questions from this
+            transcript, cited to the lines they came from.
           </p>
-          <button
-            ref={writeButton}
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => void openPlan(false)}
-          >
-            Write meeting notes…
-          </button>
-        </>
-      )}
-
-      {phase === 'none' && plan && (
-        <div
-          className="meeting-notes-confirm"
-          role="group"
-          aria-labelledby={`${id}-confirm`}
-        >
-          <h3 id={`${id}-confirm`} ref={confirmHeading} tabIndex={-1}>
-            Send this meeting to {plan.providerName ?? 'Anthropic'}?
-          </h3>
-          <p>
-            This sends this session's transcript: {plan.transcriptLines}{' '}
-            {plan.transcriptLines === 1 ? 'line' : 'lines'}, about{' '}
-            {plan.minutes} {plan.minutes === 1 ? 'minute' : 'minutes'} (
-            {plan.kilobytes} KB), with each line's time but no speaker labels.{' '}
-            {plan.noteLines === undefined
-              ? 'Your notes are not sent.'
-              : `Your notes are sent too: ${plan.noteLines} ${plan.noteLines === 1 ? 'line' : 'lines'}.`}{' '}
-            Your session name, focus lines, imported notes and the cues shown
-            are never sent.
-          </p>
-          <div className="meeting-notes-choice">
-            <input
-              id={`${id}-include`}
-              type="checkbox"
-              checked={includeNotes}
-              disabled={busy}
-              onChange={(event) => {
-                setIncludeNotes(event.target.checked);
-                void openPlan(event.target.checked);
-              }}
-            />
-            <label htmlFor={`${id}-include`}>Also send my notes</label>
-          </div>
-          <div className="meeting-notes-summary">
-            <p>To: {plan.destination}.</p>
-            <p>
-              Notes setting: {care(plan.model, plan.customModel)}, model{' '}
-              {plan.model}. Change it in Settings before sending.
-            </p>
-            <p>
-              {plan.likelyMicroUsd !== undefined &&
-              plan.likelyMicroUsd !== null &&
-              plan.worstMicroUsd !== undefined &&
-              plan.worstMicroUsd !== null &&
-              plan.spendCapMicroUsd !== undefined &&
-              plan.spendCapMicroUsd !== null &&
-              !plan.customModel ? (
-                <>
-                  Estimated cost: about {dollars(plan.likelyMicroUsd)}, at most{' '}
-                  {dollars(plan.worstMicroUsd)}
-                  {plan.cueSpentMicroUsd
-                    ? `, on top of about ${dollars(plan.cueSpentMicroUsd)} for this meeting's cues`
-                    : ''}
-                  . An estimate, not your bill; one meeting's notes may not be
-                  estimated above {dollars(plan.spendCapMicroUsd)}.
-                </>
-              ) : (
-                <>
-                  Estimated cost unavailable for custom model
-                  {plan.cueSpentMicroUsd
-                    ? ` (cues so far: about ${dollars(plan.cueSpentMicroUsd)})`
-                    : ''}
-                  . This model is outside TalkQTE's built-in price table.
-                </>
-              )}
-            </p>
-          </div>
-          <p className="meeting-notes-help">
-            One request, no retry: if it fails, nothing more is sent for this
-            meeting. {plan.providerName ?? 'Anthropic'} handles what is sent
-            under your API account's terms, and it cannot be recalled once sent.
-          </p>
-          <div className="meeting-notes-actions">
+          <div className="meeting-notes-controls">
             <button
+              ref={writeButton}
               className="primary-button"
               disabled={busy}
-              onClick={() => void send()}
+              onClick={() => void generate()}
             >
-              Send and write notes
+              Generate notes
             </button>
-            <button
-              className="secondary-button"
-              disabled={busy}
-              onClick={() => {
-                setPlan(null);
-                setIncludeNotes(false);
-                requestAnimationFrame(() => writeButton.current?.focus());
-              }}
-            >
-              Cancel
-            </button>
+            <div className="meeting-notes-choice">
+              <input
+                id={`${id}-include`}
+                type="checkbox"
+                checked={includeNotes}
+                disabled={busy}
+                onChange={(event) => setIncludeNotes(event.target.checked)}
+              />
+              <label htmlFor={`${id}-include`}>Include my notes</label>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {phase === 'writing' && (
@@ -378,13 +246,7 @@ export function MeetingNotes({
           <h3 ref={resultHeading} tabIndex={-1}>
             Check, edit, then keep or discard
           </h3>
-          <p role="status">
-            Written by a model, which can still be wrong. Each item ends with
-            the transcript times or note lines it came from. An owner or date is
-            shown only when those words appear in the lines the item cites; that
-            does not show the person agreed to it.
-            {cost}
-          </p>
+          <p role="status">Model-written — verify against cited lines.{cost}</p>
           <label htmlFor={`${id}-text`}>Notes to keep, editable</label>
           <textarea
             id={`${id}-text`}
@@ -413,10 +275,6 @@ export function MeetingNotes({
               ))}
             </ul>
           </details>
-          <p className="meeting-notes-help">
-            Kept notes are added to your export after your own notes; the export
-            review shows them. Nothing is saved until you export.
-          </p>
           <div className="meeting-notes-actions">
             <button
               className="primary-button"
@@ -449,7 +307,7 @@ export function MeetingNotes({
       {phase === 'kept' && (
         <div className="meeting-notes-result">
           <p role="status">
-            Notes kept. They are included when you export, after your own notes.
+            Notes kept. Included when you export, after your own notes.
           </p>
           <pre>{result?.kept ?? text}</pre>
           <div className="meeting-notes-actions">
@@ -474,8 +332,7 @@ export function MeetingNotes({
 
       {phase === 'discarded' && (
         <p className="meeting-notes-help" role="status">
-          Notes discarded. Each meeting gets one request, so none will be
-          written again for this meeting.
+          Notes discarded. One request per meeting.
         </p>
       )}
 

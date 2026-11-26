@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileText, History, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
+import { setKeptMeetingArchived } from '../lib/meetingHistory';
 import type {
   ContextItem,
   GranolaStatus,
@@ -299,11 +300,10 @@ export function ContextNotes({
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Notes you chose from a file, Granola, or kept meetings (your notes
-              and kept meeting notes only, never transcripts) · not from this
-              conversation · kept in memory · excluded from Markdown exports.
-              Sending selected prior notes to a cue provider requires a separate
-              processing review and approval.
+              Relevant past meetings (notes only, never transcripts) are
+              auto-selected by default. Add files, kept meetings, or Granola
+              notes for context. Held in memory, excluded from Markdown exports,
+              and never sent to a cue provider without approval.
             </span>
           </div>
           <div className="context-controls">
@@ -448,15 +448,15 @@ export function ContextNotes({
         )}
         {granola.connected && (
           <p className="muted small connection-terms" role="status">
-            Granola connected as you.{' '}
+            Granola connected.{' '}
             {granola.tools.includes('get_meetings')
-              ? 'TalkQTE may list and read the notes you choose from the last 30 days'
-              : 'This account offers no note access to TalkQTE'}
+              ? 'Reads only notes you select (last 30 days)'
+              : 'No note access on this account'}
             {granola.tools.includes('query_granola_meetings')
-              ? ', and may ask its assistant one question when you press Suggest from Granola'
+              ? ' and answers Suggest from Granola'
               : ''}
-            ; it reads no transcripts and writes nothing back. Disconnect
-            forgets the sign-in; imported notes stay until you remove them.
+            ; no transcripts or writeback. Disconnect forgets sign-in; imported
+            notes stay until removed.
           </p>
         )}
         {signingIn && (
@@ -481,13 +481,20 @@ export function ContextNotes({
             {items.map((item) => (
               <li key={`${item.provider}:${item.sourceId}`}>
                 <div>
-                  <strong>{item.title}</strong>
+                  <div className="context-item-head">
+                    <strong>{item.title}</strong>
+                    {item.autoSelected && (
+                      <span className="context-auto-chip">Auto</span>
+                    )}
+                  </div>
                   <span className="muted small">
                     {item.sourceDate} ·{' '}
                     {item.provider === 'granola'
                       ? 'From Granola'
                       : item.provider === 'history'
-                        ? 'From a kept meeting'
+                        ? item.autoSelected
+                          ? 'Auto-selected from kept meetings'
+                          : 'From a kept meeting'
                         : 'From a file'}
                   </span>
                   {item.provider === 'granola' && (
@@ -499,23 +506,44 @@ export function ContextNotes({
                   )}
                   <p>{item.excerpt}</p>
                 </div>
-                <button
-                  className="icon-button"
-                  aria-label={`Remove ${item.title} (${item.sourceDate})`}
-                  title="Remove"
-                  disabled={busy || working}
-                  onClick={(event) => {
-                    focusBeforeRemoval(event.currentTarget);
-                    void run(() =>
-                      bridge.command('remove_context_item', {
-                        provider: item.provider,
-                        sourceId: item.sourceId,
-                      }),
-                    );
-                  }}
-                >
-                  <X size={15} />
-                </button>
+                <div className="context-item-actions">
+                  {item.provider === 'history' && bridge.desktop && (
+                    <button
+                      type="button"
+                      className="text-button context-archive-button"
+                      aria-label={`Archive ${item.title} (${item.sourceDate}) so it is never auto-selected`}
+                      title="Archive (never include again)"
+                      disabled={busy || working}
+                      onClick={(event) => {
+                        focusBeforeRemoval(event.currentTarget);
+                        void run(async () => {
+                          await setKeptMeetingArchived(item.sourceId, true);
+                          onNotice(`Archived “${item.title}”.`);
+                        });
+                      }}
+                    >
+                      Archive
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remove ${item.title} (${item.sourceDate})`}
+                    title="Remove for this session"
+                    disabled={busy || working}
+                    onClick={(event) => {
+                      focusBeforeRemoval(event.currentTarget);
+                      void run(() =>
+                        bridge.command('remove_context_item', {
+                          provider: item.provider,
+                          sourceId: item.sourceId,
+                        }),
+                      );
+                    }}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -523,11 +551,10 @@ export function ContextNotes({
           <p className="muted small">
             No prior notes selected.{' '}
             {granola.connected
-              ? 'Choose Granola notes from the last 30 days, or add a file.'
-              : 'Connect Granola to choose from your notes of the last 30 days, or add a file.'}{' '}
-            A file can be one Markdown (.md) or plain-text (.txt) note, such as
-            a summary exported from another note-taker, or a TalkQTE JSON file
-            with a list of notes, each with an id, a date, and text.
+              ? 'Choose Granola notes (last 30 days)'
+              : 'Connect Granola (last 30 days)'}
+            , pick past meetings, or add a Markdown (.md), text (.txt), or
+            TalkQTE JSON notes file.
           </p>
         )}
       </details>
@@ -559,8 +586,8 @@ export function ContextNotes({
           </button>
         </div>
         <p id="context-pick-description">
-          Only the notes you tick are kept, for this session. They are listed
-          under Prior context and never feed a question on their own.
+          Selected notes stay in memory for this session under Prior context and
+          never trigger cues on their own.
         </p>
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">

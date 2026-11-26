@@ -132,6 +132,9 @@ test('pre-call prompt pre-fills default meeting title on Start live session and 
   page,
 }) => {
   await standIn(page, '/?live');
+  await expect(
+    page.getByRole('button', { name: 'Start live session' }),
+  ).toBeVisible();
   await page.evaluate(() =>
     window.calendarTest.triggerStart('Weekly Design Sync'),
   );
@@ -154,3 +157,26 @@ test('pre-call prompt pre-fills default meeting title on Start live session and 
   expect(meetings).toHaveLength(1);
   expect(meetings[0].title).toBe('Weekly Design Sync');
 });
+
+for (const clear of [false, true]) {
+  test(`calendar title can be ${clear ? 'cleared' : 'edited'} before starting`, async ({
+    page,
+  }) => {
+    await standIn(page, '/?live');
+    await expect(
+      page.getByRole('button', { name: 'Start live session' }),
+    ).toBeVisible();
+    await page.evaluate(() =>
+      window.calendarTest.triggerStart('Fictional Planning'),
+    );
+    const title = page.getByRole('textbox', { name: 'Meeting title' });
+    await expect(title).toHaveValue('Fictional Planning');
+    if (clear)
+      await page.getByRole('button', { name: 'Clear', exact: true }).click();
+    else await title.fill('Fictional Design Review');
+    await page.getByRole('button', { name: 'Start live session' }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.captureTest.liveStarts))
+      .toEqual([{ title: clear ? '' : 'Fictional Design Review' }]);
+  });
+}

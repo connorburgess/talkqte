@@ -61,6 +61,7 @@ export function MicrophoneControl({
   stopActionRef,
   action,
   processingConfigured = false,
+  processingApproved = true,
   sourceMayBeCapturing = false,
   sourceSession = null,
   transcription,
@@ -76,6 +77,7 @@ export function MicrophoneControl({
   stopActionRef?: Ref<HTMLButtonElement>;
   action?: ReactNode;
   processingConfigured?: boolean;
+  processingApproved?: boolean;
   /** macOS builds: a selected application may still be captured. */
   sourceMayBeCapturing?: boolean;
   /** macOS builds: the application a live session was started
@@ -134,11 +136,15 @@ export function MicrophoneControl({
             </p>
           ) : (
             <p>
-              {sourceSession
-                ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`}
+              {processingConfigured && !processingApproved
+                ? sourceSession
+                  ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+                  : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
+                : sourceSession
+                  ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
+                  : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
               {processingConfigured
-                ? ' Cue processing has separate permissions below.'
+                ? ' Cue processing controls are below.'
                 : ' TalkQTE does not save the transcript.'}{' '}
               {sourceSession
                 ? 'Stop live session to end it.'

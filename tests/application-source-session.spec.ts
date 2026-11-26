@@ -152,7 +152,7 @@ test('a session for an application alone never says the microphone is transcribe
   const { microphone, panel } = await notebook(page);
   await sourceSession(page, 'listening');
   await expect(microphone).toContainText(
-    'Audio from Fictional player is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.',
+    'Audio from Fictional player is sent to Deepgram for transcription. The microphone is not used. TalkQTE does not record audio.',
   );
   await expect(microphone).toContainText('Stop live session to end it.');
   await expect(microphone).not.toContainText('Your microphone is transcribed');
@@ -175,7 +175,7 @@ test('an ordinary live session keeps its microphone wording', async ({
   const { microphone } = await notebook(page);
   await page.evaluate(() => window.liveTest.start());
   await expect(microphone).toContainText(
-    'Your microphone is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.',
+    'Your microphone is sent to Deepgram for transcription. TalkQTE does not record audio.',
   );
   await expect(microphone).toContainText(
     'Stop live session to release the microphone.',
@@ -271,10 +271,10 @@ test('the session strip and Transcript tab credit the application, not the micro
   await notebook(page);
   await sourceSession(page, 'listening');
   await expect(page.locator('.notebook-body')).toContainText(
-    'Audio from Fictional player · not saved by TalkQTE',
+    'Audio from Fictional player · audio not recorded',
   );
   await expect(page.locator('.notebook-body')).not.toContainText(
-    'Your microphone · not saved by TalkQTE',
+    'Your microphone · audio not recorded',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(
@@ -287,7 +287,7 @@ test('the session strip and Transcript tab credit the application, not the micro
   ).toBeVisible();
   await expect(
     page.getByText(
-      'Lines from the application appear here a few seconds after they are heard.',
+      'Lines from the app appear a few seconds after they’re heard.',
     ),
   ).toBeVisible();
 });
@@ -305,7 +305,7 @@ test('the notebook Pause cues hint and paused line credit the application, not t
   );
   await pause.click();
   await expect(strip).toContainText(
-    'Application audio and transcript continue. Stop live session to stop listening.',
+    'App audio and transcript continue. Stop live session when done.',
   );
   await expect(strip).not.toContainText(/microphone/i);
 });
@@ -325,7 +325,7 @@ test('a stale source-session flag beside a listening microphone credits the micr
   });
   await expect(microphone).not.toContainText('the microphone is not used');
   await expect(page.locator('.notebook-body')).toContainText(
-    'Your microphone · not saved by TalkQTE',
+    'Your microphone · audio not recorded',
   );
   // Nor while the source is stopping or failed, whatever the flag says.
   await page.evaluate((value) => window.microphoneTest.send(value), {
@@ -344,7 +344,7 @@ test('a stale source-session flag beside a listening microphone credits the micr
       'the microphone is not used',
     );
     await expect(page.locator('.notebook-body'), phase).not.toContainText(
-      'Audio from Fictional player · not saved by TalkQTE',
+      'Audio from Fictional player · audio not recorded',
     );
   }
 });
@@ -369,9 +369,9 @@ test('an ordinary session draining is not described as application audio', async
   } satisfies Partial<ProcessingSnapshot>);
   const body = page.locator('.notebook-body');
   await expect(body).toContainText(
-    'Waiting for microphone release and remaining transcription.',
+    'Releasing microphone and finishing transcription…',
   );
-  await expect(body).not.toContainText('Application audio is shown');
+  await expect(body).not.toContainText('See Cue processing above.');
   // A source that may still be capturing is named while the session ends.
   await page.evaluate((value) => window.captureTest.send(value), {
     phase: 'stopping',
@@ -380,7 +380,7 @@ test('an ordinary session draining is not described as application audio', async
     source: source('stopping', true),
   } satisfies Partial<ProcessingSnapshot>);
   await expect(body).toContainText(
-    'Ending the live session. Application audio is shown under Cue processing.',
+    'Ending live session. See Cue processing above.',
   );
 });
 
@@ -432,7 +432,7 @@ test('a failed microphone counts as unused only once its device is released', as
     deviceName: null,
   });
   await expect(microphone).toContainText(
-    'Audio from Fictional player is sent to Deepgram for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used.',
+    'Audio from Fictional player is sent to Deepgram for transcription. The microphone is not used.',
   );
   // Failed with its cleanup still pending: it may still be capturing.
   await page.evaluate((value) => window.microphoneTest.send(value), {

@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import type {} from './fixtures/native-microphone';
 import type {} from './fixtures/native-meeting-history';
@@ -50,7 +51,7 @@ const offer = (page: Page) =>
   page.getByRole('region', { name: 'Keep this meeting?' });
 const keepSelect = (page: Page) =>
   page
-    .getByRole('region', { name: 'Kept meetings' })
+    .getByRole('region', { name: 'Meetings' })
     .getByRole('combobox', { name: 'After a live session ends' });
 
 test('non-empty live sessions auto-save by default without keeping the application name', async ({
@@ -59,9 +60,7 @@ test('non-empty live sessions auto-save by default without keeping the applicati
   await openNative(page);
   await expect(offer(page)).toHaveCount(0);
   await endedSession(page, 'Fictional Call');
-  await expect(
-    page.getByText(/Kept in your meetings as “Meeting, /),
-  ).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as “Meeting, /)).toBeVisible();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
   expect(meeting).toBeTruthy();
   expect(meeting.title).toMatch(/^Meeting, /);
@@ -74,7 +73,7 @@ test('non-empty live sessions auto-save by default without keeping the applicati
   await page.evaluate(() =>
     window.liveTest.publish({ notes: 'Ask about the orchard gate. And keys.' }),
   );
-  const update = page.getByRole('button', { name: 'Update kept meeting' });
+  const update = page.getByRole('button', { name: 'Update saved meeting' });
   await expect(update).toBeVisible();
   await update.click();
   await expect(update).toHaveCount(0);
@@ -91,7 +90,7 @@ test('under Ask mode, nothing is kept unless the person chooses Keep for that me
   await expect(offer(page)).toHaveCount(0);
   await endedSession(page);
   await expect(offer(page)).toBeVisible();
-  await expect(offer(page)).toContainText('Never its audio');
+  await expect(offer(page)).toContainText('never audio');
   const title = offer(page).getByRole('textbox', { name: 'Title' });
   await expect(title).toHaveValue(/^Meeting, /);
   // Not this one: nothing is written and the offer goes for this session.
@@ -118,11 +117,11 @@ test('keeping in Ask mode uses the title typed, leaves the application name out 
   const title = offer(page).getByRole('textbox', { name: 'Title' });
   await title.fill('Orchard review');
   const name = offer(page).getByRole('checkbox', {
-    name: 'Also keep the application’s name (Fictional Call)',
+    name: 'Include application name (Fictional Call)',
   });
   await expect(name).not.toBeChecked();
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  const kept = page.getByText('Kept in your meetings as “Orchard review”.');
+  const kept = page.getByText('Saved to Meetings as “Orchard review”.');
   await expect(kept).toBeVisible();
   await expect(kept).toBeFocused();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
@@ -136,7 +135,7 @@ test('keeping in Ask mode uses the title typed, leaves the application name out 
   await page.evaluate(() =>
     window.liveTest.publish({ notes: 'Ask about the orchard gate. And keys.' }),
   );
-  const update = page.getByRole('button', { name: 'Update kept meeting' });
+  const update = page.getByRole('button', { name: 'Update saved meeting' });
   await expect(update).toBeVisible();
   expect(
     (await page.evaluate(() => window.historyTest.meetings()))[0].notes,
@@ -156,11 +155,11 @@ test('the application name is kept only when the person ticks it in Ask mode', a
   await endedSession(page, 'Fictional Call');
   await offer(page)
     .getByRole('checkbox', {
-      name: 'Also keep the application’s name (Fictional Call)',
+      name: 'Include application name (Fictional Call)',
     })
     .check();
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as/)).toBeVisible();
   const [meeting] = await page.evaluate(() => window.historyTest.meetings());
   expect(meeting.application).toBe('Fictional Call');
 });
@@ -181,7 +180,7 @@ test('a failed keep says nothing was saved and can be tried again', async ({
     'The meeting could not be saved. Nothing was changed.',
   );
   await offer(page).getByRole('button', { name: 'Keep meeting' }).click();
-  await expect(page.getByText(/Kept in your meetings as/)).toBeVisible();
+  await expect(page.getByText(/Saved to Meetings as/)).toBeVisible();
 });
 
 test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all asks first', async ({
@@ -200,12 +199,12 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
     }),
   );
   await page.getByRole('button', { name: 'Settings' }).click();
-  const section = page.getByRole('region', { name: 'Kept meetings' });
-  await expect(section).toContainText('stored unencrypted on this Mac');
+  const section = page.getByRole('region', { name: 'Meetings' });
+  await expect(section).toContainText('Stored unencrypted in');
   await expect(section).toContainText(
     '~/Library/Application Support/com.talkqte.desktop/meetings',
   );
-  await expect(section).toContainText('1 meeting is kept.');
+  await expect(section).toContainText('1 saved meeting.');
   await expect(keepSelect(page)).toHaveValue('auto');
   await keepSelect(page).selectOption('ask');
   await expect(keepSelect(page)).toHaveValue('ask');
@@ -214,7 +213,7 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
 
   await section.getByRole('button', { name: 'Delete all meetings…' }).click();
   const confirm = section.getByRole('group', {
-    name: /Delete every kept meeting from this Mac\?/,
+    name: /Delete all saved meetings from this Mac\?/,
   });
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   expect(await page.evaluate(() => window.historyTest.meetings())).toHaveLength(
@@ -223,10 +222,10 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
   await section.getByRole('button', { name: 'Delete all meetings…' }).click();
   await confirm.getByRole('button', { name: 'Delete all meetings' }).click();
   await expect(section.getByRole('status')).toHaveText(
-    'Every kept meeting was deleted.',
+    'All saved meetings deleted.',
   );
   expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
-  await expect(section).toContainText('No meetings are kept.');
+  await expect(section).toContainText('No saved meetings.');
 
   await page.getByRole('button', { name: 'Notebook' }).click();
   await endedSession(page);
@@ -242,9 +241,9 @@ test('a lab run neither offers nor lists kept meetings', async ({ page }) => {
   await expect(page.getByText('Live session ended').first()).toBeVisible();
   await expect(offer(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(
-    page.getByRole('region', { name: 'Kept meetings' }),
-  ).toContainText('This is a lab run: kept meetings are not read or written.');
+  await expect(page.getByRole('region', { name: 'Meetings' })).toContainText(
+    'Lab runs don’t read or save meetings.',
+  );
 });
 
 test('Meetings lists kept meetings newest first, searches by text, and opens read-only', async ({
@@ -297,24 +296,24 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
 
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Kept meetings', level: 1 }),
+    page.getByRole('heading', { name: 'Meetings', level: 1 }),
   ).toBeVisible();
 
-  const list = page.getByRole('list', { name: 'Kept meetings' });
-  const items = list.getByRole('button');
+  const list = page.getByRole('list', { name: 'Meetings' });
+  const items = list.locator('.history-item');
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toContainText('Orchard rota planning');
   await expect(items.nth(0)).toContainText('Meeting notes');
   await expect(items.nth(1)).toContainText('Gate sign options');
 
-  const search = page.getByRole('searchbox', { name: 'Search kept meetings' });
+  const search = page.getByRole('searchbox', { name: 'Search meetings' });
   await search.fill('painted');
   await expect(items).toHaveCount(1);
   await expect(items.nth(0)).toContainText('Gate sign options');
 
   await search.fill('nothing-matches');
   await expect(
-    page.getByText('No kept meetings match “nothing-matches”.'),
+    page.getByText('No meetings match “nothing-matches”.'),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Clear search' }).click();
   await expect(items).toHaveCount(2);
@@ -334,8 +333,19 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
   await expect(
     page.getByText('Will the draft be ready Wednesday?'),
   ).toBeVisible();
-  await expect(page.getByText('Likely echo')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Transcript (2)', level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByText('Likely echo', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Can we ship the rota Friday?')).toBeVisible();
+  const echoToggle = page.getByRole('button', {
+    name: 'Show 1 likely echo line',
+  });
+  await expect(echoToggle).toHaveAttribute('aria-expanded', 'false');
+  await echoToggle.click();
+  await expect(page.getByText('Likely echo', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide 1 likely echo line' }).click();
+  await expect(page.getByText('Likely echo', { exact: true })).toHaveCount(0);
   // Read-only detail view has no editor textarea for notes or transcript.
   await expect(page.locator('textarea')).toHaveCount(0);
 });
@@ -359,7 +369,7 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
   });
 
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
-  await page.getByRole('button', { name: /Fictional planning/ }).click();
+  await page.getByRole('button', { name: /^Fictional planning/ }).click();
 
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
   await page
@@ -402,7 +412,7 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
   await confirm
     .getByRole('button', { name: 'Delete meeting', exact: true })
     .click();
-  await expect(page.getByText('No meetings kept yet.')).toBeVisible();
+  await expect(page.getByText('No meetings yet.')).toBeVisible();
   expect(await page.evaluate(() => window.historyTest.meetings())).toEqual([]);
   expect(
     await page.evaluate(
@@ -418,25 +428,21 @@ test('Meetings discloses unreadable entries, lab runs, and newer versions', asyn
   await page.evaluate(() => window.historyTest.setUnreadable(2));
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText(
-      '2 kept meetings could not be read and were left untouched.',
-    ),
+    page.getByText('2 meetings could not be read and were left untouched.'),
   ).toBeVisible();
 
   await page.evaluate(() => window.historyTest.setAvailability('newer'));
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText(
-      'Your kept meetings were saved by a newer version of TalkQTE.',
-    ),
+    page.getByText('Your meetings were saved by a newer version of TalkQTE'),
   ).toBeVisible();
 
   await page.evaluate(() => window.historyTest.setAvailability('labRun'));
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
   await expect(
-    page.getByText('This is a lab run: kept meetings are not read or written.'),
+    page.getByText('Lab runs don’t read or save meetings.'),
   ).toBeVisible();
 });
 
@@ -520,6 +526,9 @@ test('kept meetings can be selected into Prior context (notes only), approved in
     exact: true,
   });
   await panel
+    .getByRole('button', { name: 'Turn off processing', exact: true })
+    .click();
+  await panel
     .getByRole('button', { name: 'Review processing', exact: true })
     .click();
   const historyCheckbox = panel.getByRole('checkbox', {
@@ -566,4 +575,183 @@ test('kept meetings can be selected into Prior context (notes only), approved in
     'Orchard supplier sync · Kept meeting · 2026-11-02 · prior note',
   );
   await expect(cue).toContainText('Legal needs two days for review.');
+});
+
+test('auto-selects relevant recent meetings on launch and Focus match, respects per-session Remove, Archive, and Settings toggle', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      standInMeetings: unknown[];
+    };
+    w.standInMeetings = [
+      {
+        title: 'Orchard gate supplier',
+        startedAtMs: Date.UTC(2026, 10, 1, 9),
+        durationMs: 900_000,
+        sources: 'microphone',
+        transcript: [
+          { atMs: 1_000, text: 'Secret transcript from orchard call.' },
+        ],
+        notes: 'Check south latch bolts.',
+        cues: [],
+        meetingNotes: '## Decisions\n\n- Confirm gate delivery.',
+      },
+      {
+        title: 'Archived orchard notes',
+        startedAtMs: Date.UTC(2026, 10, 5, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Archived transcript.' }],
+        notes: 'Archived orchard latch notes.',
+        cues: [],
+        archived: true,
+      },
+      {
+        title: 'Empty orchard sync',
+        startedAtMs: Date.UTC(2026, 10, 6, 9),
+        durationMs: 300_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Only transcript, no notes.' }],
+        notes: '   ',
+        cues: [],
+      },
+      {
+        title: 'Budget check',
+        startedAtMs: Date.UTC(2026, 10, 2, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret budget transcript.' }],
+        notes: 'Review Q4 seed invoices.',
+        cues: [],
+      },
+      {
+        title: 'Compost rota',
+        startedAtMs: Date.UTC(2026, 10, 3, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret compost transcript.' }],
+        notes: 'Priya keeps bin padlock.',
+        cues: [],
+      },
+      {
+        title: 'Tool shed review',
+        startedAtMs: Date.UTC(2026, 10, 4, 9),
+        durationMs: 600_000,
+        sources: 'microphone',
+        transcript: [{ atMs: 1_000, text: 'Secret shed transcript.' }],
+        notes: 'Oil the hinges.',
+        cues: [],
+      },
+    ];
+  });
+
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        '/src/main.tsx',
+        '/tests/fixtures/native-microphone.ts',
+      ),
+    });
+  });
+  await page.goto('/?keys=set');
+  const context = page.getByRole('region', { name: 'Prior context' });
+  await expect(context.locator('summary')).toContainText('3 notes selected');
+
+  await context.locator('summary').click();
+  // On launch without Focus, picks 3 newest non-archived meetings with notes.
+  await expect(context).toContainText('Tool shed review');
+  await expect(context).toContainText('Compost rota');
+  await expect(context).toContainText('Budget check');
+  await expect(context).not.toContainText('Archived orchard notes');
+  await expect(context).not.toContainText('Empty orchard sync');
+  await expect(context).not.toContainText('Secret shed transcript.');
+  await expect(context.locator('.context-auto-chip')).toHaveCount(3);
+  const axeContext = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'])
+    .disableRules(['color-contrast'])
+    .analyze();
+  expect(axeContext.violations).toEqual([]);
+
+  // Typing Focus matching "orchard" promotes the older matching meeting.
+  const focusToggle = page
+    .getByRole('region', { name: 'This meeting' })
+    .locator('summary');
+  await focusToggle.click();
+  const focusInput = page.getByRole('textbox', { name: /Focus/ });
+  await focusInput.fill('Check orchard latch');
+  await focusInput.blur();
+
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).toContainText('Auto-selected from kept meetings');
+  await expect(context).not.toContainText('Secret transcript from orchard');
+
+  // Remove one auto-selected item for this session: it stays removed even when Focus changes again.
+  await context
+    .getByRole('button', { name: /Remove Tool shed review/ })
+    .click();
+  await expect(context).not.toContainText('Tool shed review');
+  await expect(context.locator('summary')).toContainText('2 notes selected');
+
+  await focusInput.fill('Check orchard south latch');
+  await focusInput.blur();
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).not.toContainText('Tool shed review');
+
+  // Archive an auto-selected item from Prior context: removes it now and excludes it permanently.
+  await context
+    .getByRole('button', { name: /Archive Orchard gate supplier/ })
+    .click();
+  await expect(context).not.toContainText('Orchard gate supplier');
+
+  // Meetings view hides archived meetings unless Show archived is toggled on, and supports Unarchive.
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  const list = page.getByRole('list', { name: 'Meetings' });
+  await expect(list).not.toContainText('Orchard gate supplier');
+  await expect(list).not.toContainText('Archived orchard notes');
+  const showArchived = page.getByRole('checkbox', {
+    name: /Show archived \(2\)/,
+  });
+  await showArchived.check();
+  await expect(list).toContainText('Orchard gate supplier');
+  await expect(list).toContainText('Archived orchard notes');
+
+  // Archive Compost rota from the Meetings list and unarchive Orchard gate supplier in detail view.
+  await page
+    .getByRole('button', { name: 'Archive Compost rota', exact: true })
+    .click();
+  await expect(
+    page.getByRole('checkbox', { name: /Show archived \(3\)/ }),
+  ).toBeVisible();
+  await list
+    .locator('.history-item', { hasText: 'Orchard gate supplier' })
+    .click();
+  await expect(page.locator('.history-detail-head')).toContainText('Archived');
+  await page.getByRole('button', { name: 'Unarchive', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Archive', exact: true }),
+  ).toBeVisible();
+
+  // Turning the Settings toggle off clears auto-selected items; turning it back on restores them.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const autoToggle = page
+    .getByRole('region', { name: 'Meetings' })
+    .getByRole('checkbox', {
+      name: 'Auto-select relevant past meetings as prior context',
+    });
+  await expect(autoToggle).toBeChecked();
+  await autoToggle.uncheck();
+
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(context.locator('summary')).toContainText('0 notes selected');
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await autoToggle.check();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(context).toContainText('Orchard gate supplier');
+  await expect(context).not.toContainText('Compost rota');
+  await expect(context).not.toContainText('Tool shed review');
 });

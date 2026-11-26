@@ -34,23 +34,228 @@ function defaultTitle(startedAtMs: number): string {
 export const commands = [
   'meeting_history_status',
   'set_after_session_keep',
+  'set_auto_prior_context',
   'keep_meeting_in_history',
   'update_kept_session_meeting',
   'kept_meetings',
   'open_kept_meeting',
   'rename_kept_meeting',
+  'set_kept_meeting_archived',
   'delete_kept_meeting',
   'delete_all_kept_meetings',
   'kept_meeting_export_preview',
   'export_kept_meeting',
 ];
 
+const preloaded = window as typeof window & {
+  standInMeetings?: Omit<KeptMeeting, 'id' | 'revision'>[];
+  standInAutoPriorContext?: boolean;
+};
+
 /** Every command the notebook invoked, with its arguments. */
 export const calls: { command: string; args: unknown }[] = [];
 let availability: HistoryAvailability = 'on';
 let afterSessionKeep: AfterSessionKeep = 'auto';
+let autoPriorContext: boolean = preloaded.standInAutoPriorContext ?? true;
 let meetings: KeptMeeting[] = [];
 let next = 0;
+let autoContextItems: ContextItem[] = [];
+const manualContextItems = new Map<string, ContextItem>();
+const dismissedAutoIds = new Set<string>();
+
+for (const item of preloaded.standInMeetings ?? []) {
+  const id = (++next).toString(16).padStart(32, '0');
+  meetings.push({ ...item, id, revision: 1 });
+}
+
+const AUTO_STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'agenda',
+  'ahead',
+  'all',
+  'and',
+  'any',
+  'are',
+  'but',
+  'call',
+  'can',
+  'catch',
+  'check',
+  'could',
+  'daily',
+  'discussion',
+  'every',
+  'first',
+  'for',
+  'from',
+  'going',
+  'has',
+  'have',
+  'into',
+  'live',
+  'meeting',
+  'minutes',
+  'month',
+  'monthly',
+  'not',
+  'notes',
+  'other',
+  'our',
+  'people',
+  'planning',
+  'quick',
+  'really',
+  'review',
+  'session',
+  'should',
+  'standup',
+  'still',
+  'sync',
+  'talkqte',
+  'team',
+  'that',
+  'the',
+  'their',
+  'there',
+  'these',
+  'thing',
+  'things',
+  'think',
+  'this',
+  'those',
+  'today',
+  'tomorrow',
+  'update',
+  'was',
+  'weekly',
+  'were',
+  'where',
+  'which',
+  'while',
+  'will',
+  'with',
+  'would',
+  'yesterday',
+  'your',
+]);
+
+function contextTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const raw of text.split(/[^\p{L}\p{N}']+/u)) {
+    const word = raw.replace(/^'+|'+$/g, '').toLowerCase();
+    if (
+      word.length >= 3 &&
+      /\p{L}/u.test(word) &&
+      !AUTO_STOP_WORDS.has(word) &&
+      !tokens.includes(word)
+    ) {
+      tokens.push(word);
+    }
+  }
+  return tokens;
+}
+
+export function refreshAutoContext(
+  focus: string[],
+  sessionTitle: string | null,
+  status: Snapshot['status'],
+  live: boolean,
+): boolean {
+  if (availability !== 'on') {
+    if (autoContextItems.length === 0) return false;
+    autoContextItems = [];
+    return true;
+  }
+  if (!autoPriorContext) {
+    if (autoContextItems.length === 0) return false;
+    autoContextItems = [];
+    return true;
+  }
+  if (status !== 'ready' || live) return false;
+
+  const keywords: string[] = [];
+  for (const line of focus) {
+    for (const token of contextTokens(line)) {
+      if (!keywords.includes(token)) keywords.push(token);
+    }
+  }
+  if (sessionTitle) {
+    for (const token of contextTokens(sessionTitle)) {
+      if (!keywords.includes(token)) keywords.push(token);
+    }
+  }
+
+  const candidates: {
+    item: ContextItem;
+    startedAtMs: number;
+    matched: number;
+    titleMatched: number;
+  }[] = [];
+  for (const meeting of meetings) {
+    if (meeting.archived) continue;
+    if (dismissedAutoIds.has(meeting.id)) continue;
+    if (manualContextItems.has(meeting.id)) continue;
+    const item = toContextItem(meeting);
+    if (!item) continue;
+    let matched = 0;
+    let titleMatched = 0;
+    if (keywords.length > 0) {
+      const titleTokens = contextTokens(item.title);
+      const noteTokens = contextTokens(item.excerpt);
+      for (const kw of keywords) {
+        const inTitle = titleTokens.includes(kw);
+        const inNotes = noteTokens.includes(kw);
+        if (inTitle) titleMatched++;
+        if (inTitle || inNotes) matched++;
+      }
+    }
+    candidates.push({
+      item: { ...item, autoSelected: true },
+      startedAtMs: meeting.startedAtMs,
+      matched,
+      titleMatched,
+    });
+  }
+  candidates.sort(
+    (a, b) =>
+      b.matched - a.matched ||
+      b.titleMatched - a.titleMatched ||
+      b.startedAtMs - a.startedAtMs ||
+      a.item.sourceId.localeCompare(b.item.sourceId),
+  );
+  const nextAuto = candidates.slice(0, 3).map((c) => c.item);
+  if (JSON.stringify(nextAuto) === JSON.stringify(autoContextItems)) {
+    return false;
+  }
+  autoContextItems = nextAuto;
+  return true;
+}
+
+if ((preloaded.standInMeetings ?? []).length > 0 && autoPriorContext) {
+  refreshAutoContext([], null, 'ready', false);
+}
+
+export function selectedContextItems(): ContextItem[] {
+  return structuredClone([...manualContextItems.values(), ...autoContextItems]);
+}
+
+export function removeHistoryContextItem(sourceId: string) {
+  const id = sourceId.trim();
+  manualContextItems.delete(id);
+  autoContextItems = autoContextItems.filter((item) => item.sourceId !== id);
+  dismissedAutoIds.add(id);
+}
+
+export function removeAllHistoryContext(): number {
+  const count = manualContextItems.size + autoContextItems.length;
+  for (const id of manualContextItems.keys()) dismissedAutoIds.add(id);
+  for (const item of autoContextItems) dismissedAutoIds.add(item.sourceId);
+  manualContextItems.clear();
+  autoContextItems = [];
+  return count;
+}
 /** The session the last keep came from, and what it held then. */
 let sessionKept: { id: string; notes: string; session: number } | null = null;
 let endPrompt: (EndPrompt & { keptId: string | null }) | null = null;
@@ -120,6 +325,13 @@ export function importPendingContext(ids: string[]) {
   const list = pendingContext ?? [];
   pendingContext = null;
   const selected = list.filter((item) => ids.includes(item.sourceId));
+  for (const item of selected) {
+    autoContextItems = autoContextItems.filter(
+      (auto) => auto.sourceId !== item.sourceId,
+    );
+    dismissedAutoIds.delete(item.sourceId);
+    manualContextItems.set(item.sourceId, structuredClone(item));
+  }
   return {
     outcome: {
       added: selected.length,
@@ -140,6 +352,7 @@ const summary = (meeting: KeptMeeting): KeptSummary => ({
   durationMs: meeting.durationMs,
   sources: meeting.sources,
   hasMeetingNotes: meeting.meetingNotes !== undefined,
+  archived: !!meeting.archived,
 });
 
 function fromSession(current: Snapshot, includeApplication: boolean) {
@@ -166,6 +379,7 @@ function fromSession(current: Snapshot, includeApplication: boolean) {
 
 export function resetAfterSessionKeep() {
   afterSessionKeep = 'auto';
+  autoPriorContext = true;
 }
 
 export function currentEndPrompt(session: number): EndPrompt | null {
@@ -212,6 +426,7 @@ function saveSessionMeeting(
 export function onSessionEnded(
   current: Snapshot,
   session: number,
+  forceSave = false,
 ): { endPrompt: EndPrompt | null; changed: boolean } {
   const transcriptLines = current.transcript.length;
   const hasNotes = current.notes.trim().length > 0;
@@ -220,12 +435,12 @@ export function onSessionEnded(
     current.status !== 'ended' ||
     availability !== 'on' ||
     (transcriptLines === 0 && !hasNotes) ||
-    afterSessionKeep === 'off'
+    (!forceSave && afterSessionKeep === 'off')
   ) {
     endPrompt = null;
     return { endPrompt: null, changed: false };
   }
-  if (afterSessionKeep === 'auto') {
+  if (afterSessionKeep === 'auto' || forceSave) {
     const existing =
       sessionKept && sessionKept.session === session
         ? meetings.find((item) => item.id === sessionKept!.id)
@@ -398,6 +613,7 @@ export function command(
       return {
         availability,
         afterSessionKeep,
+        autoPriorContext: availability === 'labRun' ? false : autoPriorContext,
         session: session(),
         kept: kept && {
           id: kept.id,
@@ -408,6 +624,9 @@ export function command(
     }
     case 'set_after_session_keep':
       afterSessionKeep = (args as { mode: AfterSessionKeep }).mode;
+      return null;
+    case 'set_auto_prior_context':
+      autoPriorContext = (args as { enabled: boolean }).enabled;
       return null;
     case 'keep_meeting_in_history': {
       const { title, includeApplication } = args as {
@@ -475,11 +694,29 @@ export function command(
       pendingExport = null;
       return summary(meeting);
     }
+    case 'set_kept_meeting_archived': {
+      const { id, archived } = args as { id: string; archived: boolean };
+      const meeting = meetings.find((item) => item.id === id);
+      if (!meeting) throw 'That meeting is no longer kept.';
+      meeting.archived = archived;
+      meeting.revision += 1;
+      if (archived) {
+        removeHistoryContextItem(id);
+      } else {
+        dismissedAutoIds.delete(id);
+      }
+      return summary(meeting);
+    }
     case 'delete_kept_meeting': {
       const { id } = args as { id: string };
       if (!meetings.some((item) => item.id === id))
         throw 'That meeting is no longer kept.';
       meetings = meetings.filter((item) => item.id !== id);
+      autoContextItems = autoContextItems.filter(
+        (item) => item.sourceId !== id,
+      );
+      manualContextItems.delete(id);
+      dismissedAutoIds.delete(id);
       if (sessionKept?.id === id) sessionKept = null;
       if (endPrompt?.keptId === id) endPrompt = null;
       pendingExport = null;
@@ -488,6 +725,9 @@ export function command(
     case 'delete_all_kept_meetings': {
       const count = meetings.length;
       meetings = [];
+      autoContextItems = [];
+      manualContextItems.clear();
+      dismissedAutoIds.clear();
       sessionKept = null;
       endPrompt = null;
       unreadable = 0;

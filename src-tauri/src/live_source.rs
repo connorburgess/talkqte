@@ -297,6 +297,7 @@ impl Runtime {
         snapshot.source_session = self.source_session_running();
         snapshot.call_prompt = self.call_prompt.prompt().cloned();
         snapshot.calendar_prompt = self.calendar.prompt().cloned();
+        snapshot.call_end_prompt = self.call_prompt.call_end_prompt().cloned();
         snapshot.end_prompt = self
             .end_prompt
             .as_ref()
@@ -396,13 +397,14 @@ impl Runtime {
                 control.application(),
             ));
         let session = self
-            .install_live_start(&ticket)
+            .install_live_start_with(&ticket, false)
             .map_err(|_| Failure::Unavailable)?;
         // The ticket ends here, so startup reads idle; the operation it set
         // stays current for the source's attachment and for Stop.
         drop(ticket);
         self.export = None;
         self.end_prompt = None;
+        self.call_prompt.clear_live();
         self.ended_source_session = None;
         self.source_session = Some(SourceSession {
             session,

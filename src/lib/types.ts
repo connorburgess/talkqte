@@ -51,6 +51,8 @@ export interface CueSnapshot {
   status: Status;
   /** A live session fed by transcription. */
   live: boolean;
+  /** True when the session started automatically when a call began. */
+  autoStarted?: boolean;
   /** Browser preview and test stand-in only: a replay of a fictional
    * conversation that captures nothing. The desktop app never sends it. */
   simulated?: boolean;
@@ -61,6 +63,8 @@ export interface CueSnapshot {
   /** An upcoming calendar meeting pre-call prompt, when opt-in Calendar
    * prompts are enabled. Narrow metadata only. */
   calendarPrompt?: import('../components/CalendarPrompt').CalendarPromptOffer;
+  /** A previously active call went inactive while a live session is running. */
+  callEndPrompt?: import('../components/CallEndPrompt').CallEndPromptOffer;
   /** An ended non-empty live session prompt: counts and keep status only. */
   endPrompt?: EndPrompt;
   cuesPaused: boolean;
@@ -134,6 +138,7 @@ export type Commands = {
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string; title?: string } | undefined;
   stop_live_session: undefined;
+  turn_off_processing: undefined;
   respond_to_call_prompt: {
     id: number;
     answer: import('../components/CallPrompt').CallPromptAnswer;
@@ -141,6 +146,10 @@ export type Commands = {
   respond_to_calendar_prompt: {
     id: number;
     answer: import('../components/CalendarPrompt').CalendarPromptAnswer;
+  };
+  respond_to_call_end_prompt: {
+    id: number;
+    answer: import('../components/CallEndPrompt').CallEndPromptAnswer;
   };
   respond_to_end_prompt: {
     session: number;
@@ -210,6 +219,8 @@ export interface ContextItem {
   sourceDate: string;
   excerpt: string;
   revision: number;
+  /** True when TalkQTE pre-selected this kept meeting for the session. */
+  autoSelected?: boolean;
 }
 export interface NoteSummary {
   sourceId: string;
@@ -238,6 +249,8 @@ export interface LiveStatus {
   reason: string | null;
   /** The cloud service this launch transcribes with, when one is selected. */
   transcription?: string;
+  /** The cue provider configured for live sessions, when available. */
+  cueProvider?: string | null;
 }
 export function clockTime(ms: number) {
   const seconds = Math.floor(ms / 1000);

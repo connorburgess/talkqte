@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('prior context is compact, keyboard accessible, and opens from setup', async ({
-  page,
-}) => {
+test('prior context is compact and keyboard accessible', async ({ page }) => {
   await page.goto('/');
   const panel = page.getByRole('region', { name: 'Prior context' });
   const summary = panel.locator('summary');
@@ -14,8 +12,4 @@ test('prior context is compact, keyboard accessible, and opens from setup', asyn
   await expect(add).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(add).toBeHidden();
-  await page.locator('.setup-disclosure > summary').press('Enter');
-  await page.getByRole('button', { name: 'Choose notes' }).press('Enter');
-  await expect(add).toBeFocused();
-  await expect(add).toBeVisible();
 });

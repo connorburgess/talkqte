@@ -55,7 +55,7 @@ test('a Markdown note without a date waits for the date the person enters, then 
   await expect(item).toContainText('Welcome guide printing');
   await expect(item).toContainText('2026-10-21 · From a file');
   await expect(item).toContainText('print shop needs two days');
-  await expect(panel(page)).toContainText('not from this conversation');
+  await expect(panel(page)).toContainText('excluded from Markdown exports');
   await expect(
     page.getByRole('status').filter({ hasText: '1 imported.' }),
   ).toHaveCount(1);
@@ -165,7 +165,7 @@ for (const [kind, message] of [
     await expect(panel(page).getByRole('listitem')).toHaveCount(0);
     await expect(panel(page)).toContainText('No prior notes selected.');
     await expect(panel(page)).toContainText(
-      'A file can be one Markdown (.md) or plain-text (.txt) note',
+      'add a Markdown (.md), text (.txt), or TalkQTE JSON notes file',
     );
     await expect(
       panel(page).getByRole('button', { name: 'Add notes from a file' }),
@@ -184,7 +184,7 @@ test('local path fallback lists notes without importing and clears the transient
   const input = panel(page).getByLabel('Local notes file path');
   await expect(panel(page)).toContainText('excluded from Markdown exports');
   await expect(panel(page)).toContainText(
-    'Sending selected prior notes to a cue provider requires a separate processing review and approval.',
+    'never sent to a cue provider without approval.',
   );
   await input.fill('/fictional/notes.md');
   await panel(page).getByRole('button', { name: 'Cancel file path' }).click();

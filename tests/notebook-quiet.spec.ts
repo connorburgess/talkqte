@@ -21,19 +21,6 @@ test('the notebook starts with the editor visible and optional setup folded away
     path: testInfo.outputPath('notebook-quiet-desktop.png'),
   });
 
-  const setup = page.locator('.setup-disclosure > summary');
-  await setup.press('Enter');
-  await expect(
-    page.getByRole('button', { name: 'Add your name' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Not now' }).press('Enter');
-  await expect(
-    page.getByRole('button', { name: 'Notebook', exact: true }),
-  ).toBeFocused();
-  await expect(notes).toHaveValue(
-    'Fictional note: confirm the garden welcome date.',
-  );
-
   const focus = page.locator('.focus-disclosure > summary');
   await focus.press('Space');
   await page.getByRole('textbox', { name: 'Focus' }).fill('Garden access');
@@ -107,10 +94,9 @@ for (const width of [320, 600]) {
     await page.setViewportSize({ width, height: 844 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
-    await page.locator('.setup-disclosure > summary').press('Enter');
-    await page.getByRole('button', { name: 'Write the focus' }).press('Enter');
+    await page.locator('.focus-disclosure > summary').press('Enter');
     const focus = page.getByRole('textbox', { name: 'Focus' });
-    await expect(focus).toBeFocused();
+    await expect(focus).toBeVisible();
     await focus.fill('Garden welcome guide');
     await page.locator('.focus-disclosure > summary').press('Enter');
     await expect(focus).toBeHidden();

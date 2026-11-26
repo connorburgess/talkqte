@@ -83,6 +83,9 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-set-user-name",
         "allow-set-focus",
         "allow-start-microphone",
+        "allow-note-dictation-snapshot",
+        "allow-start-note-dictation",
+        "allow-stop-note-dictation",
         "allow-start-live-session",
         "allow-pick-context-file",
         "allow-read-context-file-path",
@@ -118,6 +121,11 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-set-keep-running-in-menu-bar",
         "allow-set-open-at-login",
         "allow-open-login-items",
+        // In-app updates are managed by the notebook alone, never the companion.
+        "allow-update-status",
+        "allow-set-check-for-updates-at-launch",
+        "allow-check-for-updates",
+        "allow-download-and-install-update",
         // Keeping or removing a line suppressed as an echo edits the
         // transcript: the notebook's alone.
         "allow-resolve-echo-line",
@@ -130,6 +138,8 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-kept-meetings",
         "allow-open-kept-meeting",
         "allow-rename-kept-meeting",
+        "allow-set-kept-meeting-archived",
+        "allow-set-auto-prior-context",
         "allow-delete-kept-meeting",
         "allow-delete-all-kept-meetings",
         "allow-kept-meeting-export-preview",
@@ -148,13 +158,13 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     );
 
     // Everything the companion may do: read, hold and dismiss the cue,
-    // pause, hide, move, and stop. It writes nothing to the notes. A new
-    // entry is a privacy decision to make here and in PRIVACY.md, not a
-    // default. `companion_anchor` returns only "top" or "bottom", from the
-    // window's placement preset and whether it was dragged: no
-    // conversation, note or position. `respond_to_call_prompt` answers a
-    // call-starting offer: Start only brings the notebook forward with the
-    // offer's sources chosen; nothing is started, listed or captured.
+    // pause, turn off processing, hide, move, and stop. It writes nothing
+    // to the notes. A new entry is a privacy decision to make here and in
+    // PRIVACY.md, not a default. `companion_anchor` returns only "top" or
+    // "bottom", from the window's placement preset and whether it was
+    // dragged: no conversation, note or position. `respond_to_call_prompt`
+    // answers a call-starting offer: Start starts listening and cue
+    // processing in one click (or opens the notebook if keys are missing).
     // `respond_to_end_prompt` handles only the end-of-call dock card (keep
     // with default date/time title and no application name, delete only the
     // session's just-kept meeting, open notebook to write notes or view the
@@ -170,11 +180,13 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-inspect-cue",
         "allow-set-overlay",
         "allow-set-live-cues-paused",
+        "allow-turn-off-processing",
         "allow-microphone-snapshot",
         "allow-stop-microphone",
         "allow-stop-live-session",
         "allow-respond-to-call-prompt",
         "allow-respond-to-calendar-prompt",
+        "allow-respond-to-call-end-prompt",
         "allow-respond-to-end-prompt",
     ]);
     assert!(
@@ -355,6 +367,40 @@ fn the_companion_end_prompt_carries_counts_only_never_transcript_notes_titles_or
         assert!(
             !serialized.contains(private),
             "the companion end_prompt received {private}"
+        );
+    }
+}
+
+#[test]
+fn the_companion_call_end_prompt_carries_id_only_never_transcript_notes_titles_or_app_names() {
+    use talkqte_lib::call_prompt::CallEndPrompt;
+    let mut engine = Engine::live();
+    engine.set_user_name(Some("Marisol".into())).unwrap();
+    engine
+        .set_focus(vec!["Agree the seating chart for the potluck".into()])
+        .unwrap();
+    engine
+        .update_notes("Fictional private manual notes about the orchard keys.".into())
+        .unwrap();
+    engine.start().unwrap();
+    engine.advance(2_000);
+    let session = engine.session();
+    engine
+        .ingest(
+            session,
+            line("l1", 1_000, "The greenhouse keys are in the blue tin."),
+        )
+        .unwrap();
+
+    let mut snapshot = engine.cue_snapshot();
+    snapshot.call_end_prompt = Some(CallEndPrompt { id: 42 });
+    let sent = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(keys(&sent["callEndPrompt"]), set(&["id"]));
+    let serialized = sent.to_string();
+    for private in ["blue tin", "orchard keys", "Marisol", "seating chart"] {
+        assert!(
+            !serialized.contains(private),
+            "the companion call_end_prompt received {private}"
         );
     }
 }
@@ -571,7 +617,6 @@ fn the_companion_calendar_prompt_is_narrow_and_never_exposes_raw_events_or_title
 
     let mut engine = Engine::live();
     engine.set_meeting_title(Some("Fictional Quarterly Planning".into()));
-    engine.start().unwrap();
 
     let mut snapshot = engine.cue_snapshot();
     snapshot.calendar_prompt = watcher.prompt().cloned();
@@ -604,4 +649,54 @@ fn the_companion_calendar_prompt_is_narrow_and_never_exposes_raw_events_or_title
     let live_payload = serde_json::to_value(&snapshot).unwrap().to_string();
     assert!(!live_payload.contains("Fictional Quarterly Planning"));
     assert!(!live_payload.contains("meetingTitle"));
+}
+
+#[test]
+fn global_system_audio_tap_keeps_no_app_name_or_private_data_in_companion_or_kept_meetings() {
+    use talkqte_lib::engine::SessionSources;
+    let mut engine = Engine::live();
+    engine.set_user_name(Some("Marisol".into())).unwrap();
+    engine
+        .update_notes("Fictional notes for the orchard call.".into())
+        .unwrap();
+    engine.start().unwrap();
+    engine.set_sources(SessionSources::system_audio());
+    engine.advance(2_000);
+    let session = engine.session();
+    engine
+        .ingest_from(
+            session,
+            talkqte_lib::engine::LineOrigin::Application,
+            line("sys-1", 1_000, "Let's check the seed delivery."),
+        )
+        .unwrap();
+    engine
+        .ingest_from(
+            session,
+            talkqte_lib::engine::LineOrigin::Microphone,
+            line("mic-1", 1_500, "Sounds good, Friday works."),
+        )
+        .unwrap();
+
+    // Companion never receives transcript text, notes, or source details.
+    let cue_json = serde_json::to_string(&engine.cue_snapshot()).unwrap();
+    for secret in ["seed delivery", "orchard call", "Marisol", "System audio"] {
+        assert!(!cue_json.contains(secret), "companion leaked {secret}");
+    }
+
+    // Export holds manual notes only while ended/kept never stores an app name for system audio.
+    let export = engine.markdown();
+    assert!(!export.contains("seed delivery"));
+    assert!(!export.contains("System audio"));
+    engine.end();
+    let kept = engine.keepable_meeting(true).unwrap();
+    assert_eq!(kept.application, None);
+    assert_eq!(kept.sources, talkqte_lib::meeting_history::Sources::Both);
+    assert_eq!(
+        kept.transcript.iter().map(|l| l.label).collect::<Vec<_>>(),
+        vec![
+            Some(talkqte_lib::meeting_history::Label::Them),
+            Some(talkqte_lib::meeting_history::Label::You),
+        ]
+    );
 }

@@ -141,7 +141,7 @@ test('processing controls send only the originating session and scope', async ({
   await enable(page);
   await page.getByRole('button', { name: 'Pause cues' }).click();
   await page.getByRole('button', { name: 'Resume cues' }).click();
-  await page.getByRole('button', { name: 'Disable processing' }).click();
+  await page.getByRole('button', { name: 'Turn off processing' }).click();
   expect(await calls(page, 'set_processing_paused')).toEqual([
     {
       command: 'set_processing_paused',
@@ -177,7 +177,7 @@ for (const replacement of ['sources', 'session']) {
     await open(page);
     await enable(page);
     await page.evaluate(() => window.processingTest.hold('revoke_processing'));
-    await page.getByRole('button', { name: 'Disable processing' }).click();
+    await page.getByRole('button', { name: 'Turn off processing' }).click();
     await page.evaluate(
       (replacement) =>
         replacement === 'sources'
@@ -232,7 +232,7 @@ test('Pause and Disable preserve capture; Stop waits for capture confirmation', 
   ).toBeVisible();
   await page.getByRole('button', { name: 'Resume cues' }).click();
   await expect(page.getByRole('button', { name: 'Pause cues' })).toBeVisible();
-  await page.getByRole('button', { name: 'Disable processing' }).click();
+  await page.getByRole('button', { name: 'Turn off processing' }).click();
   await expect(
     page.getByText('Model connection off', { exact: true }),
   ).toBeVisible();
@@ -329,7 +329,7 @@ for (const issue of [
     ).toBeEnabled();
     expect(await calls(page, 'approve_processing_scope')).toHaveLength(1);
     expect(await calls(page, 'review_processing_scope')).toHaveLength(1);
-    await page.getByRole('button', { name: 'Disable processing' }).click();
+    await page.getByRole('button', { name: 'Turn off processing' }).click();
     await expect(
       page.getByRole('button', { name: 'Review processing' }),
     ).toBeVisible();

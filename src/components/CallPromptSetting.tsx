@@ -6,11 +6,14 @@ import { platformName, usePlatform } from '../lib/platform';
 
 interface Settings {
   enabled: boolean;
+  autoStart: boolean;
   notFor: string[];
 }
 
-/** Settings: offer to start a session when a call seems to be starting.
- * Off until the person turns it on; saved in the settings file. */
+/** Settings: offer to start or auto-start a session when a call begins.
+ * Offer in the dock is on by default on macOS (off in lab runs);
+ * Start automatically is off until the person turns it on; saved in the
+ * settings file. */
 export function CallPromptSetting() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
@@ -42,8 +45,12 @@ export function CallPromptSetting() {
     setError('');
     try {
       setSettings(await invoke<Settings>(command, args));
-    } catch {
-      setError('The change was not confirmed. Try again.');
+    } catch (failure) {
+      setError(
+        typeof failure === 'string' && failure
+          ? failure
+          : 'The change was not confirmed. Try again.',
+      );
     }
   }
 
@@ -56,7 +63,7 @@ export function CallPromptSetting() {
           <h2 id="call-prompt-setting">When a call starts</h2>
           <p>
             Not available on {platformName(platform)} yet. On a Mac, TalkQTE can
-            offer to start a session when another app starts using the
+            offer or start a live session when another app starts using the
             microphone; here, start a live session from the notebook.
           </p>
         </div>
@@ -67,30 +74,46 @@ export function CallPromptSetting() {
       <div>
         <h2 id="call-prompt-setting">When a call starts</h2>
         <p>
-          While TalkQTE is open, it can notice that another app is using your
-          microphone and offer, in the companion, to start a session with the
-          microphone and that app. It reads only whether the microphone is in
-          use and which app is in front, never audio or what is on screen, and
-          that stays on this Mac. It never starts a session by itself: Start
-          opens the notebook, where you choose and approve as usual. A browser
-          call (Google Meet, for example) looks like any other use of the
-          microphone in a browser. TalkQTE has to be running to notice. It
-          remembers this setting, and the apps you said not to ask about, by
-          their identifiers only.
+          While TalkQTE is open, it notices when another app uses your
+          microphone or camera (on by default; turn it off here or from the
+          offer). It reads only local mic/camera-active metadata and the app’s
+          bundle identifier, never audio, video, or what is on screen, and that
+          stays on this Mac. Offer in the dock shows a 1-click Start button
+          without starting capture; Start automatically (off by default) begins
+          listening once a known call app or browser uses your microphone (never
+          on a camera-only preview screen), sending your mic and macOS system
+          audio to Deepgram and recent lines to Anthropic until Stop, showing
+          Listening · Stop in the dock. While a live session runs, TalkQTE also
+          offers a Call ended dock prompt if your call’s camera and mic go
+          inactive. App preferences save by bundle identifier only.
         </p>
         {settings && (
-          <label className="processing-option call-prompt-setting-option">
-            <input
-              type="checkbox"
-              checked={settings.enabled}
-              onChange={(event) =>
-                void change('set_call_prompt', {
-                  enabled: event.target.checked,
-                })
-              }
-            />
-            <span>Offer to start a session when a call seems to start</span>
-          </label>
+          <>
+            <label className="processing-option call-prompt-setting-option">
+              <input
+                type="checkbox"
+                checked={settings.enabled}
+                onChange={(event) =>
+                  void change('set_call_prompt', {
+                    enabled: event.target.checked,
+                  })
+                }
+              />
+              <span>Offer in the dock when a call seems to start</span>
+            </label>
+            <label className="processing-option call-prompt-setting-option">
+              <input
+                type="checkbox"
+                checked={settings.autoStart}
+                onChange={(event) =>
+                  void change('set_call_prompt', {
+                    autoStart: event.target.checked,
+                  })
+                }
+              />
+              <span>Start automatically when a call begins</span>
+            </label>
+          </>
         )}
         {!!settings?.notFor.length && (
           <p className="small muted call-prompt-not-for">

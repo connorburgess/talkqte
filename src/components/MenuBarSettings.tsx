@@ -67,10 +67,8 @@ export function MenuBarSettings() {
       <div>
         <h2 id="menu-bar-setting">Menu bar and login</h2>
         <p>
-          TalkQTE has an item in the menu bar that shows whether a session is
-          running, opens the notebook, and starts or stops a session. Its Start
-          session… opens the notebook’s usual start, where you choose what to
-          listen to and approve it; nothing starts from the menu bar by itself.
+          Shows session state in the menu bar, opens the notebook, and opens
+          start controls; nothing starts from the menu bar by itself.
         </p>
         <label className="processing-option">
           <input
@@ -85,10 +83,9 @@ export function MenuBarSettings() {
           <span>Keep running in the menu bar when the notebook is closed</span>
         </label>
         <p className="small muted">
-          Off by default: closing the notebook quits TalkQTE, as it always has.
-          On: closing the notebook leaves TalkQTE in the menu bar only, so it
-          can still notice a call starting if you turned that on. Quit it from
-          the menu bar.
+          Off by default: closing the notebook quits TalkQTE. When on, closing
+          hides the window so call detection keeps running; quit from the menu
+          bar.
         </p>
         <label className="processing-option">
           <input

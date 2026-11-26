@@ -6,6 +6,7 @@ import {
   BookOpen,
   ChevronRight,
   Cloud,
+  CloudOff,
   CloudUpload,
   EyeOff,
   FileText,
@@ -37,7 +38,6 @@ import {
 } from './components/ProcessingControl';
 import { MicrophoneControl } from './components/MicrophoneControl';
 import { ContextNotes } from './components/ContextNotes';
-import { SetupCard, type SetupTarget } from './components/SetupCard';
 import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
@@ -51,29 +51,38 @@ import {
   useElementWidth,
 } from './components/PanelDivider';
 import { microphoneLabel, useMicrophone } from './lib/microphone';
+import {
+  appendDictatedText,
+  dictationStatusLabel,
+  useDictation,
+  type DictationTarget,
+} from './lib/dictation';
 import { useCaptureControl } from './lib/useCaptureControl';
-import { keysStatus, watchKeys, type KeysStatus } from './lib/providerKeys';
+import {
+  keysStatus,
+  transcriptionProvider,
+  watchKeys,
+  type KeysStatus,
+  type TranscriptionProvider,
+} from './lib/providerKeys';
 import { Onboarding } from './components/Onboarding';
 import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
 import { CalendarPrompt } from './components/CalendarPrompt';
+import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { CalendarSettings } from './components/CalendarSettings';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
+import { UpdateSettings } from './components/UpdateSettings';
 import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
-import {
-  SessionSources,
-  microphoneOnly,
-  ready,
-  type SourceChoice,
-} from './components/SessionSources';
 import {
   type EchoLine,
   applicationEndedText,
+  bothSources,
   echoText,
   sourcesHeading,
   transcribedWhere,
@@ -84,7 +93,6 @@ import {
 } from './lib/transcription';
 import {
   microphoneNotCapturing,
-  processingApi,
   sourceOnlyApplication,
 } from './lib/processing';
 
@@ -350,6 +358,18 @@ function FloatingQuestion() {
                     {microphoneControl ? 'Mic only' : 'Cues off'}
                   </strong>
                 )}
+                {live &&
+                  !!state.autoStarted &&
+                  !state.cuesPaused &&
+                  state.model !== 'stopped' &&
+                  mic?.status !== 'error' && (
+                    <strong
+                      className="companion-title companion-listening"
+                      data-tauri-drag-region
+                    >
+                      Listening
+                    </strong>
+                  )}
                 {/* Always there for assistive technology. While capture is
                     on and well the glyph and its dot say it for the eye;
                     any other state is spelled out. */}
@@ -388,8 +408,28 @@ function FloatingQuestion() {
                       <Pause size={16} aria-hidden="true" />
                     )}
                   </button>
+                  {(state.model === 'on' || state.model === 'sending') && (
+                    <button
+                      className="companion-control"
+                      aria-label="Turn off processing"
+                      title="Turn off processing; stops sending audio and lines"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() => bridge.command('turn_off_processing'))
+                      }
+                    >
+                      <CloudOff size={16} aria-hidden="true" />
+                    </button>
+                  )}
+                  {state.autoStarted && (
+                    <span className="companion-auto-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  )}
                   <button
-                    className="companion-control"
+                    className={`companion-control${
+                      state.autoStarted ? ' companion-stop-label' : ''
+                    }`}
                     aria-label="Stop live session"
                     title="Stop live session"
                     disabled={busy}
@@ -397,7 +437,11 @@ function FloatingQuestion() {
                       void run(() => bridge.command('stop_live_session'))
                     }
                   >
-                    <Square size={14} aria-hidden="true" />
+                    {state.autoStarted ? (
+                      <span>Stop</span>
+                    ) : (
+                      <Square size={14} aria-hidden="true" />
+                    )}
                   </button>
                 </>
               ) : microphoneControl ? (
@@ -429,29 +473,44 @@ function FloatingQuestion() {
                 <EyeOff size={16} aria-hidden="true" />
               </button>
             </header>
-            {state && (
-              <CueCard
-                cue={state.cue}
-                size={state.questionSize}
-                announce={false}
-                compact
-                busy={busy}
-                onHold={() =>
-                  void run(() =>
-                    bridge.command('inspect_cue', { id: state.cue!.id }),
-                  )
-                }
-                onDismiss={() => {
-                  dismissed.current = true;
-                  void run(() =>
-                    bridge.command('respond_to_cue', {
-                      id: state.cue!.id,
-                      response: 'dismiss',
-                    }),
-                  );
-                }}
-              />
-            )}
+            {state &&
+              (state.callEndPrompt ? (
+                <CallEndPrompt
+                  prompt={state.callEndPrompt}
+                  busy={busy}
+                  large={state.questionSize === 'large'}
+                  onAnswer={(answer) =>
+                    void run(() =>
+                      bridge.command('respond_to_call_end_prompt', {
+                        id: state.callEndPrompt!.id,
+                        answer,
+                      }),
+                    )
+                  }
+                />
+              ) : (
+                <CueCard
+                  cue={state.cue}
+                  size={state.questionSize}
+                  announce={false}
+                  compact
+                  busy={busy}
+                  onHold={() =>
+                    void run(() =>
+                      bridge.command('inspect_cue', { id: state.cue!.id }),
+                    )
+                  }
+                  onDismiss={() => {
+                    dismissed.current = true;
+                    void run(() =>
+                      bridge.command('respond_to_cue', {
+                        id: state.cue!.id,
+                        response: 'dismiss',
+                      }),
+                    );
+                  }}
+                />
+              ))}
           </>
         ) : state?.endPrompt && state.overlayEnabled ? (
           <EndPrompt
@@ -521,6 +580,26 @@ function transcriptLines(state: Snapshot) {
   for (const echo of state.sources?.echoes ?? [])
     lines.push({ segment: echo, echo });
   return lines.sort((a, b) => a.segment.atMs - b.segment.atMs);
+}
+
+/** Concise disclosure shown right beside Start live session. */
+function startDisclosure(
+  systemAudio: boolean,
+  liveStatus: LiveStatus | null,
+): string | null {
+  if (!liveStatus?.available) return null;
+  const sourceLabel = systemAudio
+    ? 'your microphone and system audio'
+    : 'your microphone';
+  const stt = liveStatus.transcription;
+  const cueProvider = liveStatus.cueProvider;
+  if (stt && cueProvider)
+    return `Starts immediately: sends ${sourceLabel} to ${stt} and recent lines to ${cueProvider} until you press Stop.`;
+  if (stt)
+    return `Starts immediately: sends ${sourceLabel} to ${stt} until you press Stop.`;
+  if (cueProvider)
+    return `Starts immediately: sends recent lines to ${cueProvider} until you press Stop.`;
+  return `Starts immediately with ${sourceLabel} until you press Stop.`;
 }
 
 const defaultNotesRatio = 1 / 1.95;
@@ -593,6 +672,9 @@ function Notebook() {
     if (startPending && state?.live && state.status === 'running')
       setStartInstalled(true);
   }, [startPending, state?.live, state?.status]);
+  useEffect(() => {
+    if (!state?.sources?.echoes?.length) setShowEchoes(false);
+  }, [state?.sources?.echoes?.length]);
   const startButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement | null>(null);
   const stopButton = useRef<HTMLButtonElement | null>(null);
@@ -614,88 +696,41 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
-  const [sources, setSources] = useState<SourceChoice>(microphoneOnly);
   // Pre-filled meeting title from an opt-in calendar pre-call prompt.
   const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
-  // Start in the companion's call-starting offer: show the notebook with
-  // the microphone and the offered application chosen. Nothing starts here.
   useEffect(() => {
     let disposed = false;
-    let stopCall: (() => void) | undefined;
-    let stopCalendar: (() => void) | undefined;
-    void listen<{ name: string; bundleId: string } | null>(
-      'call-prompt:start',
-      ({ payload }) => {
-        setView('notebook');
-        setSources({
-          mode: payload ? 'both' : 'microphone',
-          application: null,
-          wanted: payload ?? undefined,
-        });
-      },
-    )
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stopCall = unlisten;
-      })
-      .catch(() => {});
+    let stop: (() => void) | undefined;
     void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
       setView('notebook');
       if (payload?.title) setMeetingTitle(payload.title);
-      setStartRequested((count) => count + 1);
     })
       .then((unlisten) => {
         if (disposed) unlisten();
-        else stopCalendar = unlisten;
+        else stop = unlisten;
       })
       .catch(() => {});
     return () => {
       disposed = true;
-      stopCall?.();
-      stopCalendar?.();
+      stop?.();
     };
   }, []);
-  // Only a build that can hear an application reports one beside the
-  // microphone; any other build starts from the microphone as before.
-  const canChooseSources = !!capture.state?.source;
+  const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
-    const choice = canChooseSources ? sources : microphoneOnly;
     const explicitTitle = meetingTitle === null ? undefined : meetingTitle;
     void run(async () => {
       setNotice('');
+      if (dictation.active) await dictation.stop();
       try {
-        if (choice.mode === 'microphone' || !choice.application) {
-          await bridge.command(
-            'start_live_session',
-            explicitTitle !== undefined ? { title: explicitTitle } : undefined,
-          );
-          setMeetingTitle(null);
-          return;
-        }
-        // Review exactly the chosen application, then start with it: the
-        // session declares it, so its one approval names what is sent.
-        const review = await processingApi.applicationAudio({
-          kind: 'review',
-          source: choice.application.id,
-        });
-        if (!review?.operation)
-          throw new Error('The selected application changed. Choose it again.');
-        if (choice.mode === 'both')
-          await bridge.command('start_live_session', {
-            application: review.operation,
-            ...(explicitTitle !== undefined ? { title: explicitTitle } : {}),
-          });
-        else
-          await processingApi.applicationAudio({
-            kind: 'startSession',
-            review: review.operation,
-          });
+        await bridge.command(
+          'start_live_session',
+          explicitTitle !== undefined ? { title: explicitTitle } : undefined,
+        );
         setMeetingTitle(null);
-        setSources((current) => ({ ...current, application: null }));
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -711,6 +746,7 @@ function Notebook() {
   const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
     'notebook',
   );
+  const [showEchoes, setShowEchoes] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [sessionHistory, setSessionHistory] = useState<HistoryStatus | null>(
     null,
@@ -814,9 +850,13 @@ function Notebook() {
     }
   };
   const focusField = useRef<HTMLTextAreaElement>(null);
-  // Clear is a mousedown before a click, so the blur that would save the old
-  // text is skipped when it heads for Clear; the field keeps the focus.
+  // Clear and mouse clicks on Focus dictation skip premature blur validation
+  // so an incomplete draft can be cleared or extended by voice; keyboard Tab
+  // still submits Focus as usual.
   const clearButton = useRef<HTMLButtonElement>(null);
+  const skipFocusBlur = useRef(false);
+  const focusDictationTouched = useRef(false);
+  const lastDictationTarget = useRef<DictationTarget | null>(null);
   // All Focus writes share the command queue and latest-request error state.
   const applyFocus = (lines: string[]): Promise<boolean> => {
     const value = lines.join('\n');
@@ -859,9 +899,13 @@ function Notebook() {
   useEffect(() => {
     if (!state) return;
     setEndedFocus(
-      state.live && state.status === 'ended' ? state.focus.join('\n') : null,
+      state.live &&
+        state.status === 'ended' &&
+        (state.transcript.length > 0 || state.notes.trim().length > 0)
+        ? state.focus.join('\n')
+        : null,
     );
-  }, [state?.live, state?.status]);
+  }, [state?.live, state?.status, state?.transcript.length, state?.notes]);
   // The cap's countdown is said when it first appears, not every minute.
   const lowSaid = useRef(false);
   const lowText = transcriptionLowText(state?.transcription);
@@ -892,7 +936,7 @@ function Notebook() {
   const sessionWas = useRef<string | null>(null);
   useEffect(() => {
     const now = state?.live ? (state.status ?? null) : null;
-    if (sessionWas.current === 'running' && now === 'ended')
+    if (sessionWas.current === 'running' && now !== 'running')
       setNotice('Live session ended.');
     sessionWas.current = now;
   }, [state?.live, state?.status]);
@@ -976,11 +1020,10 @@ function Notebook() {
   const [notice, setNotice] = useState('');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
-  // The setup card: put away for this app session with Not now, or gone
-  // once the required steps are done.
-  const [setupDismissed, setSetupDismissed] = useState(false);
   const [keysAvailable, setKeysAvailable] = useState(false);
   const [initialKeys, setInitialKeys] = useState<KeysStatus | null>(null);
+  const [sttProvider, setSttProvider] =
+    useState<TranscriptionProvider>('deepgram');
   const [onboardingMode, setOnboardingMode] = useState<
     'idle' | 'auto' | 'manual' | 'skipped' | 'finished'
   >('idle');
@@ -992,43 +1035,11 @@ function Notebook() {
   useEffect(() => {
     if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
-  const pendingFocus = useRef<SetupTarget | 'appearance' | null>(null);
-  const goToSetup = (target: SetupTarget) => {
-    if (target === 'focus') {
-      setFocusExpanded(true);
-      // The card only shows in the notebook, so the focus box is already here.
-      setTimeout(() => {
-        focusField.current?.scrollIntoView({ block: 'center' });
-        focusField.current?.focus();
-      }, 0);
-      return;
-    }
-    if (target === 'context') {
-      // The card only shows in the notebook, so the panel is already here.
-      setTab('notes');
-      setTimeout(() => {
-        const panel = document.querySelector<HTMLDetailsElement>(
-          '[aria-label="Prior context"] details',
-        );
-        if (panel) panel.open = true;
-        const add = panel?.querySelector<HTMLElement>(
-          'button.secondary-button',
-        );
-        add?.scrollIntoView({ block: 'center' });
-        add?.focus();
-      }, 0);
-      return;
-    }
-    pendingFocus.current = target;
-    setView('settings');
-  };
+  const pendingFocus = useRef<'appearance' | null>(null);
   useEffect(() => {
-    const target = pendingFocus.current;
-    if (!target) return;
+    if (!pendingFocus.current) return;
     pendingFocus.current = null;
-    const element = document.getElementById(
-      target === 'name' ? 'user-name' : 'question-size',
-    );
+    const element = document.getElementById('question-size');
     element?.scrollIntoView({ block: 'center' });
     element?.focus();
   }, [view, tab]);
@@ -1052,6 +1063,7 @@ function Notebook() {
   useEffect(() => {
     if (!bridge.desktop) return;
     let live = true;
+    let stopWatch: (() => void) | undefined;
     keysStatus().then(
       (next) => {
         if (!live) return;
@@ -1066,8 +1078,19 @@ function Notebook() {
         if (live) setKeysAvailable(false);
       },
     );
+    void watchKeys((next) => {
+      if (!live) return;
+      setKeysAvailable(true);
+      setInitialKeys(next);
+    })
+      .then((unlisten) => {
+        if (!live) unlisten();
+        else stopWatch = unlisten;
+      })
+      .catch(() => {});
     return () => {
       live = false;
+      stopWatch?.();
     };
   }, []);
   const showOnboarding =
@@ -1120,7 +1143,13 @@ function Notebook() {
   };
   const startFromOnboarding = () => {
     setOnboardingMode('finished');
-    if (liveStatus?.available && !busy && !startPending && !microphone.active) {
+    if (
+      liveStatus?.available &&
+      !busy &&
+      !startPending &&
+      !microphone.active &&
+      !dictation.active
+    ) {
       void startLive();
     } else {
       focusSessionHeading();
@@ -1140,6 +1169,67 @@ function Notebook() {
   // change the editor takes from a snapshot; a snapshot that lags typing is
   // ignored, and nothing typed meanwhile is lost.
   const engineNotes = useRef('');
+  const dictation = useDictation((event) => {
+    if (event.target === 'notes') {
+      setNotes((current) => {
+        const next = appendDictatedText(current, event.text, 20_000);
+        if (next === current) return current;
+        engineNotes.current = next;
+        void bridge
+          .command('update_notes', { notes: next })
+          .catch((e: unknown) => setError(String(e)));
+        return next;
+      });
+    } else {
+      focusDictationTouched.current = true;
+      focusEdit.current++;
+      setFocus((current) => appendDictatedText(current, event.text));
+    }
+  });
+  if (dictation.state?.target) {
+    lastDictationTarget.current = dictation.state.target;
+  }
+  const dictationTarget =
+    dictation.state?.target ?? lastDictationTarget.current;
+  useEffect(() => {
+    if (
+      focusDictationTouched.current &&
+      !dictation.active &&
+      dictation.state &&
+      (dictation.state.status === 'off' || dictation.state.status === 'error')
+    ) {
+      focusDictationTouched.current = false;
+      if (document.activeElement !== focusField.current) {
+        saveFocus();
+      }
+    }
+  }, [dictation.active, dictation.state?.status]);
+  const notesFieldVisible =
+    view === 'notebook' && !showOnboarding && tab === 'notes';
+  const focusFieldVisible =
+    view === 'notebook' && !showOnboarding && focusExpanded;
+  useEffect(() => {
+    if (!dictation.active) return;
+    if (
+      (dictation.state?.target === 'notes' && !notesFieldVisible) ||
+      (dictation.state?.target === 'focus' && !focusFieldVisible)
+    ) {
+      dictation.stopQuietly();
+    }
+  }, [
+    dictation.active,
+    dictation.state?.target,
+    notesFieldVisible,
+    focusFieldVisible,
+  ]);
+  const dictationActiveRef = useRef(false);
+  dictationActiveRef.current = dictation.active;
+  useEffect(
+    () => () => {
+      if (dictationActiveRef.current) dictation.stopQuietly();
+    },
+    [],
+  );
   useEffect(() => {
     if (!state || !initialized.current) return;
     if (state.notes === engineNotes.current) return;
@@ -1181,6 +1271,14 @@ function Notebook() {
             reason: 'Live transcription status is unavailable.',
           });
       });
+    if (bridge.desktop) {
+      transcriptionProvider().then(
+        (provider) => {
+          if (liveStatusSeq.current === seq) setSttProvider(provider);
+        },
+        () => {},
+      );
+    }
   }, []);
   useEffect(() => {
     let current = true;
@@ -1218,6 +1316,13 @@ function Notebook() {
   }, [preview, busy]);
 
   const live = !!state?.live && state.status === 'running';
+  const emptyEndedLive =
+    !!state?.live &&
+    state.status === 'ended' &&
+    state.transcript.length === 0 &&
+    state.notes.trim().length === 0 &&
+    notes.trim().length === 0;
+  const sessionLive = !!state?.live && !emptyEndedLive;
   // Browser preview and tests only: a replay of a fictional conversation.
   // The flag comes from the browser tests' stand-in (liveTest.simulate in
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
@@ -1270,6 +1375,148 @@ function Notebook() {
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </main>
     );
+  const dictationUnavailableReason = (
+    target: DictationTarget,
+  ): { reason: string; visibleHint: boolean } | null => {
+    if (!bridge.desktop) {
+      return {
+        reason: 'Dictation is available in the desktop app.',
+        visibleHint: false,
+      };
+    }
+    if (live || preparing || finishing || simulated) {
+      return {
+        reason: 'Stop the live session before dictating.',
+        visibleHint: false,
+      };
+    }
+    if (microphone.active) {
+      return {
+        reason: 'Stop the microphone check before dictating.',
+        visibleHint: false,
+      };
+    }
+    const sttLabel = sttProvider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
+    const sttKeyState =
+      sttProvider === 'elevenlabs'
+        ? initialKeys?.elevenlabs?.state
+        : initialKeys?.deepgram.state;
+    if (sttKeyState === 'rejected') {
+      return {
+        reason: `${sttLabel} rejected your API key. Replace it in Settings to dictate.`,
+        visibleHint: true,
+      };
+    }
+    if (sttKeyState === 'unreadable') {
+      return {
+        reason: `Your ${sttLabel} key could not be read. Check it in Settings.`,
+        visibleHint: true,
+      };
+    }
+    if (
+      (sttKeyState === 'notSet' || (!initialKeys && keysAvailable)) &&
+      !liveStatus?.transcription
+    ) {
+      return {
+        reason: `Add your ${sttLabel} API key in Settings to dictate.`,
+        visibleHint: true,
+      };
+    }
+    if (
+      dictation.state &&
+      (dictation.state.status === 'stopping' ||
+        (dictation.state.status === 'error' && !dictation.state.canStart))
+    ) {
+      return { reason: 'Finishing dictation…', visibleHint: false };
+    }
+    if (dictation.active && dictation.state?.target !== target) {
+      return {
+        reason: 'Stop dictating before switching fields.',
+        visibleHint: false,
+      };
+    }
+    if (dictation.busy) {
+      return { reason: 'Updating dictation…', visibleHint: false };
+    }
+    return null;
+  };
+
+  const toggleDictation = (target: DictationTarget) => {
+    const activeHere =
+      dictation.state?.target === target &&
+      (dictation.state.status === 'starting' ||
+        dictation.state.status === 'listening');
+    if (activeHere) {
+      void dictation.stop();
+    } else {
+      lastDictationTarget.current = target;
+      void dictation.start(target);
+    }
+  };
+
+  const notesDictating =
+    dictation.state?.target === 'notes' &&
+    (dictation.state.status === 'starting' ||
+      dictation.state.status === 'listening');
+  const notesDictationBlock = notesDictating
+    ? null
+    : dictationUnavailableReason('notes');
+  const notesDictationFeedback = (() => {
+    if (
+      notesDictating ||
+      (dictation.state?.target === 'notes' &&
+        dictation.state.status === 'stopping')
+    ) {
+      return {
+        kind: 'status' as const,
+        text: dictationStatusLabel(dictation.state),
+      };
+    }
+    if (dictationTarget === 'notes') {
+      if (dictation.error) {
+        return { kind: 'error' as const, text: dictation.error };
+      }
+      if (dictation.state?.status === 'error' && dictation.state.message) {
+        return { kind: 'error' as const, text: dictation.state.message };
+      }
+      if (dictation.state?.status === 'off' && dictation.state.message) {
+        return { kind: 'status' as const, text: dictation.state.message };
+      }
+    }
+    return null;
+  })();
+
+  const focusDictating =
+    dictation.state?.target === 'focus' &&
+    (dictation.state.status === 'starting' ||
+      dictation.state.status === 'listening');
+  const focusDictationBlock = focusDictating
+    ? null
+    : dictationUnavailableReason('focus');
+  const focusDictationFeedback = (() => {
+    if (
+      focusDictating ||
+      (dictation.state?.target === 'focus' &&
+        dictation.state.status === 'stopping')
+    ) {
+      return {
+        kind: 'status' as const,
+        text: dictationStatusLabel(dictation.state),
+      };
+    }
+    if (dictationTarget === 'focus') {
+      if (dictation.error) {
+        return { kind: 'error' as const, text: dictation.error };
+      }
+      if (dictation.state?.status === 'error' && dictation.state.message) {
+        return { kind: 'error' as const, text: dictation.state.message };
+      }
+      if (dictation.state?.status === 'off' && dictation.state.message) {
+        return { kind: 'status' as const, text: dictation.state.message };
+      }
+    }
+    return null;
+  })();
   const holdCue = () => {
     if (!state.cue) return;
     void run(() => bridge.command('inspect_cue', { id: state.cue!.id }));
@@ -1394,30 +1641,6 @@ function Notebook() {
               Meetings
             </button>
           </nav>
-          {view === 'notebook' && (
-            <div className="meeting-list-content">
-              {state &&
-                !setupDismissed &&
-                !live &&
-                !simulated &&
-                !state.userName && (
-                  <details className="setup-disclosure">
-                    <summary>Set up a live session</summary>
-                    <SetupCard
-                      name={state.userName}
-                      focus={state.focus}
-                      items={contextItems}
-                      busy={busy}
-                      onGoTo={goToSetup}
-                      onDismiss={() => {
-                        setSetupDismissed(true);
-                        notebookNav.current?.focus();
-                      }}
-                    />
-                  </details>
-                )}
-            </div>
-          )}
           <div className="sidebar-bottom">
             <button
               className={view === 'settings' ? 'nav-item selected' : 'nav-item'}
@@ -1464,74 +1687,13 @@ function Notebook() {
                   ? 'Meetings'
                   : 'Settings'}
             </span>
-            {view === 'notebook' && state.live && (
+            {view === 'notebook' && sessionLive && (
               <>
                 <ChevronRight size={14} />
                 <span>Live session</span>
               </>
             )}
           </div>
-          {view === 'notebook' &&
-            !showOnboarding &&
-            (listResizable || splitContent) && (
-              <details
-                className="layout-controls"
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.currentTarget.open = false;
-                    event.currentTarget.querySelector('summary')?.focus();
-                  }
-                }}
-              >
-                <summary>Panel sizes</summary>
-                <div className="layout-controls-body">
-                  {listResizable && (
-                    <label>
-                      Sidebar width
-                      <input
-                        type="range"
-                        min={200}
-                        max={listMax}
-                        value={listWidth}
-                        aria-valuetext={`${listWidth} pixels wide`}
-                        onChange={(event) =>
-                          setPreferredListWidth(Number(event.target.value))
-                        }
-                      />
-                    </label>
-                  )}
-                  {splitContent && (
-                    <label>
-                      Notes and transcript width
-                      <input
-                        type="range"
-                        min={260}
-                        max={notesMax}
-                        value={notesWidth}
-                        aria-valuetext={`${notesWidth} pixels wide`}
-                        onChange={(event) =>
-                          resizeNotes(Number(event.target.value))
-                        }
-                      />
-                    </label>
-                  )}
-                  <button
-                    className="secondary-button"
-                    onClick={() => {
-                      setPreferredListWidth(null);
-                      setNotesRatio(defaultNotesRatio);
-                    }}
-                  >
-                    Reset panel sizes
-                  </button>
-                  <p>
-                    TalkQTE remembers these sizes. Narrow windows stack the
-                    panels.
-                  </p>
-                </div>
-              </details>
-            )}
           {!bridge.desktop && (
             <span className="prototype-label">Browser preview</span>
           )}
@@ -1545,6 +1707,7 @@ function Notebook() {
             compact={!liveCaptureBar}
             stopActionRef={rememberStop}
             processingConfigured={!!capture.state?.processor}
+            processingApproved={!!capture.state?.approved}
             sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
             sourceSession={sourceApp}
             transcription={state?.transcription}
@@ -1601,9 +1764,14 @@ function Notebook() {
           <div
             className="notebook-processing"
             hidden={
-              view !== 'settings' &&
-              !state.live &&
-              !capture.state?.source?.mayBeCapturing
+              view === 'meetings' ||
+              (!live &&
+                !preparing &&
+                !finishing &&
+                !capture.state?.source?.mayBeCapturing &&
+                !capture.state?.issue &&
+                !capture.error &&
+                !(capture.statusError && (live || preparing || finishing)))
             }
           >
             <ProcessingControl
@@ -1670,7 +1838,7 @@ function Notebook() {
                         : 'Preparing live session'
                       : finishing
                         ? 'Finishing live session'
-                        : state.live
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? 'Cues paused · session continues'
@@ -1682,41 +1850,55 @@ function Notebook() {
                   </h1>
                   <p>
                     {preparing
-                      ? 'Starting · capture status shown above'
+                      ? 'Starting…'
                       : finishing
                         ? capture.state?.source?.mayBeCapturing &&
                           microphoneNotCapturing(microphone.state)
-                          ? 'Ending the live session. Application audio is shown under Cue processing.'
-                          : 'Waiting for microphone release and remaining transcription.'
-                        : state.live
+                          ? 'Ending live session. See Cue processing above.'
+                          : 'Releasing microphone and finishing transcription…'
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? sourceApp
-                                ? 'Application audio and transcript continue. Stop live session to stop listening.'
-                                : 'Microphone and transcript continue. Stop live session to stop listening.'
+                                ? 'App audio and transcript continue. Stop live session when done.'
+                                : 'Microphone and transcript continue. Stop live session when done.'
                               : sourceApp
-                                ? `Audio from ${sourceApp} · not saved by TalkQTE`
-                                : 'Your microphone · not saved by TalkQTE'
+                                ? `Audio from ${sourceApp} · audio not recorded`
+                                : bothSources(state.sources) &&
+                                    !state.sources?.applicationEnded
+                                  ? 'Your microphone and system audio · audio not recorded'
+                                  : 'Your microphone · audio not recorded'
                             : sessionHistory?.kept
-                              ? 'Saved to your Meetings list. Your notes and transcript stay in this window until you start another session or quit, and only what you choose to export leaves.'
-                              : 'Nothing was saved. The transcript stays here until you start another session or quit and is never exported; your notes stay until you quit and can be exported.'
+                              ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
+                              : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
                           : simulated
                             ? 'Fictional replay · nothing is captured'
                             : capture.state?.source?.mayBeCapturing
-                              ? 'No live session. Audio from a selected application may still be captured; see Cue processing above.'
+                              ? 'No live session. Selected app audio may still be capturing; see Cue processing above.'
                               : microphone.active &&
                                   !microphoneNotCapturing(microphone.state)
                                 ? microphone.state?.status === 'error'
-                                  ? 'No live session. The microphone is still being released; see above.'
-                                  : 'No live session. The microphone check above is on; it records and transcribes nothing.'
+                                  ? 'No live session. Releasing microphone; see above.'
+                                  : 'No live session. Mic check is on; nothing is recorded or transcribed.'
                                 : liveStatus?.available
-                                  ? 'Nothing is being captured. Start a live session when your meeting begins.'
+                                  ? 'Nothing is captured until you start a live session.'
                                   : liveStatus?.reason
-                                    ? `Nothing is being captured. Cues appear only during a live session. ${liveStatus.reason}`
-                                    : 'Nothing is being captured.'}
+                                    ? `Nothing is captured. ${liveStatus.reason}`
+                                    : 'Nothing is captured.'}
                   </p>
+                  {capturesSystemAudio &&
+                    liveStatus?.available &&
+                    !sessionLive &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing && (
+                      <p className="small muted">
+                        Use headphones if you can—speaker playback can echo into
+                        your mic and TalkQTE can’t catch every repeat.
+                      </p>
+                    )}
                   {notMacos(platform) &&
-                    !state.live &&
+                    !sessionLive &&
                     !simulated &&
                     !preparing &&
                     !finishing && (
@@ -1741,7 +1923,7 @@ function Notebook() {
                           <input
                             id="pre-call-title"
                             type="text"
-                            maxLength={200}
+                            maxLength={120}
                             value={meetingTitle}
                             disabled={busy}
                             onChange={(e) => setMeetingTitle(e.target.value)}
@@ -1750,7 +1932,7 @@ function Notebook() {
                             type="button"
                             className="secondary-button"
                             disabled={busy}
-                            onClick={() => setMeetingTitle(null)}
+                            onClick={() => setMeetingTitle('')}
                           >
                             Clear
                           </button>
@@ -1786,9 +1968,8 @@ function Notebook() {
                 </div>
               </div>
               <div className="session-actions">
-                {(state.live || simulated) && !preparing && (
+                {(live || simulated) && !preparing && (
                   <span className="session-clock">
-                    {state.live && !live && !finishing ? 'Length ' : ''}
                     {clockTime(state.elapsedMs)}
                   </span>
                 )}
@@ -1831,46 +2012,34 @@ function Notebook() {
                   Export
                 </button>
                 {!preparing && !finishing && !live && !simulated && (
-                  <>
+                  <div className="session-start-group">
                     {liveStatus?.available && (
-                      <button
-                        className="primary-button"
-                        ref={startButton}
-                        disabled={
-                          busy ||
-                          startPending ||
-                          micCheckActive ||
-                          (canChooseSources && !ready(sources))
-                        }
-                        title={
-                          micCheckActive
-                            ? 'Stop the microphone check first.'
-                            : canChooseSources && !ready(sources)
-                              ? 'Choose the application first.'
+                      <>
+                        <button
+                          className="primary-button"
+                          ref={startButton}
+                          disabled={busy || startPending || micCheckActive}
+                          title={
+                            micCheckActive
+                              ? 'Stop the microphone check first.'
                               : undefined
-                        }
-                        onClick={startLive}
-                      >
-                        <Play size={15} />
-                        Start live session
-                      </button>
+                          }
+                          onClick={startLive}
+                        >
+                          <Play size={15} />
+                          Start live session
+                        </button>
+                        {startDisclosure(capturesSystemAudio, liveStatus) && (
+                          <p className="session-start-disclosure">
+                            {startDisclosure(capturesSystemAudio, liveStatus)}
+                          </p>
+                        )}
+                      </>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             </section>
-            {canChooseSources &&
-              liveStatus?.available &&
-              !preparing &&
-              !finishing &&
-              !live &&
-              !simulated && (
-                <SessionSources
-                  value={sources}
-                  onChange={setSources}
-                  disabled={busy || startPending}
-                />
-              )}
 
             <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
             <KeepInHistory
@@ -1968,9 +2137,73 @@ function Notebook() {
                       }}
                     />
                     <div className="editor-footer">
-                      <span>Kept in memory for this session</span>
-                      <span>{notes.length.toLocaleString()} / 20,000</span>
+                      <span>In memory for this session</span>
+                      <div className="editor-footer-actions">
+                        <span>{notes.length.toLocaleString()} / 20,000</span>
+                        <button
+                          type="button"
+                          className={`dictation-button${notesDictating ? ' is-listening' : ''}`}
+                          aria-label={
+                            notesDictating ? 'Stop dictating' : 'Dictate note'
+                          }
+                          aria-pressed={notesDictating}
+                          aria-describedby={
+                            notesDictationBlock?.visibleHint
+                              ? 'notes-dictation-hint'
+                              : undefined
+                          }
+                          disabled={
+                            notesDictating
+                              ? dictation.busy
+                              : !!notesDictationBlock
+                          }
+                          title={
+                            notesDictating
+                              ? 'Stop dictating'
+                              : (notesDictationBlock?.reason ?? 'Dictate note')
+                          }
+                          onClick={() => toggleDictation('notes')}
+                        >
+                          {notesDictating ? (
+                            <Square size={14} aria-hidden="true" />
+                          ) : (
+                            <Mic size={16} aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
                     </div>
+                    {notesDictationFeedback && (
+                      <p
+                        className={
+                          notesDictationFeedback.kind === 'error'
+                            ? 'dictation-error'
+                            : 'dictation-status'
+                        }
+                        role={
+                          notesDictationFeedback.kind === 'error'
+                            ? 'alert'
+                            : 'status'
+                        }
+                      >
+                        {notesDictationFeedback.kind === 'status' &&
+                          notesDictating && (
+                            <span
+                              className="dictation-dot"
+                              aria-hidden="true"
+                            />
+                          )}
+                        {notesDictationFeedback.text}
+                      </p>
+                    )}
+                    {!notesDictationFeedback &&
+                      notesDictationBlock?.visibleHint && (
+                        <p
+                          id="notes-dictation-hint"
+                          className="small muted dictation-hint"
+                        >
+                          {notesDictationBlock.reason}
+                        </p>
+                      )}
                   </div>
                 ) : (
                   <div
@@ -1979,9 +2212,9 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    {(state.live || simulated) && (
+                    {(sessionLive || simulated) && (
                       <p className="muted small">
-                        {state.live
+                        {sessionLive
                           ? (sourcesHeading(
                               state.sources,
                               state.transcription,
@@ -1992,77 +2225,104 @@ function Notebook() {
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
-                    {transcriptLines(state).length ? (
-                      transcriptLines(state).map(({ segment, echo }) => (
-                        <article
-                          className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
-                          key={segment.id}
-                        >
-                          <div className="transcript-segment-head">
-                            <strong>{segment.speaker}</strong>
-                            <time>{clockTime(segment.atMs)}</time>
-                            {echo && !echo.kept && (
-                              <span className="transcript-echo-label">
-                                Likely an echo of Them · not used for cues
-                              </span>
-                            )}
-                          </div>
-                          <p>{segment.text}</p>
-                          {echo && !echo.kept && (
-                            <div className="transcript-echo-actions">
+                    {(() => {
+                      const allLines = transcriptLines(state);
+                      const echoCount = allLines.filter(
+                        ({ echo }) => echo && !echo.kept,
+                      ).length;
+                      const visibleLines = showEchoes
+                        ? allLines
+                        : allLines.filter(({ echo }) => !echo || echo.kept);
+                      return (
+                        <>
+                          {echoCount > 0 && (
+                            <div className="transcript-echo-toggle-row">
                               <button
-                                className="secondary-button"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: true,
-                                    }),
-                                  )
-                                }
+                                type="button"
+                                className="transcript-echo-toggle"
+                                aria-expanded={showEchoes}
+                                onClick={() => setShowEchoes((open) => !open)}
                               >
-                                It was me
-                              </button>
-                              <button
-                                className="secondary-button transcript-echo-remove"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: false,
-                                    }),
-                                  )
-                                }
-                              >
-                                Remove
+                                {showEchoes
+                                  ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                                  : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
                               </button>
                             </div>
                           )}
-                        </article>
-                      ))
-                    ) : (
-                      <div className="empty-inline">
-                        <MessageCircle size={25} />
-                        <h2>
-                          {live || simulated
-                            ? 'A conversation starts here.'
-                            : 'No transcript yet.'}
-                        </h2>
-                        <p>
-                          {live
-                            ? sourceApp
-                              ? 'Lines from the application appear here a few seconds after they are heard.'
-                              : 'Lines from your microphone appear here a few seconds after they are spoken.'
-                            : state.live
-                              ? 'No lines were transcribed in this session.'
-                              : simulated
-                                ? 'Lines of the replay appear here.'
-                                : 'Lines appear here during a live session.'}
-                        </p>
-                      </div>
-                    )}
+                          {visibleLines.length ? (
+                            visibleLines.map(({ segment, echo }) => (
+                              <article
+                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
+                                key={segment.id}
+                              >
+                                <div className="transcript-segment-head">
+                                  <strong>{segment.speaker}</strong>
+                                  <time>{clockTime(segment.atMs)}</time>
+                                  {echo && !echo.kept && (
+                                    <span className="transcript-echo-label">
+                                      Likely an echo of Them · not used for cues
+                                    </span>
+                                  )}
+                                </div>
+                                <p>{segment.text}</p>
+                                {echo && !echo.kept && (
+                                  <div className="transcript-echo-actions">
+                                    <button
+                                      className="secondary-button"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: true,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      It was me
+                                    </button>
+                                    <button
+                                      className="secondary-button transcript-echo-remove"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: false,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </article>
+                            ))
+                          ) : echoCount > 0 ? null : (
+                            <div className="empty-inline">
+                              <MessageCircle size={25} />
+                              <h2>
+                                {live || simulated
+                                  ? 'A conversation starts here.'
+                                  : 'No transcript yet.'}
+                              </h2>
+                              <p>
+                                {live
+                                  ? sourceApp
+                                    ? 'Lines from the app appear a few seconds after they’re heard.'
+                                    : 'Lines appear a few seconds after they’re spoken.'
+                                  : sessionLive
+                                    ? 'No lines transcribed.'
+                                    : simulated
+                                      ? 'Replay lines appear here.'
+                                      : 'Lines appear here during a live session.'}
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </section>
@@ -2095,18 +2355,18 @@ function Notebook() {
                           ? 'Cues are paused.'
                           : live || simulated
                             ? 'A little room to think.'
-                            : state.live
+                            : sessionLive
                               ? 'Cues have stopped.'
                               : 'No cue yet.'}
                       </h3>
                       <p>
                         {state.cuesPaused
-                          ? 'Resume cues when you want suggestions again. Speech from the pause will not become a new cue.'
+                          ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
                           : live || simulated
-                            ? 'Cues pass quietly. You can keep listening without responding.'
-                            : state.live
-                              ? 'Start another session to see cues again.'
-                              : 'During a live session, one cue at a time appears here. In this version cues come from simple phrase rules, not AI.'}
+                            ? 'Cues pass quietly. Keep listening without needing to respond.'
+                            : sessionLive
+                              ? 'Start a new session for cues.'
+                              : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
                       </p>
                     </div>
                   }
@@ -2115,11 +2375,11 @@ function Notebook() {
                   <p className="companion-footnote">
                     {state.live && capture.state?.processor
                       ? capture.state.approved
-                        ? 'Cues come from the model, using the lines approved for this session. Pause cues or turn the connection off above at any time.'
-                        : 'Cues are off until you turn on the model connection in Cue processing above.'
+                        ? 'Cues come from the model on approved lines. Pause or turn off processing anytime.'
+                        : 'Cues are off until you enable Cue processing above.'
                       : state.live
-                        ? 'Suggestions use simple phrase rules on what was transcribed. Use a cue in the conversation or let it pass.'
-                        : 'This replay is fictional. Its cues were decided before it was played.'}
+                        ? 'Phrase rules only—use a cue or let it pass.'
+                        : 'Fictional replay with pre-authored cues.'}
                   </p>
                 )}
                 <button
@@ -2147,23 +2407,19 @@ function Notebook() {
                   This meeting{' '}
                   <span>
                     {suggesting
-                      ? 'Waiting for Granola…'
+                      ? 'Asking Granola…'
                       : suggestions !== null
                         ? 'Suggestions ready'
                         : focus.trim()
-                          ? 'Review focus'
-                          : 'Add a focus · optional'}
+                          ? 'Edit focus'
+                          : 'Add focus · optional'}
                   </span>
                 </summary>
                 <div className="meeting-focus-heading">
                   <div>
                     <p id="meeting-focus-help" className="small muted">
-                      Up to five short lines on what you want to get to, such as
-                      “agree the launch plan for the newsletter”. A question
-                      about one of them comes through even in the pause after
-                      another; when the meeting is wrapping up, the lines never
-                      touched are listed once. Word matches, kept until you
-                      quit.
+                      Up to 5 short topics you want to cover, word-matched for
+                      this session until you quit.
                     </p>
                   </div>
                   {focus.trim().length > 0 && (
@@ -2189,29 +2445,100 @@ function Notebook() {
                   <label htmlFor="meeting-focus">
                     Focus <span className="muted small">· optional</span>
                   </label>
-                  <textarea
-                    id="meeting-focus"
-                    ref={focusField}
-                    aria-describedby={
-                      focusError
-                        ? 'meeting-focus-help meeting-focus-error'
-                        : 'meeting-focus-help'
-                    }
-                    value={focus}
-                    rows={3}
-                    spellCheck={false}
-                    onChange={(e) => {
-                      focusEdit.current++;
-                      setFocus(e.target.value);
-                    }}
-                    onBlur={(e) => {
-                      if (
-                        !clearButton.current ||
-                        e.relatedTarget !== clearButton.current
-                      )
-                        saveFocus();
-                    }}
-                  />
+                  <div className="focus-input-row">
+                    <textarea
+                      id="meeting-focus"
+                      ref={focusField}
+                      aria-describedby={
+                        focusError
+                          ? 'meeting-focus-help meeting-focus-error'
+                          : 'meeting-focus-help'
+                      }
+                      value={focus}
+                      rows={3}
+                      spellCheck={false}
+                      onChange={(e) => {
+                        focusEdit.current++;
+                        setFocus(e.target.value);
+                      }}
+                      onBlur={(e) => {
+                        if (skipFocusBlur.current) {
+                          skipFocusBlur.current = false;
+                          return;
+                        }
+                        if (
+                          !clearButton.current ||
+                          e.relatedTarget !== clearButton.current
+                        )
+                          saveFocus();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={`dictation-button${focusDictating ? ' is-listening' : ''}`}
+                      aria-label={
+                        focusDictating ? 'Stop dictating' : 'Dictate focus'
+                      }
+                      aria-pressed={focusDictating}
+                      aria-describedby={
+                        focusDictationBlock?.visibleHint
+                          ? 'focus-dictation-hint'
+                          : undefined
+                      }
+                      disabled={
+                        focusDictating ? dictation.busy : !!focusDictationBlock
+                      }
+                      title={
+                        focusDictating
+                          ? 'Stop dictating'
+                          : (focusDictationBlock?.reason ?? 'Dictate focus')
+                      }
+                      onMouseDown={() => {
+                        if (!focusDictating && !focusDictationBlock) {
+                          skipFocusBlur.current = true;
+                        }
+                      }}
+                      onClick={() => {
+                        skipFocusBlur.current = false;
+                        toggleDictation('focus');
+                      }}
+                    >
+                      {focusDictating ? (
+                        <Square size={14} aria-hidden="true" />
+                      ) : (
+                        <Mic size={16} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  {focusDictationFeedback && (
+                    <p
+                      className={
+                        focusDictationFeedback.kind === 'error'
+                          ? 'dictation-error'
+                          : 'dictation-status'
+                      }
+                      role={
+                        focusDictationFeedback.kind === 'error'
+                          ? 'alert'
+                          : 'status'
+                      }
+                    >
+                      {focusDictationFeedback.kind === 'status' &&
+                        focusDictating && (
+                          <span className="dictation-dot" aria-hidden="true" />
+                        )}
+                      {focusDictationFeedback.text}
+                    </p>
+                  )}
+                  {!focusDictationFeedback &&
+                    focusDictationBlock?.visibleHint && (
+                      <p
+                        id="focus-dictation-hint"
+                        className="small muted dictation-hint"
+                      >
+                        {focusDictationBlock.reason}
+                      </p>
+                    )}
                   {focusError && (
                     <p id="meeting-focus-error" role="alert">
                       Focus wasn't applied. {focusError} Edit the lines and
@@ -2245,10 +2572,8 @@ function Notebook() {
                         </p>
                       )}
                       <p className="small muted">
-                        Asks Granola’s assistant one question about your
-                        meetings of the last 30 days and shows its answer for
-                        you to tick. Granola sees the question; nothing else
-                        leaves{' '}
+                        Asks Granola’s assistant once about your last 30 days of
+                        notes. Nothing else leaves{' '}
                         {notMacos(platform) ? 'this computer' : 'this Mac'}.
                       </p>
                     </div>
@@ -2313,9 +2638,8 @@ function Notebook() {
                         </button>
                       </div>
                       <p className="small muted">
-                        A suggestion is Granola’s reading of your notes, not a
-                        fact; it becomes a focus line only when you add it, and
-                        each needs a few specific words.
+                        Suggestions come from Granola; only ticked lines are
+                        added.
                       </p>
                     </fieldset>
                   )}
@@ -2333,12 +2657,12 @@ function Notebook() {
               <ShieldCheck size={15} />
               <p>
                 {live || preparing || finishing
-                  ? 'This live session stays in memory while it runs; non-empty live sessions save locally to your Meetings list when they end unless you change that in Settings.'
-                  : state.live
+                  ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
+                  : sessionLive
                     ? sessionHistory?.kept
-                      ? 'This session is saved in your local Meetings list. It leaves your device only if you ask for meeting notes or export it.'
-                      : 'This session stays in memory until you quit or start another, unless you keep it in your meetings or export it.'
-                    : 'Your notes stay in memory until you quit. Export anything you want to keep before closing.'}
+                      ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
+                      : 'In memory until you quit or start another session, unless you save or export it.'
+                    : 'Notes stay in memory until you quit. Export before closing to keep them.'}
               </p>
             </footer>
           </div>
@@ -2355,9 +2679,9 @@ function Notebook() {
 
         {view === 'settings' && (
           <div className="secondary-page settings-page">
-            <h1>Make room for your conversation.</h1>
+            <h1>Settings</h1>
             <p className="page-description">
-              A few controls to keep questions on your terms.
+              Keys, providers, cues, and storage.
             </p>
             <ProviderKeys
               key={settingsEpoch}
@@ -2369,8 +2693,8 @@ function Notebook() {
                 <div>
                   <h2>Setup walkthrough</h2>
                   <p>
-                    Review keys, permissions, and how per-session approval
-                    works.
+                    Review keys, permissions, and how live sessions start and
+                    stop.
                   </p>
                 </div>
                 <button
@@ -2386,10 +2710,8 @@ function Notebook() {
               <div>
                 <h2>Your name</h2>
                 <p id="user-name-help">
-                  In a live session, when someone asks you something by name,
-                  such as “Sam, can you take the draft?”, the question is shown
-                  as Asked you and stays while you answer. Questions for other
-                  people stay quiet. TalkQTE remembers your name on{' '}
+                  Highlights questions asked of you by name as Asked you so they
+                  stay while you answer. Saved on{' '}
                   {notMacos(platform) ? 'this computer' : 'this Mac'}.
                 </p>
               </div>
@@ -2439,8 +2761,7 @@ function Notebook() {
               <div>
                 <h2>Glance view</h2>
                 <p>
-                  One complete cue with where it came from. A line shows how
-                  long it stays; Hold keeps it until you dismiss it.
+                  One cue with its source. Hold keeps a cue until dismissed.
                 </p>
                 <p
                   className={`appearance-example question-${state.questionSize}`}
@@ -2471,17 +2792,10 @@ function Notebook() {
               <div>
                 <h2>Companion position</h2>
                 <p>
-                  Place the question near your camera if that feels comfortable,
-                  or drag the companion by its top bar to wherever suits you; it
-                  stays there until you choose a position here. The desktop
-                  companion follows the notebook’s display; move the notebook to
-                  the display you want to use.
-                </p>
-                <p className="small">
-                  No camera access or video changes. TalkQTE remembers the
-                  position you choose here; a place you drag the companion to
-                  lasts until you quit.
-                  {!bridge.desktop && ' Position applies in the desktop app.'}
+                  Where the floating companion sits on the notebook’s display.
+                  Dragging moves it for this session; your selection here is
+                  saved. No camera access or video changes.
+                  {!bridge.desktop && ' Applies in the desktop app.'}
                 </p>
               </div>
               <div className="setting-control">
@@ -2525,12 +2839,9 @@ function Notebook() {
               <div>
                 <h2>Question timing</h2>
                 <p>
-                  Balanced leaves at least 10 seconds between questions. Quiet
-                  leaves 30 seconds after a question passes. Focused shows only
-                  questions about your focus lines (written in the notebook’s
-                  This meeting box), questions asked of you by name, and
-                  reminders of notes you chose; with no focus lines it shows
-                  just the last two.
+                  Balanced waits 10s between cues; Quiet waits 30s. Focused
+                  shows only cues matching your Focus lines, your name, or prior
+                  notes.
                 </p>
               </div>
               <label className="visually-hidden" htmlFor="sensitivity">
@@ -2557,12 +2868,10 @@ function Notebook() {
                 <h2>Floating question window</h2>
                 <p>
                   {bridge.desktop
-                    ? 'Keep a small companion in your chosen position during a live session or microphone check. Stop microphone controls take priority while it is on. Hide only hides the window; it does not stop the microphone. For keyboard controls, use the question in your notebook.'
-                    : 'Available in the desktop app. The browser preview shows questions inside the notebook.'}
+                    ? 'Shows the compact companion window during a live session or mic check. Hiding it doesn’t stop the mic.'
+                    : 'Available in the desktop app. The browser preview shows cues inside the notebook.'}
                 </p>
-                <p className="small">
-                  The window may be visible when you share your screen.
-                </p>
+                <p className="small">May appear when sharing your screen.</p>
               </div>
               <input
                 type="checkbox"
@@ -2578,6 +2887,27 @@ function Notebook() {
                   )
                 }
               />
+            </section>
+            <section className="setting">
+              <div>
+                <h2>Panel sizes</h2>
+                <p>Drag the dividers in the notebook to resize panels.</p>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={
+                  preferredListWidth === null &&
+                  notesRatio === defaultNotesRatio
+                }
+                onClick={() => {
+                  setPreferredListWidth(null);
+                  setNotesRatio(defaultNotesRatio);
+                  setNotice('Panel sizes reset.');
+                }}
+              >
+                Reset panel sizes
+              </button>
             </section>
             <CallPromptSetting key={settingsEpoch} />
             <CalendarSettings key={`calendar-${settingsEpoch}`} />
@@ -2595,22 +2925,21 @@ function Notebook() {
                   Live transcription
                 </h2>
                 <p>
-                  Start live session in the notebook to get questions from what
-                  your microphone hears and, on a Mac, from one application you
-                  choose, such as the app your call is in. TalkQTE does not
-                  transcribe on this device: the session’s audio is sent to{' '}
+                  TalkQTE does not transcribe on this device. Pressing Start
+                  live session sends audio (from your mic and, on macOS 14.2+,
+                  system audio) to{' '}
                   {liveStatus?.transcription ??
-                    'your chosen provider (Deepgram or ElevenLabs)'}{' '}
-                  with your key once you enable cue processing for that session.
-                  Audio is not recorded by TalkQTE. The transcript stays in
-                  memory until you start another session or close the app,
-                  unless you choose to keep the meeting and export it.
+                    'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
+                  and recent lines to{' '}
+                  {liveStatus?.cueProvider ?? 'your chosen cue provider'} with
+                  your keys until you stop or turn off processing. Audio is
+                  never written to disk.
                 </p>
                 <p className="small muted" role="status">
                   {!liveStatus
                     ? 'Checking…'
                     : liveStatus.available
-                      ? `Ready. Audio goes to ${liveStatus.transcription ?? 'the transcription service'} only after you enable cue processing for a session.`
+                      ? `Ready. Pressing Start live session sends audio to ${liveStatus.transcription ?? 'the transcription service'}${liveStatus.cueProvider ? ` and recent lines to ${liveStatus.cueProvider}` : ''} until you stop.`
                       : liveStatus.reason}
                 </p>
               </div>
@@ -2619,6 +2948,7 @@ function Notebook() {
               key={`history-${settingsEpoch}`}
               onDeleted={() => setHistoryRevision((r) => r + 1)}
             />
+            <UpdateSettings key={`updates-${settingsEpoch}`} />
             <SavedSettings
               onReset={() => {
                 setPreferredListWidth(null);
@@ -2633,15 +2963,11 @@ function Notebook() {
               <div>
                 <h2>Your data</h2>
                 <p>
-                  The optional microphone check retains no audio and does not
-                  transcribe. With cloud transcription or cue processing on,
-                  audio goes to the named transcription service and recent lines
-                  to the cue provider, for that session only. A live session’s
-                  transcript is kept in memory until you quit or start another
-                  session, unless you keep that meeting after it ends or export
-                  it. Notes exist in memory until you close the app. Exports
-                  contain exactly the text you review and are saved to the
-                  location you choose.
+                  Mic check keeps no audio and never transcribes. During a live
+                  session, audio and recent lines go only to your chosen
+                  providers until you stop. Transcripts and notes stay in memory
+                  unless saved to Meetings or exported. Exports contain only the
+                  text you review.
                 </p>
               </div>
               <ShieldCheck size={24} />
@@ -2655,17 +2981,6 @@ function Notebook() {
                 liveAvailable: liveStatus?.available ?? null,
               })}
             />
-            <section className="coming-next">
-              <h2>What comes next</h2>
-              <p>
-                A guided first-run setup, both sides of a call rather than the
-                microphone alone, and a notebook that remembers your sessions.
-                Integrations with other note-takers are planned for later.
-              </p>
-              <p className="small muted">
-                These features are not available in this prototype.
-              </p>
-            </section>
           </div>
         )}
         <div className="visually-hidden" role="status">
@@ -2676,8 +2991,7 @@ function Notebook() {
         </div>
         <p className="visually-hidden" id="panel-resize-help">
           Drag to resize. Left and right arrows adjust width; Home and End use
-          the limits. Escape cancels a drag. Panel sizes in the toolbar offers
-          sliders and Reset.
+          the limits. Escape cancels a drag.
         </p>
       </main>
       <dialog

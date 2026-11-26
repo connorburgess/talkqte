@@ -570,11 +570,25 @@ export function checkSources(
   else {
     const endpoints = Array.isArray(updater.endpoints) ? updater.endpoints : [];
     const insecure = endpoints.filter((url) => !/^https:\/\//.test(`${url}`));
-    if (!endpoints.length || insecure.length || !updater.pubkey)
+    const pubkey =
+      typeof updater.pubkey === 'string'
+        ? updater.pubkey.trim() ||
+          process.env.TALKQTE_UPDATER_PUBKEY?.trim() ||
+          process.env.TAURI_UPDATER_PUBKEY?.trim() ||
+          ''
+        : null;
+    if (!endpoints.length || insecure.length || pubkey === null)
       findings.push(
         fail(
           'updater',
           'needs at least one endpoint, only https endpoints, and a public key',
+        ),
+      );
+    else if (!pubkey)
+      findings.push(
+        note(
+          'updater',
+          `${endpoints.length} https endpoint(s) configured without a public key; in-app updates stay disabled until a minisign public key is configured`,
         ),
       );
     else

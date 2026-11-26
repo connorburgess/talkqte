@@ -105,6 +105,8 @@ impl Harness {
             session: runtime.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         // A and B are offered by a picked file; only A is selected. Exercise
         // the store's filtering too by including B in a provider's reply.

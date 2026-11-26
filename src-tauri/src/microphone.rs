@@ -1,6 +1,6 @@
 //! Microphone activity only: no sample buffers, recordings, or transcript data
 //! leave the capture callback. The UI receives a small status snapshot.
-mod native;
+pub(crate) mod native;
 
 use serde::Serialize;
 use std::{
@@ -61,7 +61,7 @@ impl Default for Snapshot {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Failure {
+pub(crate) enum Failure {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
     Permission,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
@@ -86,17 +86,17 @@ impl Failure {
 }
 
 #[derive(Default)]
-pub(super) struct Meter {
-    blocks: AtomicU64,
+pub(crate) struct Meter {
+    pub(crate) blocks: AtomicU64,
     active: AtomicBool,
-    failed: AtomicBool,
+    pub(crate) failed: AtomicBool,
 }
 
 impl Meter {
     // The callback does bounded arithmetic and atomic writes only. It never
     // allocates, locks, logs, emits UI events, or retains a sample.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used by the macOS adapter only.
-    fn observe(&self, samples: impl Iterator<Item = f32>) {
+    pub(crate) fn observe(&self, samples: impl Iterator<Item = f32>) {
         let mut power = 0.0;
         let mut count = 0;
         for sample in samples.take(MAX_METER_SAMPLES) {
@@ -116,7 +116,7 @@ impl Meter {
     }
 }
 
-pub(super) trait CaptureStream: Send + Sync {
+pub(crate) trait CaptureStream: Send + Sync {
     fn play(&self) -> Result<(), Failure>;
     // Cached by the adapter at stream construction; never query hardware here.
     fn device_name(&self) -> Option<&str> {
@@ -210,6 +210,18 @@ impl Controller {
         }
         Ok(Reservation::Ready(generation, snapshot))
     }
+    /// Whether the microphone check is currently starting, listening,
+    /// stopping, or finishing device cleanup.
+    pub(crate) fn is_busy(&self) -> bool {
+        self.0.lock().map_or(true, |state| {
+            state.cleanup_pending
+                || matches!(
+                    state.snapshot.status,
+                    Status::Starting | Status::Listening | Status::Stopping
+                )
+        })
+    }
+
     // Timer and window placement must never wait behind native stream startup.
     pub fn try_status(&self) -> Option<Status> {
         self.0.try_lock().ok().map(|state| state.snapshot.status)
@@ -530,36 +542,48 @@ pub async fn start_microphone(
     app: tauri::AppHandle,
     state: tauri::State<'_, Controller>,
 ) -> Result<(), String> {
-    let may_start = |app: &tauri::AppHandle| {
-        app.state::<crate::AppState>()
+    let refusal_reason = |app: &tauri::AppHandle| -> Option<&'static str> {
+        let live_busy = !app
+            .state::<crate::AppState>()
             .0
             .lock()
-            .is_ok_and(|runtime| runtime.microphone_may_start())
+            .is_ok_and(|runtime| runtime.microphone_may_start());
+        if live_busy {
+            return Some("Stop the live session before checking the microphone.");
+        }
+        if app.state::<crate::dictation::Controller>().is_active() {
+            return Some("Stop dictation before checking the microphone.");
+        }
+        None
     };
-    if !may_start(&app) {
-        return Err("Stop the live session before checking the microphone.".into());
+    if let Some(reason) = refusal_reason(&app) {
+        return Err(reason.into());
     }
-    // Checked again once the start is reserved, so a session that began in
-    // between still refuses it before any permission request.
+    // Checked again once the start is reserved, so a session or dictation
+    // that began in between still refuses it before any permission request.
     let owner = app.clone();
-    let refused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let refused = Arc::new(Mutex::new(None::<&'static str>));
     let noted = refused.clone();
     let on_reserved: OnReserved = Box::new(move |_| {
-        let allowed = may_start(&owner);
-        if !allowed {
-            noted.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(reason) = refusal_reason(&owner) {
+            if let Ok(mut slot) = noted.lock() {
+                *slot = Some(reason);
+            }
+            false
+        } else {
+            true
         }
-        allowed
     });
     start(app, state.inner().clone(), None, Some(on_reserved))
         .await
         .map(|_| ())
         .map_err(|error| {
-            if refused.load(std::sync::atomic::Ordering::Acquire) {
-                "Stop the live session before checking the microphone.".into()
-            } else {
-                error
-            }
+            refused
+                .lock()
+                .ok()
+                .and_then(|slot| *slot)
+                .map(str::to_owned)
+                .unwrap_or(error)
         })
 }
 
@@ -676,7 +700,7 @@ pub fn refresh(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         alloc::{GlobalAlloc, Layout, System},
@@ -711,7 +735,7 @@ mod tests {
     static ALLOCATOR: CountingAllocator = CountingAllocator;
 
     /// Allocations `work` makes on this thread.
-    fn allocations_during(work: impl FnOnce()) -> usize {
+    pub(crate) fn allocations_during(work: impl FnOnce()) -> usize {
         ALLOCATIONS.set(0);
         COUNTING.set(true);
         work();

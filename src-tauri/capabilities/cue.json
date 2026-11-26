@@ -13,11 +13,13 @@
     "allow-inspect-cue",
     "allow-set-overlay",
     "allow-set-live-cues-paused",
+    "allow-turn-off-processing",
     "allow-microphone-snapshot",
     "allow-stop-microphone",
     "allow-stop-live-session",
     "allow-respond-to-call-prompt",
     "allow-respond-to-calendar-prompt",
+    "allow-respond-to-call-end-prompt",
     "allow-respond-to-end-prompt"
   ]
 }

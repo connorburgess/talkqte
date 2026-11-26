@@ -60,11 +60,9 @@ export function Diagnostics({
       <div>
         <h2 id="diagnostics-title">Diagnostics</h2>
         <p>
-          For a problem report: the app version, your settings, whether each key
-          is set, and the fixed codes of what last went wrong. It contains
-          nothing from a meeting: no transcript, notes, cues, focus, names,
-          application or device names, and no keys. Nothing is sent; you read
-          it, then copy it.
+          Version, settings, key status, and error codes only—never transcripts,
+          notes, cues, focus, names, apps, or keys. Nothing is sent; review
+          before copying.
         </p>
         {report === null ? (
           <button className="secondary-button" onClick={() => void show()}>

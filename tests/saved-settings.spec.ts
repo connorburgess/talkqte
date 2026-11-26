@@ -62,6 +62,13 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   await section.getByRole('button', { name: 'Keep them' }).click();
   expect((await saved(page)).resets).toBe(0);
 
+  const callOffer = page.getByRole('checkbox', {
+    name: 'Offer in the dock when a call seems to start',
+  });
+  await expect(callOffer).toBeChecked();
+  await callOffer.uncheck();
+  await expect(callOffer).not.toBeChecked();
+
   await section.getByRole('button', { name: 'Reset settings…' }).click();
   await section
     .getByRole('button', { name: 'Reset settings', exact: true })
@@ -70,17 +77,13 @@ test('Settings says what is remembered, and Reset settings asks first and restor
     page.getByText('Settings are back to their defaults.'),
   ).toBeAttached();
   expect((await saved(page)).resets).toBe(1);
-  // The call-starting offer reads its setting again: off.
-  await expect(
-    page.getByRole('checkbox', {
-      name: 'Offer to start a session when a call seems to start',
-    }),
-  ).not.toBeChecked();
+  // The call-starting offer reads its setting again: back to its default (on).
+  await expect(callOffer).toBeChecked();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(sidebar(page)).not.toHaveAttribute('aria-valuenow', '320');
 });
 
-test('a lab run says its choices are not saved and offers no reset', async ({
+test('a lab run says its choices are not saved, keeps call offer off, and offers no reset', async ({
   page,
 }) => {
   await open(page, { status: { saving: 'labRun' } });
@@ -92,6 +95,11 @@ test('a lab run says its choices are not saved and offers no reset', async ({
   await expect(
     section.getByRole('button', { name: 'Reset settings…' }),
   ).toBeDisabled();
+  await expect(
+    page.getByRole('checkbox', {
+      name: 'Offer in the dock when a call seems to start',
+    }),
+  ).not.toBeChecked();
 });
 
 test('settings from a newer version are left as they are, and Reset is offered', async ({

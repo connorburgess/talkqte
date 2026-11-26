@@ -267,15 +267,17 @@ export function Onboarding({
 
               <div className="ob-perm-card">
                 <div className="ob-card-head">
-                  <h2>Screen &amp; System Audio Recording</h2>
+                  <h2>System Audio Recording Only</h2>
                   <span className="ob-card-meta">
-                    Only if choosing application audio
+                    Asked on first session start
                   </span>
                 </div>
                 <p>
-                  Needed only if you choose to capture one application's audio
-                  (all of its windows) instead of your microphone. macOS asks
-                  when you first list applications to choose one.
+                  Needed on macOS 14.2 and later so TalkQTE can hear the other
+                  side of your call (all apps except TalkQTE) with no Screen
+                  Recording permission and no app picker. If you decline or run
+                  an earlier macOS, live sessions continue with your microphone
+                  only.
                 </p>
               </div>
             </>
@@ -284,38 +286,40 @@ export function Onboarding({
           {step === 4 && (
             <>
               <p className="ob-lead">
-                Nothing leaves {device} when you press Start live session. You
-                approve each session before anything is sent, and Stop ends the
-                session and stops sending.
+                Pressing Start live session starts capture and sends audio to
+                Deepgram and recent transcript lines to your chosen cue provider
+                immediately, until you press Stop or Turn off processing.
               </p>
 
               <div className="ob-perm-card">
                 <span className="ob-sequence-label">
-                  Per-session approval sequence
+                  One-click session flow
                 </span>
                 <ol className="ob-sequence-list">
                   <li>
-                    <strong>Start live session</strong> opens the floating dock
-                    and starts local capture only. Audio captured before
-                    approval is discarded.
-                  </li>
-                  <li>
-                    <strong>
-                      Review processing → Review selected sources → Enable for
-                      this session
-                    </strong>{' '}
-                    names both services explicitly:{' '}
+                    <strong>Start live session</strong> opens the floating dock,
+                    starts capture on {device}, and immediately enables{' '}
                     <strong>Deepgram or ElevenLabs</strong> (session audio for
-                    transcription, up to 120 minutes per session) and your
+                    transcription, up to 480 minutes per session) and your
                     chosen cue provider — <strong>Anthropic</strong>,{' '}
                     <strong>OpenAI</strong>, or <strong>Gemini</strong> (up to
                     six recent transcript lines, the cue on screen and earlier
                     cues, and your session name if set, for cue decisions; never
-                    audio, your notes or focus lines).
+                    audio, your notes or focus lines). Lab runs keep the
+                    three-click{' '}
+                    <strong>Cue processing → Review processing</strong> review.
                   </li>
                   <li>
-                    <strong>Stop</strong> ends the session, releases the
-                    microphone or application audio source, and stops sending.
+                    <strong>Pause cues</strong> stops cue decisions while
+                    listening continues. <strong>Turn off processing</strong>{' '}
+                    stops sending audio and lines.
+                  </li>
+                  <li>
+                    <strong>Stop</strong> ends the session, releases{' '}
+                    {other
+                      ? 'the microphone'
+                      : 'the microphone and system audio tap'}
+                    , and stops sending.
                   </li>
                 </ol>
               </div>

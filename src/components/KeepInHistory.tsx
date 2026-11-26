@@ -30,7 +30,11 @@ export function KeepInHistory({
     snapshot.live &&
     snapshot.status === 'ended' &&
     (snapshot.transcript.length > 0 || snapshot.notes.trim().length > 0);
-  const application = snapshot.sources?.application ?? null;
+  const application =
+    snapshot.sources?.application &&
+    snapshot.sources.application !== 'System audio'
+      ? snapshot.sources.application
+      : null;
   const [status, setStatus] = useState<HistoryStatus | null>(null);
   const [title, setTitle] = useState('');
   const [includeApplication, setIncludeApplication] = useState(false);
@@ -112,12 +116,12 @@ export function KeepInHistory({
     return (
       <section className="keep-history is-kept" aria-labelledby={`${id}-kept`}>
         <p id={`${id}-kept`} ref={keptHeading} tabIndex={-1}>
-          Kept in your meetings as “{kept.title}”.
+          Saved to Meetings as “{kept.title}”.
         </p>
         {kept.changed && (
           <div className="keep-history-row">
             <p className="keep-history-help">
-              Your notes or meeting notes changed since you kept it.
+              Notes changed since this was saved.
             </p>
             <button
               className="secondary-button"
@@ -125,11 +129,11 @@ export function KeepInHistory({
               onClick={() =>
                 void act(
                   updateKeptSessionMeeting,
-                  'The kept meeting could not be updated.',
+                  'The saved meeting could not be updated.',
                 )
               }
             >
-              Update kept meeting
+              Update saved meeting
             </button>
           </div>
         )}
@@ -141,10 +145,8 @@ export function KeepInHistory({
     <section className="keep-history" aria-labelledby={`${id}-title`}>
       <h2 id={`${id}-title`}>Keep this meeting?</h2>
       <p className="keep-history-help" id={`${id}-help`}>
-        Keeps its transcript, your notes, the cues shown and any meeting notes
-        you keep, on this Mac, so you can find it later. Never its audio. Note
-        reminders and the Still open list are left out. Nothing is kept unless
-        you choose Keep.
+        Saves transcript, notes, cues, and meeting notes on this Mac—never
+        audio. Note reminders and Focus lines are left out.
       </p>
       <label className="keep-history-field" htmlFor={`${id}-name`}>
         Title
@@ -165,7 +167,7 @@ export function KeepInHistory({
             disabled={busy}
             onChange={(event) => setIncludeApplication(event.target.checked)}
           />
-          Also keep the application’s name ({application})
+          Include application name ({application})
         </label>
       )}
       <div className="keep-history-actions">
@@ -177,7 +179,7 @@ export function KeepInHistory({
             focusKept.current = true;
             void act(
               () => keepMeeting(title, includeApplication),
-              'The meeting could not be kept. Nothing was saved.',
+              'The meeting could not be saved. Nothing was written.',
             );
           }}
         >

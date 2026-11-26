@@ -2,10 +2,9 @@
 //! settings are the main window's; the companion can only answer an offer.
 
 use crate::{
-    call_prompt::{Answer, Settings},
+    call_prompt::{Answer, CallEndAnswer, Settings},
     AppState,
 };
-use tauri::Emitter;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 
@@ -29,19 +28,30 @@ pub(crate) fn call_prompt_settings(
     Ok(runtime.call_prompt.settings().clone())
 }
 
-/// Turn the prompt on or off; the choice is saved. Off stops every read of the
-/// microphone's in-use state and the frontmost application.
+/// Turn the prompt or auto-start on or off; the choice is saved. Off stops
+/// every read of the microphone's in-use state and the frontmost application.
 #[tauri::command]
 pub(crate) fn set_call_prompt(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
-    enabled: bool,
+    enabled: Option<bool>,
+    auto_start: Option<bool>,
 ) -> Result<Settings, String> {
     main_only(&window)?;
+    if crate::settings::lab_run() && (enabled == Some(true) || auto_start == Some(true)) {
+        return Err("Lab runs do not enable the call-starting offer or automatic start.".into());
+    }
     let settings = {
         let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-        if runtime.call_prompt.set_enabled(enabled) {
+        let mut did_change = false;
+        if let Some(enabled) = enabled {
+            did_change |= runtime.call_prompt.set_enabled(enabled);
+        }
+        if let Some(auto_start) = auto_start {
+            did_change |= runtime.call_prompt.set_auto_start(auto_start);
+        }
+        if did_change {
             changed(&app, &mut runtime);
         }
         crate::settings_commands::record_call_prompt(&app, &runtime.call_prompt);
@@ -64,8 +74,8 @@ pub(crate) fn clear_call_prompt_apps(
     Ok(runtime.call_prompt.settings().clone())
 }
 
-/// The companion's answer to offer `id`. Start opens the notebook with the
-/// offer's sources chosen; nothing is started, listed or captured here.
+/// The companion's answer to offer `id`. Start immediately begins a live
+/// session (or opens the notebook if keys are missing).
 #[tauri::command]
 pub(crate) fn respond_to_call_prompt(
     app: tauri::AppHandle,
@@ -84,49 +94,98 @@ pub(crate) fn respond_to_call_prompt(
         start
     };
     crate::companion::refresh(&app);
-    if let Some(preselect) = start {
-        // The person clicked Start: bringing the notebook forward, from the
-        // menu bar if it was closed there, is what they asked for.
-        crate::menu_bar::show_notebook(&app);
-        // The name and bundle identifier go to the notebook only.
-        let _ = app.emit_to("main", "call-prompt:start", preselect);
+    if let Some(_preselect) = start {
+        if crate::live_unavailable().is_some() {
+            // Keys are missing: bring the notebook forward so the person sees why.
+            crate::menu_bar::show_notebook(&app);
+        } else {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::start_live_session_now(app, None, false, None).await;
+            });
+        }
     }
     Ok(())
 }
 
-/// Read the two signals once a second while the prompt is on; nothing at all
-/// while it is off. The reads happen without the runtime lock.
+/// The companion's answer to a "Call ended" dock prompt `id`.
+#[tauri::command]
+pub(crate) async fn respond_to_call_end_prompt(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: u64,
+    answer: CallEndAnswer,
+) -> Result<(), String> {
+    let stop_and_save = {
+        let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+        let outcome = runtime.call_prompt.answer_call_end(id, answer);
+        if outcome.changed {
+            changed(&app, &mut runtime);
+        }
+        outcome.stop_and_save
+    };
+    crate::companion::refresh(&app);
+    if stop_and_save {
+        crate::stop_and_save_live_session(app).await?;
+    }
+    Ok(())
+}
+
+/// Read the local call metadata signals while the prompt or auto-start is on,
+/// or while a live session is running (for call-end detection). Nothing at all
+/// is read otherwise. The reads happen without the runtime lock.
 #[cfg(target_os = "macos")]
 pub(crate) fn install(app: &tauri::AppHandle) {
+    if crate::settings::lab_run() {
+        return;
+    }
     let app = app.clone();
     let _ = std::thread::Builder::new()
         .name("talkqte-call-prompt".into())
         .spawn(move || loop {
             std::thread::sleep(crate::call_prompt::POLL);
             let state = app.state::<AppState>();
-            if !state
-                .0
-                .lock()
-                .is_ok_and(|runtime| runtime.call_prompt.enabled())
-            {
+            if !state.0.lock().is_ok_and(|runtime| {
+                runtime.call_prompt.watching() || runtime.live_session_running()
+            }) {
                 continue;
             }
             let signals = crate::call_prompt::native::read();
+            let can_auto_start = !crate::settings::lab_run() && crate::live_unavailable().is_none();
             let microphone_busy = app
                 .state::<crate::microphone::Controller>()
                 .try_not_capturing()
-                != Some(true);
+                != Some(true)
+                || app.state::<crate::dictation::Controller>().is_active();
             let Ok(mut runtime) = state.0.lock() else {
                 continue;
             };
+            let live_session = runtime
+                .live_session_running()
+                .then(|| runtime.engine.session());
             let busy = microphone_busy || runtime.live_session_open();
-            if runtime
-                .call_prompt
-                .observe(&signals, busy, std::time::Instant::now())
-            {
+            let observation = runtime.call_prompt.observe_session(
+                &signals,
+                live_session,
+                busy,
+                can_auto_start,
+                std::time::Instant::now(),
+            );
+            if observation.prompt_changed || observation.call_end_changed {
                 changed(&app, &mut runtime);
-                drop(runtime);
+            }
+            let auto_start = observation.auto_start;
+            let should_refresh =
+                observation.prompt_changed || observation.call_end_changed || auto_start.is_some();
+            drop(runtime);
+            if should_refresh {
                 crate::companion::refresh(&app);
+            }
+            if auto_start.is_some() {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::start_live_session_now(app, None, true, None).await;
+                });
             }
         });
 }

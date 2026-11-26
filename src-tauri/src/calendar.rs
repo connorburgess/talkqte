@@ -7,7 +7,8 @@
 //! only the event identifier/start time for deduplication, a sanitized title,
 //! start/end timestamps, and whether URL/location/notes contain a known meeting
 //! link. Attendee lists, organizers, descriptions, and unrelated calendar entries
-//! are never read or retained. Everything stays on this Mac.
+//! are never retained. Notes are inspected transiently only for meeting-link
+//! detection; attendees and organizers are never accessed. Everything stays local.
 
 use serde::Serialize;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -73,7 +74,9 @@ fn is_domain_suffix_boundary(rest: &str) -> bool {
     // Allow trailing sentence punctuation like "zoom.us." only if not followed
     // by another hostname label (so "zoom.us.evil.com" does not match).
     if next == '.' {
-        return !chars.next().is_some_and(|after| after.is_ascii_alphanumeric());
+        return !chars
+            .next()
+            .is_some_and(|after| after.is_ascii_alphanumeric());
     }
     false
 }
@@ -144,7 +147,7 @@ pub fn sanitize_title(raw: &str) -> String {
     let filtered: String = raw
         .chars()
         .filter(|c| {
-            !c.is_control()
+            (!c.is_control() || c.is_whitespace())
                 && !matches!(
                     c,
                     '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'
@@ -345,10 +348,9 @@ impl Watcher {
                 !event.is_all_day
                     && event.has_meeting_link
                     && in_prompt_window(event.start_epoch_s, event.end_epoch_s, now_epoch_s)
-                    && !self
-                        .seen
-                        .iter()
-                        .any(|seen| seen.id == event.id && seen.start_epoch_s == event.start_epoch_s)
+                    && !self.seen.iter().any(|seen| {
+                        seen.id == event.id && seen.start_epoch_s == event.start_epoch_s
+                    })
             })
             .filter_map(|event| {
                 let title = sanitize_title(&event.title);
@@ -392,9 +394,7 @@ impl Watcher {
     /// Handles the user's answer to prompt `id`.
     /// Returns `Some(title)` when `Start` is chosen, `None` for `Dismiss` or stale `id`.
     pub fn answer(&mut self, id: u64, answer: Answer) -> Option<String> {
-        let active = self
-            .active
-            .take_if(|active| active.prompt.id == id)?;
+        let active = self.active.take_if(|active| active.prompt.id == id)?;
         match answer {
             Answer::Start => Some(active.prompt.title),
             Answer::Dismiss => None,
@@ -414,9 +414,7 @@ pub fn for_app() -> Box<dyn CalendarSource> {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{
-        event_has_meeting_link, CalendarEvent, CalendarSource, PermissionStatus,
-    };
+    use super::{event_has_meeting_link, CalendarEvent, CalendarSource, PermissionStatus};
     use block2::RcBlock;
     use objc2::{
         class, msg_send,
@@ -467,16 +465,18 @@ mod macos {
 
     fn map_auth_status(raw: isize) -> Option<PermissionStatus> {
         match raw {
-            0 => None,                                // EKAuthorizationStatusNotDetermined
+            0 => None,                                   // EKAuthorizationStatusNotDetermined
             1 | 2 | 4 => Some(PermissionStatus::Denied), // Restricted, Denied, WriteOnly
-            3 => Some(PermissionStatus::Connected),   // EKAuthorizationStatusFullAccess / Authorized
+            3 => Some(PermissionStatus::Connected), // EKAuthorizationStatusFullAccess / Authorized
             _ => Some(PermissionStatus::Denied),
         }
     }
 
     fn current_raw_status() -> isize {
         // SAFETY: class method taking EKEntityTypeEvent (0) and returning NSInteger.
-        unsafe { msg_send![class!(EKEventStore), authorizationStatusForEntityType: EK_ENTITY_TYPE_EVENT] }
+        unsafe {
+            msg_send![class!(EKEventStore), authorizationStatusForEntityType: EK_ENTITY_TYPE_EVENT]
+        }
     }
 
     fn nsstring_to_string(value: Option<Retained<NSString>>) -> Option<String> {
@@ -587,7 +587,8 @@ mod macos {
                 let count: usize = unsafe { msg_send![&*events, count] };
                 let mut out = Vec::with_capacity(count);
                 for index in 0..count {
-                    let event: *mut AnyObject = unsafe { msg_send![&*events, objectAtIndex: index] };
+                    let event: *mut AnyObject =
+                        unsafe { msg_send![&*events, objectAtIndex: index] };
                     if event.is_null() {
                         continue;
                     }
@@ -595,15 +596,10 @@ mod macos {
                     if is_all_day.as_bool() {
                         continue;
                     }
-                    let id = nsstring_to_string(unsafe { msg_send![event, eventIdentifier] });
-                    let title = nsstring_to_string(unsafe { msg_send![event, title] });
                     let start_obj: Option<Retained<AnyObject>> =
                         unsafe { msg_send![event, startDate] };
-                    let end_obj: Option<Retained<AnyObject>> =
-                        unsafe { msg_send![event, endDate] };
-                    let (Some(id), Some(title), Some(start_obj), Some(end_obj)) =
-                        (id, title, start_obj, end_obj)
-                    else {
+                    let end_obj: Option<Retained<AnyObject>> = unsafe { msg_send![event, endDate] };
+                    let (Some(start_obj), Some(end_obj)) = (start_obj, end_obj) else {
                         continue;
                     };
                     let start_secs: f64 = unsafe { msg_send![&*start_obj, timeIntervalSince1970] };
@@ -611,9 +607,23 @@ mod macos {
                     if !start_secs.is_finite() || !end_secs.is_finite() {
                         continue;
                     }
+                    // EventKit returns overlapping events too. Reject old starts before
+                    // accessing any title, identifier, or link-bearing fields.
+                    if start_secs < window_start_epoch_s as f64
+                        || start_secs > window_end_epoch_s as f64
+                        || end_secs <= start_secs
+                    {
+                        continue;
+                    }
+                    let id = nsstring_to_string(unsafe { msg_send![event, eventIdentifier] });
+                    let title = nsstring_to_string(unsafe { msg_send![event, title] });
+                    let (Some(id), Some(title)) = (id, title) else {
+                        continue;
+                    };
                     let url_obj: Option<Retained<AnyObject>> = unsafe { msg_send![event, URL] };
-                    let url_str = url_obj
-                        .and_then(|u| nsstring_to_string(unsafe { msg_send![&*u, absoluteString] }));
+                    let url_str = url_obj.and_then(|u| {
+                        nsstring_to_string(unsafe { msg_send![&*u, absoluteString] })
+                    });
                     let location = nsstring_to_string(unsafe { msg_send![event, location] });
                     let notes = nsstring_to_string(unsafe { msg_send![event, notes] });
                     // Extract only whether a known meeting link is present; never retain raw
@@ -625,7 +635,7 @@ mod macos {
                     );
                     out.push(CalendarEvent {
                         id,
-                        title,
+                        title: super::sanitize_title(&title),
                         start_epoch_s: start_secs.round() as i64,
                         end_epoch_s: end_secs.round() as i64,
                         has_meeting_link,
@@ -688,7 +698,7 @@ pub mod fake {
                 .unwrap()
                 .iter()
                 .filter(|event| {
-                    event.end_epoch_s >= window_start_epoch_s
+                    event.start_epoch_s >= window_start_epoch_s
                         && event.start_epoch_s <= window_end_epoch_s
                 })
                 .cloned()
@@ -775,7 +785,13 @@ mod tests {
         let mut watcher = Watcher::default();
         assert!(!watcher.enabled());
         let now = 1_700_000_000;
-        let events = [event("e1", "Weekly Design Sync", now + 120, now + 1920, true)];
+        let events = [event(
+            "e1",
+            "Weekly Design Sync",
+            now + 120,
+            now + 1920,
+            true,
+        )];
         assert!(!watcher.observe(&events, false, now));
         assert_eq!(watcher.prompt(), None);
 
@@ -867,7 +883,13 @@ mod tests {
 
         // Next day's occurrence with same series id prompts once.
         let tomorrow = start + 86_400;
-        let next_events = [event("series-1", "Daily Standup", tomorrow, tomorrow + 900, true)];
+        let next_events = [event(
+            "series-1",
+            "Daily Standup",
+            tomorrow,
+            tomorrow + 900,
+            true,
+        )];
         assert!(watcher.observe(&next_events, false, tomorrow - 120));
         let next_id = watcher.prompt().unwrap().id;
         assert!(next_id > id);
@@ -896,6 +918,29 @@ mod tests {
             *source.fetches.lock().unwrap(),
             [(now - IN_PROGRESS_WINDOW_SECS, now + UPCOMING_WINDOW_SECS)]
         );
+    }
+
+    #[test]
+    fn edited_or_cancelled_events_withdraw_the_offer_and_stale_start_cannot_apply_title() {
+        let mut watcher = Watcher::default();
+        watcher.set_enabled(true);
+        let now = 1_700_000_000;
+        let mut meeting = event(
+            "fictional-1",
+            "Fictional Review",
+            now + 120,
+            now + 1800,
+            true,
+        );
+        assert!(watcher.observe(&[meeting.clone()], false, now));
+        let id = watcher.prompt().unwrap().id;
+        meeting.title = "Fictional Revised Review".into();
+        assert!(watcher.observe(&[meeting.clone()], false, now));
+        assert_eq!(watcher.prompt().unwrap().title, "Fictional Revised Review");
+        meeting.has_meeting_link = false;
+        assert!(watcher.observe(&[meeting], false, now));
+        assert!(watcher.prompt().is_none());
+        assert_eq!(watcher.answer(id, Answer::Start), None);
     }
 
     #[test]

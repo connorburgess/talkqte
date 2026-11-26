@@ -8,5 +8,7 @@
     <string>TalkQTE reads upcoming meeting titles and links locally from Apple Calendar only after you turn on Calendar prompts in Settings, to show a pre-call prompt and pre-fill the meeting title. Your calendar stays on this Mac and is never uploaded.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>TalkQTE reads upcoming meeting titles and links locally from Apple Calendar only after you turn on Calendar prompts in Settings, to show a pre-call prompt and pre-fill the meeting title. Your calendar stays on this Mac and is never uploaded.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>TalkQTE captures macOS system audio (excluding TalkQTE itself) only during a live session you start, so it can transcribe the other side of a call alongside your microphone. TalkQTE does not save audio or record your screen.</string>
 </dict>
 </plist>

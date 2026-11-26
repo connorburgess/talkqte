@@ -188,9 +188,9 @@ pub type Opener = Box<dyn FnOnce() -> Result<Box<dyn StreamingTranscriber>, SttF
 /// `CloudFeed::reconnect_with`.
 pub type Reopener = Box<dyn FnMut() -> Result<Box<dyn StreamingTranscriber>, SttFailure> + Send>;
 
-/// Reconnects allowed per stream of a session. The cap keeps a failing
-/// network from opening streams without end.
-pub const MAX_RECONNECTS: u32 = 2;
+/// Reconnects allowed per stream of a session. Keeps a failing network from
+/// opening streams without end while tolerating transient drops in 1-3 hour calls.
+pub const MAX_RECONNECTS: u32 = 10;
 
 /// Maps stream audio time back to the session clock, block by block, so a
 /// final is timed by when its words were captured.
@@ -805,10 +805,12 @@ pub enum Source {
 }
 
 /// Most minutes of audio one live session may send with the person's own
-/// key, across that session's reconnects. A development application source
+/// key, across that session's reconnects. Sized at 480 minutes (8 hours
+/// single-stream / 4 hours with both microphone and system audio) so 1-3 hour
+/// meetings never hit the cap prematurely. A development application source
 /// started into a session opens its own streams under a separate budget of
 /// the same size.
-pub const OWN_KEY_MINUTE_CAP: u32 = 120;
+pub const OWN_KEY_MINUTE_CAP: u32 = 480;
 
 /// The launch's source: development settings when selected (and then only
 /// they, even if invalid), otherwise a stored key for the chosen provider.
@@ -1075,6 +1077,9 @@ fn audio_of(sources: &SessionSources) -> String {
         (false, Some(app)) => format!(
             "the live audio of {app} (audio from all of its windows may be included), not your microphone,"
         ),
+        (true, Some(crate::engine::SYSTEM_AUDIO)) => {
+            "the live audio from your microphone and, as a second stream, macOS system audio (all apps except TalkQTE),".into()
+        }
         (true, Some(app)) => format!(
             "the live audio from your microphone and, as a second stream, from {app} (audio from all of its windows may be included),"
         ),
@@ -1620,10 +1625,14 @@ mod tests {
 
     #[test]
     fn reconnects_stop_at_the_cap_and_never_for_a_refusal() {
-        let streams: Vec<Script> = (0..3).map(|_| Script::default()).collect();
+        let streams: Vec<Script> = (0..=MAX_RECONNECTS as usize)
+            .map(|_| Script::default())
+            .collect();
         let (mut feed, _, lost) = reconnecting(
             &streams[0],
-            vec![Ok(streams[1].clone()), Ok(streams[2].clone())],
+            (1..=MAX_RECONNECTS as usize)
+                .map(|i| Ok(streams[i].clone()))
+                .collect(),
         );
         for (n, stream) in streams.iter().enumerate() {
             stream.events.lock().unwrap().push(SttEvent::Connected {
@@ -1861,7 +1870,7 @@ mod tests {
             "opt out of its Model Improvement Program",
             "https://deepgram.com/terms",
             "Audio captured before this approval is never sent",
-            "At most 120 minutes of audio for this session",
+            "At most 480 minutes of audio for this session",
             "Pausing cues does not stop the audio",
             "nothing falls back to another service",
         ] {
@@ -1878,7 +1887,7 @@ mod tests {
             "ElevenLabs bills your account for usage",
             "https://elevenlabs.io/terms",
             "Audio captured before this approval is never sent",
-            "At most 120 minutes of audio for this session",
+            "At most 480 minutes of audio for this session",
             "Pausing cues does not stop the audio",
             "nothing falls back to another service",
         ] {
@@ -1922,7 +1931,7 @@ mod tests {
         for part in [
             "from your microphone and, as a second stream, from Fictional Call (audio from all of its windows may be included)",
             "each minute of audio of each stream",
-            "At most 120 minutes of audio for this session, counted across both streams",
+            "At most 480 minutes of audio for this session, counted across both streams",
             "turning processing off or Stop does, for both",
         ] {
             assert!(both.contains(part), "missing: {part}");
@@ -1939,13 +1948,13 @@ mod tests {
         let second = streams_for(Source::OwnKey(Provider::Deepgram), first.budget());
         let cap = u64::from(OWN_KEY_MINUTE_CAP) * 60 * SAMPLE_RATE as u64;
         // The application's stream uses 40 minutes; the microphone's stream
-        // has only the rest of the session's 120.
+        // has only the rest of the session's 480.
         let forty = 40 * 60 * SAMPLE_RATE as u64;
         assert_eq!(second.budget().unwrap().reserve(forty), forty);
         assert_eq!(first.budget().unwrap().reserve(u64::MAX), cap - forty);
         assert_eq!(second.budget().unwrap().reserve(1), 0);
         // A second source without the session's budget is refused, never
-        // given a fresh 120 minutes.
+        // given a fresh 480 minutes.
         assert!(joining_streams(Source::OwnKey(Provider::Deepgram), None).is_err());
         let joined = joining_streams(Source::OwnKey(Provider::Deepgram), first.budget()).unwrap();
         assert_eq!(

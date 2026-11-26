@@ -42,31 +42,31 @@ const providers: {
   {
     id: 'deepgram',
     name: 'Deepgram',
-    role: "Transcribes a live session's audio. Billed by Deepgram per minute, at most 120 minutes per session.",
+    role: 'Live transcription. Billed by Deepgram per minute (480 min session cap).',
     whereToGet: 'Deepgram Console (console.deepgram.com) → API Keys',
   },
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
-    role: "Alternative to Deepgram: transcribes a live session's audio using Scribe v2 Realtime. Billed by ElevenLabs per your account, at most 120 minutes per session.",
+    role: 'Live transcription via Scribe v2 Realtime. Billed by ElevenLabs (480 min session cap).',
     whereToGet: 'ElevenLabs (elevenlabs.io) → Developers → API Keys',
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
-    role: 'Decides when a cue would help, from recent lines, or writes meeting notes. Billed by Anthropic per token.',
+    role: 'Cue decisions and meeting notes. Billed by Anthropic per token.',
     whereToGet: 'Anthropic Console (console.anthropic.com) → API Keys',
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    role: 'Decides when a cue would help or writes meeting notes, if selected. Billed by OpenAI per token.',
+    role: 'Cue decisions and meeting notes, if selected. Billed by OpenAI per token.',
     whereToGet: 'OpenAI Platform (platform.openai.com) → API keys',
   },
   {
     id: 'gemini',
     name: 'Gemini',
-    role: 'Decides when a cue would help or writes meeting notes, if selected. Billed by Google per token.',
+    role: 'Cue decisions and meeting notes, if selected. Billed by Google per token.',
     whereToGet: 'Google AI Studio (aistudio.google.com) → API keys',
   },
 ];
@@ -265,11 +265,10 @@ export function ProviderKeys({
       <div className="provider-keys-intro">
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
-          TalkQTE runs on your own accounts. Live sessions need a transcription
-          key (Deepgram or ElevenLabs) and a key for your chosen cue provider.
-          Each is kept in {keyStoreName(status?.store?.kind)} and is never shown
-          again. Nothing is sent to any provider until you approve a session's
-          processing review.
+          TalkQTE runs on your own accounts (one transcription key and one cue
+          key). Each is kept in {keyStoreName(status?.store?.kind)} and is never
+          shown again. Nothing is sent until you start a live session or press
+          Test key.
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (

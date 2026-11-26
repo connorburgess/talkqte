@@ -78,6 +78,9 @@ pub struct Settings {
     pub user_name: Option<String>,
     /// The "a call seems to be starting" offer: off until turned on.
     pub call_prompt_enabled: bool,
+    /// Start a live session automatically when a known call app or browser
+    /// activates the microphone. Off by default; never enabled in lab runs.
+    pub call_prompt_auto_start: bool,
     /// Bundle identifiers the call-starting prompt skips; each one is a
     /// known meeting application or browser.
     pub call_prompt_not_for: Vec<String>,
@@ -88,6 +91,13 @@ pub struct Settings {
     pub keep_running_in_menu_bar: bool,
     /// What to do with a non-empty live session when it ends.
     pub after_session_keep: AfterSessionKeep,
+    /// Check for signed app updates when TalkQTE launches (ignored in lab
+    /// runs and in builds without an update-signing public key).
+    pub check_for_updates_at_launch: bool,
+    /// Pre-select up to 3 relevant recent kept meetings as prior context
+    /// (notes only, never transcripts or archived meetings). On by default;
+    /// never enabled, read, or written in lab runs.
+    pub auto_prior_context: bool,
 }
 
 /// Notebook panel sizes. `None` follows the window's width.
@@ -113,11 +123,14 @@ impl Default for Settings {
             overlay_enabled: true,
             panels: Panels::default(),
             user_name: None,
-            call_prompt_enabled: false,
+            call_prompt_enabled: true,
+            call_prompt_auto_start: false,
             call_prompt_not_for: Vec::new(),
             calendar_prompts: false,
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
+            check_for_updates_at_launch: true,
+            auto_prior_context: true,
         }
     }
 }
@@ -197,6 +210,10 @@ pub fn parse(bytes: &[u8]) -> Settings {
         .and_then(|prompt| prompt.get("enabled"))
         .and_then(Value::as_bool)
         .unwrap_or(defaults.call_prompt_enabled);
+    let call_prompt_auto_start = call_prompt
+        .and_then(|prompt| prompt.get("autoStart"))
+        .and_then(Value::as_bool)
+        .unwrap_or(defaults.call_prompt_auto_start);
     let mut call_prompt_not_for: Vec<String> = Vec::new();
     for bundle in call_prompt
         .and_then(|prompt| prompt.get("notFor"))
@@ -232,6 +249,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
         panels,
         user_name,
         call_prompt_enabled,
+        call_prompt_auto_start,
         call_prompt_not_for,
         calendar_prompts: field(&object, "calendarPrompts", defaults.calendar_prompts),
         keep_running_in_menu_bar: field(
@@ -240,6 +258,12 @@ pub fn parse(bytes: &[u8]) -> Settings {
             defaults.keep_running_in_menu_bar,
         ),
         after_session_keep: field(&object, "afterSessionKeep", defaults.after_session_keep),
+        check_for_updates_at_launch: field(
+            &object,
+            "checkForUpdatesAtLaunch",
+            defaults.check_for_updates_at_launch,
+        ),
+        auto_prior_context: field(&object, "autoPriorContext", defaults.auto_prior_context),
     }
 }
 
@@ -261,11 +285,14 @@ pub fn render(settings: &Settings) -> Vec<u8> {
         "userName": settings.user_name,
         "callPrompt": {
             "enabled": settings.call_prompt_enabled,
+            "autoStart": settings.call_prompt_auto_start,
             "notFor": settings.call_prompt_not_for,
         },
         "calendarPrompts": settings.calendar_prompts,
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
+        "checkForUpdatesAtLaunch": settings.check_for_updates_at_launch,
+        "autoPriorContext": settings.auto_prior_context,
     });
     let mut bytes = serde_json::to_vec_pretty(&value).expect("settings serialize");
     bytes.push(b'\n');
@@ -423,6 +450,13 @@ impl Store {
         let (saving, saved) = match path.as_deref().map(read) {
             Some(Contents::Newer) => (Saving::Newer, Settings::default()),
             Some(Contents::Settings(saved)) => (saving, saved),
+            None if lab_run => (
+                saving,
+                Settings {
+                    call_prompt_enabled: false,
+                    ..Settings::default()
+                },
+            ),
             None => (saving, Settings::default()),
         };
         let store = Self(Mutex::new(Inner {
@@ -557,11 +591,14 @@ mod tests {
                 notes_ratio: Some(0.6),
             },
             user_name: Some("Zoë O’Neil-Ray".into()),
-            call_prompt_enabled: true,
+            call_prompt_enabled: false,
+            call_prompt_auto_start: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             calendar_prompts: true,
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
+            check_for_updates_at_launch: false,
+            auto_prior_context: false,
         }
     }
 
@@ -580,7 +617,7 @@ mod tests {
     fn the_file_is_the_owners_alone_and_leaves_no_temporary_file() {
         let folder = folder();
         let (store, _) = Store::open(Some(folder.file()), false);
-        store.record(|settings| settings.call_prompt_enabled = true);
+        store.record(|settings| settings.call_prompt_enabled = false);
         store.record(|settings| settings.sensitivity = Sensitivity::Quiet);
         #[cfg(unix)]
         {
@@ -605,8 +642,10 @@ mod tests {
             keys,
             [
                 "afterSessionKeep",
+                "autoPriorContext",
                 "calendarPrompts",
                 "callPrompt",
+                "checkForUpdatesAtLaunch",
                 "companionPosition",
                 "cueModelOverride",
                 "cueProvider",
@@ -731,7 +770,8 @@ mod tests {
                     "notFor": ["us.zoom.xos", "com.example.unknown", 4, "us.zoom.xos"]
                 },
                 "transcript": "an unknown field is ignored",
-                "keys": { "anthropic": "never read" }
+                "keys": { "anthropic": "never read" },
+                "checkForUpdatesAtLaunch": "yes"
             }"#,
         );
         assert_eq!(
@@ -757,7 +797,15 @@ mod tests {
         let before = fs::read(folder.file()).unwrap();
 
         let (lab, applied) = Store::open(Some(folder.file()), true);
-        assert_eq!(applied, Settings::default());
+        assert!(!applied.call_prompt_enabled);
+        assert!(!applied.call_prompt_auto_start);
+        assert_eq!(
+            applied,
+            Settings {
+                call_prompt_enabled: false,
+                ..Settings::default()
+            }
+        );
         assert_eq!(lab.status().saving, Saving::LabRun);
         lab.record(|settings| settings.sensitivity = Sensitivity::Balanced);
         lab.reset().unwrap();
@@ -805,6 +853,20 @@ mod tests {
     }
 
     #[test]
+    fn call_prompt_enabled_defaults_true_and_auto_start_defaults_false() {
+        assert!(Settings::default().call_prompt_enabled);
+        assert!(!Settings::default().call_prompt_auto_start);
+        assert!(parse(br#"{"version":1}"#).call_prompt_enabled);
+        assert!(parse(br#"{"version":1,"callPrompt":{"enabled":"no"}}"#).call_prompt_enabled);
+        assert!(!parse(br#"{"version":1,"callPrompt":{"enabled":true}}"#).call_prompt_auto_start);
+        let parsed = parse(br#"{"version":1,"callPrompt":{"enabled":false,"autoStart":true}}"#);
+        assert!(!parsed.call_prompt_enabled);
+        assert!(parsed.call_prompt_auto_start);
+        let non_bool = parse(br#"{"version":1,"callPrompt":{"autoStart":"yes"}}"#);
+        assert!(!non_bool.call_prompt_auto_start);
+    }
+
+    #[test]
     fn after_session_keep_defaults_to_auto_and_parses_all_modes_safely() {
         assert_eq!(
             Settings::default().after_session_keep,
@@ -829,5 +891,18 @@ mod tests {
         assert!(!invalid.calendar_prompts);
         let invalid_cal = parse(br#"{"version": 1, "calendarPrompts": "yes"}"#);
         assert!(!invalid_cal.calendar_prompts);
+    }
+
+    #[test]
+    fn auto_prior_context_defaults_true_and_parses_safely() {
+        assert!(Settings::default().auto_prior_context);
+        assert!(parse(br#"{"version": 1, "sensitivity": "quiet"}"#).auto_prior_context);
+        let disabled = Settings {
+            auto_prior_context: false,
+            ..Default::default()
+        };
+        assert!(!parse(&render(&disabled)).auto_prior_context);
+        let invalid = parse(br#"{"version": 1, "autoPriorContext": "yes"}"#);
+        assert!(invalid.auto_prior_context);
     }
 }

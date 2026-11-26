@@ -54,7 +54,7 @@ export function PanelDivider({
       aria-valuenow={value}
       aria-valuetext={`${value} pixels wide`}
       aria-describedby="panel-resize-help"
-      title={`Resize ${label.toLowerCase()}. Use left and right arrow keys, or Panel sizes above.`}
+      title={`Resize ${label.toLowerCase()}. Drag or use left and right arrow keys.`}
       onPointerDown={(event) => {
         if (event.button !== 0 || !event.isPrimary) return;
         event.preventDefault();

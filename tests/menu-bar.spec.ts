@@ -35,7 +35,7 @@ test('both are off by default, and Settings says what off and on mean', async ({
   await expect(keep).not.toBeChecked();
   await expect(login).not.toBeChecked();
   await expect(section).toContainText(
-    'Off by default: closing the notebook quits TalkQTE, as it always has.',
+    'Off by default: closing the notebook quits TalkQTE.',
   );
   await expect(section).toContainText(
     'nothing starts from the menu bar by itself',
@@ -100,8 +100,10 @@ test('the menu bar’s call-starting switch is the one in Settings', async ({
 }) => {
   await settings(page);
   const offer = page.getByRole('checkbox', {
-    name: 'Offer to start a session when a call seems to start',
+    name: 'Offer in the dock when a call seems to start',
   });
+  await expect(offer).toBeChecked();
+  await page.evaluate(() => window.captureTest.menuBarOffer(false));
   await expect(offer).not.toBeChecked();
   await page.evaluate(() => window.captureTest.menuBarOffer(true));
   await expect(offer).toBeChecked();

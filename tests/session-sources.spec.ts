@@ -109,6 +109,92 @@ test('dropped echoes are counted and a stopped application is said plainly', asy
   );
 });
 
+test('system audio tap labels You/Them, counts echoes, and falls back calmly when denied or unsupported', async ({
+  page,
+}) => {
+  await notebook(page);
+  const systemAudio = {
+    microphone: true,
+    application: 'System audio',
+    applicationAttached: true,
+  };
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources,
+        transcript: [
+          {
+            id: 'c1-1-1',
+            atMs: 1_000,
+            speaker: 'Them',
+            text: 'Can we move the review to Friday?',
+          },
+          {
+            id: 'c1-0-1',
+            atMs: 2_000,
+            speaker: 'You',
+            text: 'Yes, Friday afternoon works.',
+          },
+        ],
+      }),
+    systemAudio,
+  );
+  await expect(
+    page.getByRole('region', { name: 'Session', exact: true }),
+  ).toContainText('Your microphone and system audio · audio not recorded');
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  await expect(transcript).toContainText(
+    'You: your microphone · Them: system audio · transcribed by Deepgram',
+  );
+
+  // Echo notice mentions system audio and headphones.
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({ sources: { ...sources, echoDropped: 1 } }),
+    systemAudio,
+  );
+  await expect(
+    page
+      .getByRole('region', { name: 'Session' })
+      .getByText(
+        '1 microphone line looks like a repeat of system audio through your speakers. They are marked in the transcript, not used for cues; keep or remove each there. Headphones avoid this.',
+      ),
+  ).toBeVisible();
+
+  // Graceful fallback on macOS < 14.2.
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources: {
+          ...sources,
+          applicationAttached: false,
+          applicationEnded: 'unsupported',
+        },
+      }),
+    systemAudio,
+  );
+  await expect(page.getByRole('alert')).toContainText(
+    'System audio requires macOS 14.2 or later. Only your microphone is heard now.',
+  );
+
+  // Graceful fallback on denied System Audio Recording Only permission.
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources: {
+          ...sources,
+          applicationAttached: false,
+          applicationEnded: 'permission_denied',
+        },
+      }),
+    systemAudio,
+  );
+  await expect(page.getByRole('alert')).toContainText(
+    'System audio permission was not allowed. Check System Audio Recording Only for TalkQTE in System Settings → Privacy & Security. Only your microphone is heard now.',
+  );
+});
+
 test('a microphone-only session keeps its plain wording', async ({ page }) => {
   await notebook(page);
   await page.evaluate(() =>
@@ -121,7 +207,7 @@ test('a microphone-only session keeps its plain wording', async ({ page }) => {
   await expect(page.locator('#transcript-panel')).not.toContainText('Them');
 });
 
-test('a line suppressed as a likely echo stays visible, marked, with Keep and Remove', async ({
+test('a line suppressed as a likely echo is hidden by default behind a toggle, with Keep and Remove', async ({
   page,
 }) => {
   await notebook(page);
@@ -160,6 +246,20 @@ test('a line suppressed as a likely echo stays visible, marked, with Keep and Re
   await page.getByRole('tab', { name: /Transcript/ }).click();
   const transcript = page.locator('#transcript-panel');
   const lines = transcript.locator('.transcript-segment');
+  // By default, flagged echoes are collapsed so speaker-mode calls do not double lines.
+  await expect(lines).toHaveCount(2);
+  await expect(
+    transcript.getByText('Likely an echo of Them · not used for cues'),
+  ).toHaveCount(0);
+  const toggle = transcript.getByRole('button', {
+    name: 'Show 1 likely echo line',
+  });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  const hideToggle = transcript.getByRole('button', {
+    name: 'Hide 1 likely echo line',
+  });
+  await expect(hideToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(lines).toHaveCount(3);
   // In time order, the echo between the two ordinary lines.
   await expect(lines.nth(1)).toContainText(
@@ -171,4 +271,27 @@ test('a line suppressed as a likely echo stays visible, marked, with Keep and Re
     { id: 'c1-0-2', keep: true },
     { id: 'c1-0-2', keep: false },
   ]);
+  await hideToggle.click();
+  await expect(lines).toHaveCount(2);
+});
+
+test('a long meeting transcript past 400 lines renders all lines in the live notebook', async ({
+  page,
+}) => {
+  await notebook(page);
+  const longTranscript = Array.from({ length: 450 }, (_, index) => ({
+    id: `c1-0-${index + 1}`,
+    atMs: (index + 1) * 1_000,
+    speaker: index % 2 === 0 ? 'Them' : 'You',
+    text: `Fictional long meeting line ${index + 1}.`,
+  }));
+  await page.evaluate(
+    ([sources, transcript]) => window.liveTest.publish({ sources, transcript }),
+    [both, longTranscript] as const,
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  await expect(transcript.locator('.transcript-segment')).toHaveCount(450);
+  await expect(transcript).toContainText('Fictional long meeting line 1.');
+  await expect(transcript).toContainText('Fictional long meeting line 450.');
 });

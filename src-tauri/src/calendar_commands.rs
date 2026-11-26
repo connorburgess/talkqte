@@ -22,6 +22,17 @@ fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 fn current_settings(enabled: bool, backend: &dyn CalendarSource) -> Settings {
+    if !enabled {
+        return Settings {
+            enabled: false,
+            status: if cfg!(target_os = "macos") && !crate::settings::lab_run() {
+                PermissionStatus::Off
+            } else {
+                PermissionStatus::Unavailable
+            },
+            error: None,
+        };
+    }
     let os_status = backend.authorization_status();
     let status = match (os_status, enabled) {
         (PermissionStatus::Unavailable, _) => PermissionStatus::Unavailable,
@@ -226,3 +237,31 @@ pub(crate) fn install(app: &tauri::AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install(_: &tauri::AppHandle) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MustNotRead;
+    impl CalendarSource for MustNotRead {
+        fn authorization_status(&self) -> PermissionStatus {
+            panic!("disabled Calendar settings must not query authorization");
+        }
+        fn request_access(&self) -> PermissionStatus {
+            panic!("disabled Calendar settings must not request access");
+        }
+        fn upcoming_events(&self, _: i64, _: i64) -> Vec<calendar::CalendarEvent> {
+            panic!("disabled Calendar settings must not read events");
+        }
+    }
+
+    #[test]
+    fn inspecting_disabled_settings_never_touches_calendar() {
+        let settings = current_settings(false, &MustNotRead);
+        assert!(!settings.enabled);
+        assert!(matches!(
+            settings.status,
+            PermissionStatus::Off | PermissionStatus::Unavailable
+        ));
+    }
+}

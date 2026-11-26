@@ -59,7 +59,7 @@ pub const SPEND_CAP_MICRO_USD: u64 = 1_000_000;
 const LIKELY_OUTPUT_TOKENS: f64 = 3_000.0;
 
 // Bounds, also written in the contract's `limits`; a test keeps them equal.
-const MAX_TRANSCRIPT_LINES: usize = 4_000;
+const MAX_TRANSCRIPT_LINES: usize = 10_000;
 const MAX_TRANSCRIPT_BYTES: usize = 240_000;
 const MAX_SUMMARY_ITEMS: usize = 5;
 const MAX_SECTION_ITEMS: usize = 20;

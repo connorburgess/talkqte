@@ -422,8 +422,8 @@ test('a failed pending replacement spends the second attempt before Connected wi
 
 for (const [name, fixtureCase, reconnect] of [
   ['a run that did not allow reconnects', 'cloud-reconnect', undefined],
-  ['a third replacement', 'cloud-reconnect-thrice', true],
-  ['a third pending replacement', 'cloud-reconnect-pending-thrice', true],
+  ['an eleventh replacement', 'cloud-reconnect-over-cap', true],
+  ['an eleventh pending replacement', 'cloud-reconnect-pending-over-cap', true],
   ['before the first confirmed query', 'cloud-reconnect-before-first', true],
   ['another session', 'cloud-reconnect-other-session', true],
   ['a changed query', 'cloud-reconnect-changed-query', true],
@@ -780,7 +780,7 @@ test('exactly the two app queries are accepted, and only en or multi selects one
   assert.ok(isAppQuery(DEEPGRAM_APP_QUERY_MULTI));
   for (const near of [
     DEEPGRAM_APP_QUERY.replace('language=en', 'language=multi'),
-    DEEPGRAM_APP_QUERY_MULTI.replace('endpointing=100', 'endpointing=300'),
+    DEEPGRAM_APP_QUERY_MULTI.replace('endpointing=100', 'endpointing=600'),
     DEEPGRAM_APP_QUERY.replace('language=en', 'language=de'),
     DEEPGRAM_APP_QUERY + '&detect_language=true',
   ])
