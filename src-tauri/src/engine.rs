@@ -1471,7 +1471,8 @@ impl Engine {
                 (self.resolved_remote_speaker(id), Some(id))
             }
             (LineOrigin::Application, true, _, _) => (THEM.to_string(), None),
-            (LineOrigin::Application, false, _, _) => (THEM.to_string(), None),
+            (LineOrigin::Application, false, true, _) => (THEM.to_string(), None),
+            (LineOrigin::Application, false, false, _) => (speaker.to_string(), None),
         };
         let segment = Segment {
             text: text.into(),
