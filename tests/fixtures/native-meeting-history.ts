@@ -43,6 +43,10 @@ export const commands = [
   'set_kept_meeting_archived',
   'delete_kept_meeting',
   'delete_all_kept_meetings',
+  'create_meeting_folder',
+  'rename_meeting_folder',
+  'delete_meeting_folder',
+  'set_kept_meeting_folder',
   'kept_meeting_export_preview',
   'export_kept_meeting',
 ];
@@ -58,6 +62,7 @@ let availability: HistoryAvailability = 'on';
 let afterSessionKeep: AfterSessionKeep = 'auto';
 let autoPriorContext: boolean = preloaded.standInAutoPriorContext ?? true;
 let meetings: KeptMeeting[] = [];
+let folders: string[] = [];
 let next = 0;
 let autoContextItems: ContextItem[] = [];
 const manualContextItems = new Map<string, ContextItem>();
@@ -352,8 +357,16 @@ const summary = (meeting: KeptMeeting): KeptSummary => ({
   durationMs: meeting.durationMs,
   sources: meeting.sources,
   hasMeetingNotes: meeting.meetingNotes !== undefined,
+  ...(meeting.folder ? { folder: meeting.folder } : {}),
   archived: !!meeting.archived,
 });
+
+function cleanFolderName(raw: string): string {
+  const cleaned = raw.trim().replace(/\s+/g, ' ');
+  if (!cleaned || cleaned.length > 80)
+    throw 'Give the folder a name of up to 80 characters.';
+  return cleaned;
+}
 
 function fromSession(current: Snapshot, includeApplication: boolean) {
   const application = current.sources?.application;
@@ -658,11 +671,12 @@ export function command(
     case 'kept_meetings': {
       const query = words((args as { query: string | null }).query);
       if (availability !== 'on')
-        return { availability, meetings: [], unreadable: 0 };
+        return { availability, meetings: [], folders: [], unreadable: 0 };
       const found = meetings
         .filter((meeting) => {
           const text = [
             meeting.title,
+            meeting.folder ?? '',
             meeting.notes,
             meeting.meetingNotes ?? '',
             ...meeting.transcript.map((line) => line.text),
@@ -674,7 +688,12 @@ export function command(
         })
         .sort((a, b) => b.startedAtMs - a.startedAtMs)
         .map(summary);
-      return { availability, meetings: found, unreadable };
+      return {
+        availability,
+        meetings: found,
+        folders: [...folders],
+        unreadable,
+      };
     }
     case 'open_kept_meeting': {
       const meeting = meetings.find(
@@ -725,6 +744,7 @@ export function command(
     case 'delete_all_kept_meetings': {
       const count = meetings.length;
       meetings = [];
+      folders = [];
       autoContextItems = [];
       manualContextItems.clear();
       dismissedAutoIds.clear();
@@ -734,6 +754,88 @@ export function command(
       availability = 'on';
       pendingExport = null;
       return count;
+    }
+    case 'create_meeting_folder': {
+      if (availability === 'newer')
+        throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
+      if (availability !== 'on')
+        throw 'Kept meetings are not available in this launch.';
+      const clean = cleanFolderName((args as { name: string }).name);
+      if (folders.some((f) => f.toLowerCase() === clean.toLowerCase()))
+        throw 'A folder with that name already exists.';
+      folders.push(clean);
+      return [...folders];
+    }
+    case 'rename_meeting_folder': {
+      if (availability === 'newer')
+        throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
+      if (availability !== 'on')
+        throw 'Kept meetings are not available in this launch.';
+      const { oldName, newName } = args as { oldName: string; newName: string };
+      const idx = folders.findIndex(
+        (f) => f.toLowerCase() === oldName.trim().toLowerCase(),
+      );
+      if (idx === -1) throw 'That folder no longer exists.';
+      const clean = cleanFolderName(newName);
+      if (
+        folders.some(
+          (f, i) => i !== idx && f.toLowerCase() === clean.toLowerCase(),
+        )
+      )
+        throw 'A folder with that name already exists.';
+      const canonicalOld = folders[idx];
+      folders[idx] = clean;
+      for (const meeting of meetings) {
+        if (meeting.folder?.toLowerCase() === canonicalOld.toLowerCase()) {
+          meeting.folder = clean;
+          meeting.revision += 1;
+        }
+      }
+      pendingExport = null;
+      return [...folders];
+    }
+    case 'delete_meeting_folder': {
+      if (availability === 'newer')
+        throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
+      if (availability !== 'on')
+        throw 'Kept meetings are not available in this launch.';
+      const { name } = args as { name: string };
+      const idx = folders.findIndex(
+        (f) => f.toLowerCase() === name.trim().toLowerCase(),
+      );
+      if (idx === -1) throw 'That folder no longer exists.';
+      const canonical = folders[idx];
+      folders.splice(idx, 1);
+      for (const meeting of meetings) {
+        if (meeting.folder?.toLowerCase() === canonical.toLowerCase()) {
+          delete meeting.folder;
+          meeting.revision += 1;
+        }
+      }
+      pendingExport = null;
+      return [...folders];
+    }
+    case 'set_kept_meeting_folder': {
+      if (availability === 'newer')
+        throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
+      if (availability !== 'on')
+        throw 'Kept meetings are not available in this launch.';
+      const { id, folder } = args as { id: string; folder: string | null };
+      const meeting = meetings.find((item) => item.id === id);
+      if (!meeting) throw 'That meeting is no longer kept.';
+      if (folder === null) {
+        delete meeting.folder;
+      } else {
+        const clean = cleanFolderName(folder);
+        const match = folders.find(
+          (f) => f.toLowerCase() === clean.toLowerCase(),
+        );
+        if (!match) throw 'That folder no longer exists.';
+        meeting.folder = match;
+      }
+      meeting.revision += 1;
+      pendingExport = null;
+      return summary(meeting);
     }
     case 'kept_meeting_export_preview': {
       const { id } = args as { id: string };
@@ -822,6 +924,7 @@ declare global {
     historyTest: {
       calls: typeof calls;
       meetings: () => KeptMeeting[];
+      folders: () => string[];
       exports: () => string[];
       add: (meeting: Omit<KeptMeeting, 'id' | 'revision'>) => string;
       setAvailability: (value: HistoryAvailability) => void;
@@ -836,9 +939,16 @@ declare global {
 window.historyTest = {
   calls,
   meetings: () => structuredClone(meetings),
+  folders: () => [...folders],
   exports: () => [...exported],
   add: (meeting) => {
     const id = (++next).toString(16).padStart(32, '0');
+    if (
+      meeting.folder &&
+      !folders.some((f) => f.toLowerCase() === meeting.folder!.toLowerCase())
+    ) {
+      folders.push(meeting.folder);
+    }
     meetings.push({ ...meeting, id, revision: 1 });
     return id;
   },

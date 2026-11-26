@@ -142,6 +142,27 @@ function engineSeconds(name) {
 // changing the source without the document (or the reverse) fails here.
 const FACTS = [
   {
+    claim:
+      'docs/meeting-history.md: folder name length and folder count limits',
+    doc: () =>
+      capture(
+        read('docs/meeting-history.md'),
+        /Optional names \(up to (\d+) characters, (\d+) folders\)/,
+        'the folder limits in docs/meeting-history.md',
+      ),
+    source: () => {
+      const text = read('src-tauri/src/meeting_history.rs');
+      return [
+        ...capture(
+          text,
+          /MAX_FOLDER_CHARS: usize = (\d+);/,
+          'MAX_FOLDER_CHARS',
+        ),
+        ...capture(text, /MAX_FOLDERS: usize = (\d+);/, 'MAX_FOLDERS'),
+      ];
+    },
+  },
+  {
     claim: 'DESIGN.md: height of the companion window showing a question',
     doc: () =>
       capture(
