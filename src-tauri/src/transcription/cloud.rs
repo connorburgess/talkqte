@@ -561,6 +561,7 @@ impl CloudFeed {
                         id: format!("c{}-{}-{}", self.session, self.stream_index, seq),
                         at_ms: at,
                         speaker: "Speaker".into(),
+                        speaker_id: untrusted_speaker,
                         text,
                     };
                     match (self.sink)(self.session, segment) {

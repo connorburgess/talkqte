@@ -191,6 +191,7 @@ impl Harness {
                     id: format!("line-{}", self.next_line),
                     at_ms: self.runtime.engine.state.elapsed_ms,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: SPEECH.into(),
                 },
             )

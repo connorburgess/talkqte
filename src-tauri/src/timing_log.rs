@@ -1017,6 +1017,7 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
+            speaker_id: None,
             text: text.into(),
         }
     }

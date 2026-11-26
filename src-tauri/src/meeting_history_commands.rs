@@ -310,6 +310,30 @@ pub(crate) async fn rename_kept_meeting(
 }
 
 #[tauri::command]
+pub(crate) async fn rename_kept_meeting_speaker(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    speaker_id: u32,
+    name: String,
+) -> Result<Meeting, String> {
+    main_only(&window)?;
+    let target = id.clone();
+    let meeting = blocking(&app, move |store| {
+        store.rename_speaker(&target, speaker_id, &name)
+    })
+    .await?
+    .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        if let Some(kept) = keeping.kept.as_mut().filter(|kept| kept.id == meeting.id) {
+            kept.content.speaker_names = meeting.content.speaker_names.clone();
+        }
+        keeping.export = None;
+    }
+    Ok(meeting)
+}
+
+#[tauri::command]
 pub(crate) async fn set_kept_meeting_archived(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,

@@ -1120,6 +1120,30 @@ mockIPC(
       case 'resolve_echo_line':
         echoAnswers.push(structuredClone(args));
         return;
+      case 'rename_speaker': {
+        const { speakerId, name } = args as Commands['rename_speaker'];
+        const normalized = name.trim().replace(/\s+/g, ' ');
+        if ([...normalized].length > 80 || /[\p{Cc}]/u.test(name)) {
+          throw new Error('Give the speaker a name of up to 80 characters.');
+        }
+        const fallback = `Speaker ${speakerId + 1}`;
+        const nextNames = { ...(session.speakerNames ?? {}) };
+        if (!normalized || normalized === fallback) {
+          delete nextNames[speakerId];
+        } else {
+          nextNames[speakerId] = normalized;
+        }
+        const resolved = nextNames[speakerId] ?? fallback;
+        await publish({
+          speakerNames: nextNames,
+          transcript: session.transcript.map((segment) =>
+            segment.speakerId === speakerId
+              ? { ...segment, speaker: resolved }
+              : segment,
+          ),
+        });
+        return;
+      }
       case 'set_keep_meeting':
         await publish({
           keepMeeting: (args as Commands['set_keep_meeting']).keep,

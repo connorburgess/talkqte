@@ -16,18 +16,18 @@ By default, non-empty live sessions save automatically into local **Meetings** h
 
 ## What a kept meeting holds
 
-| Kept                                                               | Never kept                                         |
-| ------------------------------------------------------------------ | -------------------------------------------------- |
-| Title (editable)                                                   | Audio                                              |
-| Start date and time, and length                                    | Provider keys or tokens                            |
-| Sources used: microphone, application or both                      | The application's name, unless the person ticks it |
-| Transcript, times from the start                                   | The transcription provider's speaker labels        |
-| You/Them labels, only in a session with both sources               | The name setting and focus lines                   |
-| Likely-echo marks, for lines neither removed nor kept as their own | Imported notes and note reminders                  |
-| The person's notes                                                 | The Still open list                                |
-| Cues shown from the conversation, with the line each quoted        | Cue usage, spend or provider replies               |
-| Meeting notes, only if the person kept them, as edited             | Anything from a lab run                            |
-| The transcription service's name (Deepgram)                        |                                                    |
+| Kept                                                                  | Never kept                                         |
+| --------------------------------------------------------------------- | -------------------------------------------------- |
+| Title (editable)                                                      | Audio                                              |
+| Start date and time, and length                                       | Provider keys or tokens                            |
+| Sources used: microphone, application or both                         | The application's name, unless the person ticks it |
+| Transcript, times from the start                                      | The person's name setting and focus lines          |
+| You/Them labels, 0-based remote speaker IDs, and custom speaker names | Imported notes and note reminders                  |
+| Likely-echo marks, for lines neither removed nor kept as their own    | Imported notes and note reminders                  |
+| The person's notes                                                    | The Still open list                                |
+| Cues shown from the conversation, with the line each quoted           | Cue usage, spend or provider replies               |
+| Meeting notes, only if the person kept them, as edited                | Anything from a lab run                            |
+| The transcription service's name (Deepgram)                           |                                                    |
 
 The engine builds this (`Engine::keepable_meeting`, `src-tauri/src/engine/history.rs`)
 with the same exclusions as an export that keeps the meeting.
@@ -101,6 +101,7 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
 | `kept_meetings`                  | The list, newest first, optionally filtered by a search                                                                                    |
 | `open_kept_meeting`              | One meeting in full                                                                                                                        |
 | `rename_kept_meeting`            | A new title                                                                                                                                |
+| `rename_kept_meeting_speaker`    | Renames a diarized remote speaker (`Speaker 1`, etc.) in a kept meeting                                                                    |
 | `set_kept_meeting_archived`      | Marks a kept meeting archived/unarchived (excluded from auto prior context when archived)                                                  |
 | `delete_kept_meeting`            | Deletes one for good                                                                                                                       |
 | `delete_all_kept_meetings`       | Deletes the whole folder                                                                                                                   |

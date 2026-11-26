@@ -43,8 +43,10 @@ fn content(started_at_ms: u64, line: &str) -> Content {
             at_ms: 4_000,
             label: None,
             echo: false,
+            speaker_id: None,
             text: line.into(),
         }],
+        speaker_names: BTreeMap::new(),
         notes: "Bring the fictional ladder.".into(),
         cues: vec![Cue {
             at_ms: 5_000,
@@ -449,18 +451,21 @@ fn a_kept_meeting_exports_notes_cues_and_transcript_without_unkept_fields() {
             at_ms: 4_000,
             label: Some(Label::You),
             echo: false,
+            speaker_id: None,
             text: "Can we ship Friday?".into(),
         },
         Line {
             at_ms: 5_000,
             label: Some(Label::You),
             echo: true,
+            speaker_id: None,
             text: "Legal said review takes two days.".into(),
         },
         Line {
             at_ms: 5_100,
             label: Some(Label::Them),
             echo: false,
+            speaker_id: None,
             text: "Legal said review takes two days.".into(),
         },
     ];
@@ -660,4 +665,102 @@ fn suggest_prior_context_ranks_keyword_overlap_falls_back_to_recency_and_exclude
     // Lab runs never read kept meetings.
     let lab = Store::open(Some(folder.root()), true);
     assert_eq!(lab.suggest_prior_context(&[], None, 3), Err(Error::Off));
+}
+
+#[test]
+fn v1_meetings_without_speaker_fields_still_load_and_speaker_renames_persist() {
+    let folder = Folder::new("speaker-names");
+    let store = folder.store();
+
+    // Create a meeting without speaker names or speaker IDs: verify skip_serializing_if omits them.
+    let plain_summary = store
+        .keep("Plain v1 meeting", content(1_000, "No diarized speakers."))
+        .unwrap();
+    let plain_path = folder.root().join(&plain_summary.id).join(MEETING);
+    let plain_raw = fs::read_to_string(&plain_path).unwrap();
+    assert!(!plain_raw.contains("speakerNames"));
+    assert!(!plain_raw.contains("speakerId"));
+
+    // Write a pure v1 JSON file without speakerNames or speakerId and verify it loads cleanly.
+    let v1_json = serde_json::json!({
+        "version": 1,
+        "id": plain_summary.id,
+        "title": "Plain v1 meeting",
+        "revision": 1,
+        "startedAtMs": 1_000,
+        "durationMs": 600_000,
+        "sources": "both",
+        "transcript": [
+            { "atMs": 2_000, "label": "them", "text": "Hello from v1." }
+        ],
+        "notes": "",
+        "cues": []
+    });
+    fs::write(&plain_path, serde_json::to_vec_pretty(&v1_json).unwrap()).unwrap();
+    let loaded_v1 = store.open_meeting(&plain_summary.id).unwrap();
+    assert!(loaded_v1.content.speaker_names.is_empty());
+    assert_eq!(loaded_v1.content.transcript[0].speaker_id, None);
+
+    // Diarized meeting with speaker IDs: rename speaker 0 and verify persistence, search, and export.
+    let mut diarized = content(2_000, "Unused");
+    diarized.sources = Sources::Both;
+    diarized.transcript = vec![
+        Line {
+            at_ms: 1_000,
+            label: Some(Label::Them),
+            echo: false,
+            speaker_id: Some(0),
+            text: "Let us finalize the rota.".into(),
+        },
+        Line {
+            at_ms: 2_000,
+            label: Some(Label::Them),
+            echo: false,
+            speaker_id: Some(1),
+            text: "Agreed on Friday.".into(),
+        },
+        Line {
+            at_ms: 3_000,
+            label: Some(Label::You),
+            echo: false,
+            speaker_id: None,
+            text: "I will bring the keys.".into(),
+        },
+    ];
+    let kept = store.keep("Diarized sync", diarized).unwrap();
+    let renamed = store
+        .rename_speaker(&kept.id, 0, "  Priya   Patel ")
+        .unwrap();
+    assert_eq!(renamed.revision, 2);
+    assert_eq!(
+        renamed.content.speaker_names.get(&0).map(String::as_str),
+        Some("Priya Patel")
+    );
+
+    // Search matches renamed speaker names.
+    let hits = store.list(Some("Priya")).meetings;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, kept.id);
+
+    // Export uses resolved speaker names.
+    let md = store.open_meeting(&kept.id).unwrap().markdown();
+    assert!(md.contains("- 00:01 Priya Patel: Let us finalize the rota."));
+    assert!(md.contains("- 00:02 Speaker 2: Agreed on Friday."));
+    assert!(md.contains("- 00:03 You: I will bring the keys."));
+
+    // Validation rejects overlong/control speaker names.
+    assert_eq!(
+        store.rename_speaker(&kept.id, 0, &"x".repeat(81)),
+        Err(Error::SpeakerName)
+    );
+    assert_eq!(
+        store.rename_speaker(&kept.id, 0, "Priya\n"),
+        Err(Error::SpeakerName)
+    );
+
+    // Blank name resets back to default and omits speakerNames from disk JSON.
+    let reset = store.rename_speaker(&kept.id, 0, "   ").unwrap();
+    assert!(reset.content.speaker_names.is_empty());
+    let raw_after = fs::read_to_string(folder.root().join(&kept.id).join(MEETING)).unwrap();
+    assert!(!raw_after.contains("speakerNames"));
 }

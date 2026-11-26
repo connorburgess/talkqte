@@ -943,17 +943,14 @@ mod tests {
             Monitor::default(),
         );
         // Timed on the capture clock: 100 ms of stream audio is 100 ms into
-        // the session. Only the final became a line, with no speaker label.
+        // the session, surfacing Deepgram's 0-based speaker index as 1-based.
         assert_eq!(
             fixture.transcript(),
             [(100, "Fictional cloud line.".to_string())]
         );
-        // Labelled by its source, since the session has the microphone too;
-        // never by Deepgram's speaker number.
-        assert_eq!(
-            fixture.runtime.lock().unwrap().engine.state.transcript[0].speaker,
-            crate::engine::THEM
-        );
+        let line = &fixture.runtime.lock().unwrap().engine.state.transcript[0];
+        assert_eq!(line.speaker, "Speaker 3");
+        assert_eq!(line.speaker_id, Some(2));
         // The lost stream ended the source; nothing fell back to another path.
         assert!(fixture.control.is_cancelled());
         assert_eq!(report.status.stage, Stage::Released);

@@ -6,6 +6,7 @@
 //! with both sources, the microphone's lines are "You" and the application's
 //! "Them". A session with one source keeps the plain label it always had.
 
+#[cfg(test)]
 use super::LineOrigin;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -334,6 +335,7 @@ fn words(text: &str) -> Vec<String> {
 }
 
 /// The label for a line from `origin`, or `None` to keep the given one.
+#[cfg(test)]
 pub(super) fn label(sources: Option<&SessionSources>, origin: LineOrigin) -> Option<&'static str> {
     sources.filter(|sources| sources.both_sources())?;
     Some(match origin {

@@ -30,6 +30,7 @@ use crate::provider_keys::{KeyError, Secret};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, OnceLock,
@@ -135,6 +136,9 @@ pub struct Line {
     /// Where to find it: "transcript 03:41" or "your notes line 3".
     pub label: String,
     pub text: String,
+    /// Resolved custom speaker name when the person renamed a remote speaker.
+    #[serde(skip)]
+    owner_speaker: Option<String>,
 }
 
 /// Why nothing was sent. Every message says so.
@@ -386,8 +390,9 @@ fn flat(text: &str) -> String {
 }
 
 /// Builds the request's input from the session's transcript and, only when
-/// the person chose to include them, their notes. Speaker labels, the
-/// session name, focus lines, imported notes and cues are never included.
+/// the person chose to include them, their notes. Renamed remote speaker
+/// labels are included when present; the session name, focus lines, imported
+/// notes and cues are never included.
 pub fn prepare(
     model: Model,
     transcript: &[Segment],
@@ -400,7 +405,7 @@ pub fn prepare(
         thinking: None,
         custom: false,
     };
-    prepare_inner(model, target, transcript, notes)
+    prepare_inner(model, target, transcript, notes, &BTreeMap::new())
 }
 
 pub fn prepare_for(
@@ -408,8 +413,17 @@ pub fn prepare_for(
     transcript: &[Segment],
     notes: Option<&str>,
 ) -> Result<Prepared, Refusal> {
+    prepare_for_with_speakers(target, transcript, notes, &BTreeMap::new())
+}
+
+pub fn prepare_for_with_speakers(
+    target: ResolvedModel,
+    transcript: &[Segment],
+    notes: Option<&str>,
+    speaker_names: &BTreeMap<u32, String>,
+) -> Result<Prepared, Refusal> {
     let fallback = anthropic_api::model(DEFAULT_MODEL).expect("default model");
-    prepare_inner(fallback, target, transcript, notes)
+    prepare_inner(fallback, target, transcript, notes, speaker_names)
 }
 
 fn prepare_inner(
@@ -417,6 +431,7 @@ fn prepare_inner(
     target: ResolvedModel,
     transcript: &[Segment],
     notes: Option<&str>,
+    speaker_names: &BTreeMap<u32, String>,
 ) -> Result<Prepared, Refusal> {
     let spoken: Vec<&Segment> = transcript
         .iter()
@@ -429,19 +444,47 @@ fn prepare_inner(
     if spoken.len() > MAX_TRANSCRIPT_LINES || bytes > MAX_TRANSCRIPT_BYTES {
         return Err(Refusal::TooLong);
     }
+    let has_speakers =
+        !speaker_names.is_empty() || spoken.iter().any(|line| line.speaker_id.is_some());
     let mut lines = Vec::new();
-    let mut user = String::from(
-        "Transcript lines, with times from the start of the session. Speakers are not identified.\n",
-    );
+    let mut user = String::from(if has_speakers {
+        "Transcript lines, with times from the start of the session and speaker labels where known.\n"
+    } else {
+        "Transcript lines, with times from the start of the session. Speakers are not identified.\n"
+    });
     for (index, line) in spoken.iter().enumerate() {
         let id = format!("L{}", index + 1);
         let text = flat(&line.text);
         let at = clock(line.at_ms);
-        user.push_str(&format!("{id} [{at}] {text}\n"));
+        let (speaker_prefix, owner_speaker) = if has_speakers {
+            if let Some(sid) = line.speaker_id {
+                if let Some(custom) = speaker_names
+                    .get(&sid)
+                    .map(|name| flat(name))
+                    .filter(|name| !name.is_empty())
+                {
+                    (Some(custom.clone()), Some(custom))
+                } else {
+                    (Some(crate::engine::default_speaker_label(sid)), None)
+                }
+            } else if line.speaker == crate::engine::YOU || line.speaker == crate::engine::THEM {
+                (Some(line.speaker.clone()), None)
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+        if let Some(label) = speaker_prefix {
+            user.push_str(&format!("{id} [{at}] {label}: {text}\n"));
+        } else {
+            user.push_str(&format!("{id} [{at}] {text}\n"));
+        }
         lines.push(Line {
             id,
             label: format!("transcript {at}"),
             text,
+            owner_speaker,
         });
     }
     let transcript_lines = lines.len();
@@ -465,6 +508,7 @@ fn prepare_inner(
                     id,
                     label: format!("your notes line {number}"),
                     text: text.clone(),
+                    owner_speaker: None,
                 });
             }
             Some(written.len())
@@ -727,17 +771,19 @@ const NOT_A_NAME: &[&str] = &[
     "equipo",
 ];
 
+fn contains_words(haystack: &str, value: &[String]) -> bool {
+    let words = words(haystack);
+    words.windows(value.len()).any(|window| window == value)
+}
+
 /// The value's words as a run of whole words in one of the cited lines.
 fn stated_in(value: &[String], lines: &[Line]) -> bool {
-    lines.iter().any(|line| {
-        let line = words(&line.text);
-        line.windows(value.len()).any(|window| window == value)
-    })
+    lines.iter().any(|line| contains_words(&line.text, value))
 }
 
 /// Accepts an owner only when it is a name-like run of whole words that one
-/// of the cited lines contains: at least two letters, not only pronouns or
-/// stand-ins, not a bare number.
+/// of the cited lines contains (or its renamed speaker label when set): at
+/// least two letters, not only pronouns or stand-ins, not a bare number.
 fn owner_stated(owner: &str, lines: &[Line]) -> bool {
     let value = words(owner);
     let letters = value
@@ -749,7 +795,13 @@ fn owner_stated(owner: &str, lines: &[Line]) -> bool {
         && value.iter().any(|word| {
             word.chars().any(char::is_alphabetic) && !NOT_A_NAME.contains(&word.as_str())
         })
-        && stated_in(&value, lines)
+        && lines.iter().any(|line| {
+            contains_words(&line.text, &value)
+                || line
+                    .owner_speaker
+                    .as_deref()
+                    .is_some_and(|speaker| contains_words(speaker, &value))
+        })
 }
 
 /// Accepts a due date only when it is at least two characters of whole

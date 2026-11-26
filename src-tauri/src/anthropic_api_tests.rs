@@ -594,6 +594,7 @@ impl Session {
                     id: format!("line-{}", self.line),
                     at_ms: self.engine.state.elapsed_ms,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: text.into(),
                 },
             )

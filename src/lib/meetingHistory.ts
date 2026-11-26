@@ -26,6 +26,8 @@ export interface KeptLine {
   label?: 'you' | 'them';
   /** Marked during the meeting as a likely echo of the application. */
   echo?: boolean;
+  /** 0-based diarized remote speaker ID when distinct speakers were identified. */
+  speakerId?: number;
   text: string;
 }
 
@@ -47,6 +49,7 @@ export interface KeptMeeting {
   application?: string;
   transcribedBy?: string;
   transcript: KeptLine[];
+  speakerNames?: Record<number, string>;
   notes: string;
   cues: KeptCue[];
   meetingNotes?: string;
@@ -126,6 +129,19 @@ export function openKeptMeeting(id: string) {
 export function renameKeptMeeting(id: string, title: string) {
   if (!desktop) return browserOnly();
   return invoke<KeptSummary>('rename_kept_meeting', { id, title });
+}
+
+export function renameKeptMeetingSpeaker(
+  id: string,
+  speakerId: number,
+  name: string,
+) {
+  if (!desktop) return browserOnly();
+  return invoke<KeptMeeting>('rename_kept_meeting_speaker', {
+    id,
+    speakerId,
+    name,
+  });
 }
 
 export function setKeptMeetingArchived(id: string, archived: boolean) {

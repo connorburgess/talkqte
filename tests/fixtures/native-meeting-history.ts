@@ -40,6 +40,7 @@ export const commands = [
   'kept_meetings',
   'open_kept_meeting',
   'rename_kept_meeting',
+  'rename_kept_meeting_speaker',
   'set_kept_meeting_archived',
   'delete_kept_meeting',
   'delete_all_kept_meetings',
@@ -358,6 +359,10 @@ const summary = (meeting: KeptMeeting): KeptSummary => ({
 function fromSession(current: Snapshot, includeApplication: boolean) {
   const application = current.sources?.application;
   const both = !!(current.sources?.microphone && application);
+  const speakerNames =
+    current.speakerNames && Object.keys(current.speakerNames).length > 0
+      ? structuredClone(current.speakerNames)
+      : undefined;
   return {
     startedAtMs: Date.now() - current.elapsedMs,
     durationMs: current.elapsedMs,
@@ -367,11 +372,15 @@ function fromSession(current: Snapshot, includeApplication: boolean) {
     transcript: current.transcript.map((line) => ({
       atMs: line.atMs,
       label:
-        both && (line.speaker === 'You' || line.speaker === 'Them')
-          ? (line.speaker.toLowerCase() as 'you' | 'them')
-          : undefined,
+        both && line.speakerId !== undefined
+          ? ('them' as const)
+          : both && (line.speaker === 'You' || line.speaker === 'Them')
+            ? (line.speaker.toLowerCase() as 'you' | 'them')
+            : undefined,
+      ...(line.speakerId !== undefined ? { speakerId: line.speakerId } : {}),
       text: line.text,
     })),
+    ...(speakerNames ? { speakerNames } : {}),
     notes: current.notes,
     cues: [],
   } satisfies Omit<KeptMeeting, 'id' | 'title' | 'revision'>;
@@ -664,6 +673,7 @@ export function command(
             meeting.title,
             meeting.notes,
             meeting.meetingNotes ?? '',
+            ...Object.values(meeting.speakerNames ?? {}),
             ...meeting.transcript.map((line) => line.text),
             ...meeting.cues.flatMap((cue) => [cue.question, cue.evidence]),
           ]
@@ -692,6 +702,31 @@ export function command(
       meeting.revision += 1;
       pendingExport = null;
       return summary(meeting);
+    }
+    case 'rename_kept_meeting_speaker': {
+      const { id, speakerId, name } = args as {
+        id: string;
+        speakerId: number;
+        name: string;
+      };
+      const meeting = meetings.find((item) => item.id === id);
+      if (!meeting) throw 'That meeting is no longer kept.';
+      const normalized = name.trim().replace(/\s+/g, ' ');
+      if ([...normalized].length > 80 || /[\p{Cc}]/u.test(name)) {
+        throw 'Give the speaker a name of up to 80 characters.';
+      }
+      const fallback = `Speaker ${speakerId + 1}`;
+      const nextNames = { ...(meeting.speakerNames ?? {}) };
+      if (!normalized || normalized === fallback) {
+        delete nextNames[speakerId];
+      } else {
+        nextNames[speakerId] = normalized;
+      }
+      meeting.speakerNames =
+        Object.keys(nextNames).length > 0 ? nextNames : undefined;
+      meeting.revision += 1;
+      pendingExport = null;
+      return structuredClone(meeting);
     }
     case 'set_kept_meeting_archived': {
       const { id, archived } = args as { id: string; archived: boolean };
@@ -774,10 +809,15 @@ export function command(
           );
         }
       }
+      const hasDiarized = meeting.transcript.some(
+        (line) => line.speakerId !== undefined,
+      );
       lines.push('', '## Transcript', '');
       if (meeting.transcribedBy) {
         lines.push(
-          `Transcribed by ${flat(meeting.transcribedBy)}. Speakers are not identified.`,
+          hasDiarized
+            ? `Transcribed by ${flat(meeting.transcribedBy)}.`
+            : `Transcribed by ${flat(meeting.transcribedBy)}. Speakers are not identified.`,
           '',
         );
       }
@@ -785,16 +825,27 @@ export function command(
         lines.push('None.');
       } else {
         for (const line of meeting.transcript) {
+          const speakerLabel =
+            line.speakerId !== undefined
+              ? flat(
+                  meeting.speakerNames?.[line.speakerId] ??
+                    `Speaker ${line.speakerId + 1}`,
+                )
+              : null;
           const label =
             meeting.sources === 'both'
               ? line.echo
                 ? ' You (likely an echo of Them):'
                 : line.label === 'you'
                   ? ' You:'
-                  : line.label === 'them'
-                    ? ' Them:'
-                    : ''
-              : '';
+                  : speakerLabel
+                    ? ` ${speakerLabel}:`
+                    : line.label === 'them'
+                      ? ' Them:'
+                      : ''
+              : speakerLabel
+                ? ` ${speakerLabel}:`
+                : '';
           lines.push(`- ${clockTime(line.atMs)}${label} ${flat(line.text)}`);
         }
       }

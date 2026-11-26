@@ -818,6 +818,63 @@ svg {
 .transcript-echo-remove:hover:not(:disabled) {
   background: var(--danger-surface);
 }
+.transcript-speaker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--band);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.transcript-speaker-chip:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--border);
+}
+.transcript-speaker-chip:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.transcript-speaker-chip svg {
+  color: var(--muted);
+  flex: none;
+}
+.transcript-speaker-rename {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.transcript-speaker-rename input {
+  min-height: 28px;
+  width: 160px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+.transcript-speaker-rename input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-color: var(--ink);
+}
+.transcript-speaker-rename .secondary-button {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
 .context-panel {
   margin-top: var(--space-8);
   padding: 0 0 var(--space-16);

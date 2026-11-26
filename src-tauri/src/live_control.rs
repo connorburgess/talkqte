@@ -550,6 +550,7 @@ mod tests {
                     id: "drained".into(),
                     at_ms: 10,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "Someone should take the checklist.".into(),
                 },
             )

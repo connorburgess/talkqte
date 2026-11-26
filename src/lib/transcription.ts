@@ -140,12 +140,16 @@ export function bothSources(sources: SessionSources | undefined): boolean {
 export function sourcesHeading(
   sources: SessionSources | undefined,
   transcription: CloudTranscription | undefined,
+  hasDiarizedSpeakers = false,
 ): string | null {
   if (!sources || !bothSources(sources)) return null;
   const remote =
     sources.application === 'System audio'
       ? 'system audio'
       : `audio from ${sources.application}`;
+  if (hasDiarizedSpeakers) {
+    return `You: your microphone · Remote speakers: ${remote} (click a speaker name to rename) · ${transcribedWhere(transcription)}.`;
+  }
   return `You: your microphone · Them: ${remote} · ${transcribedWhere(transcription)}. The labels say where a line was heard, not who said it.`;
 }
 

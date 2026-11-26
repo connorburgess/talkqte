@@ -701,6 +701,26 @@ fn resolve_echo_line(
     Ok(())
 }
 
+/// Renames a diarized remote speaker across this session's transcript and
+/// meeting record. Notebook only.
+#[tauri::command]
+fn rename_speaker(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    speaker_id: u32,
+    name: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Only the notebook can rename speakers.".into());
+    }
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime.engine.rename_speaker(speaker_id, &name)?;
+    runtime.export = None;
+    publish(&app, &mut runtime);
+    Ok(())
+}
+
 #[tauri::command]
 fn set_keep_meeting(
     app: tauri::AppHandle,
@@ -2352,6 +2372,7 @@ pub fn run() {
             export_markdown,
             set_keep_meeting,
             resolve_echo_line,
+            rename_speaker,
             meeting_notes_commands::meeting_notes_plan,
             meeting_notes_commands::write_meeting_notes,
             meeting_notes_commands::cancel_meeting_notes,
@@ -2367,6 +2388,7 @@ pub fn run() {
             meeting_history_commands::kept_meetings,
             meeting_history_commands::open_kept_meeting,
             meeting_history_commands::rename_kept_meeting,
+            meeting_history_commands::rename_kept_meeting_speaker,
             meeting_history_commands::set_kept_meeting_archived,
             meeting_history_commands::set_auto_prior_context,
             meeting_history_commands::delete_kept_meeting,
@@ -3021,6 +3043,7 @@ mod export_tests {
                     id: "l1".into(),
                     at_ms: 1_000,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "The greenhouse keys are in the blue tin.".into(),
                 },
             )
@@ -3086,6 +3109,7 @@ mod export_tests {
                     id: "l1".into(),
                     at_ms: 65_000,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "Can someone take the fictional\ndraft soon?".into(),
                 },
             )
