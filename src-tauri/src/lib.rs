@@ -2475,6 +2475,7 @@ pub fn run() {
             meeting_history_commands::rename_meeting_folder,
             meeting_history_commands::delete_meeting_folder,
             meeting_history_commands::set_kept_meeting_folder,
+            meeting_history_commands::position_kept_meeting,
             meeting_history_commands::kept_meeting_export_preview,
             meeting_history_commands::export_kept_meeting,
             meeting_history_commands::list_kept_meetings_for_context,

@@ -149,6 +149,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-rename-meeting-folder",
         "allow-delete-meeting-folder",
         "allow-set-kept-meeting-folder",
+        "allow-position-kept-meeting",
         "allow-kept-meeting-export-preview",
         "allow-export-kept-meeting",
         "allow-list-kept-meetings-for-context",

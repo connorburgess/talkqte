@@ -66,6 +66,7 @@ fn main() {
             "rename_meeting_folder",
             "delete_meeting_folder",
             "set_kept_meeting_folder",
+            "position_kept_meeting",
             "kept_meeting_export_preview",
             "export_kept_meeting",
             "list_kept_meetings_for_context",

@@ -51,6 +51,7 @@
     "allow-rename-meeting-folder",
     "allow-delete-meeting-folder",
     "allow-set-kept-meeting-folder",
+    "allow-position-kept-meeting",
     "allow-kept-meeting-export-preview",
     "allow-export-kept-meeting",
     "allow-list-kept-meetings-for-context",

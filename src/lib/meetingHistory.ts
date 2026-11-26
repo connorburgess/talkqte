@@ -17,6 +17,8 @@ export interface KeptSummary {
   durationMs: number;
   sources: MeetingSources;
   hasMeetingNotes: boolean;
+  /** Nonblank user notes or kept model notes; never transcript/cues. */
+  hasNotes: boolean;
   folder?: string;
   archived?: boolean;
 }
@@ -232,4 +234,20 @@ export function failure(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
   return fallback;
+}
+
+/** Position only this item, retaining all other (including hidden) ordering. */
+export function positionKeptMeeting(
+  id: string,
+  folder: string | null,
+  anchorId: string | null,
+  placement: 'before' | 'after',
+) {
+  if (!desktop) return browserOnly();
+  return invoke<KeptSummary>('position_kept_meeting', {
+    id,
+    folder,
+    anchorId,
+    placement,
+  });
 }

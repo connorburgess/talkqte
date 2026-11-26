@@ -284,6 +284,9 @@ pub struct Summary {
     /// Whether the meeting holds kept meeting notes.
     #[serde(default)]
     pub has_meeting_notes: bool,
+    /// Nonblank user notes or kept model notes, never transcript/cues.
+    #[serde(default)]
+    pub has_notes: bool,
     /// Optional folder name; `None` means unfiled at the top.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
@@ -302,6 +305,12 @@ impl Meeting {
             duration_ms: self.content.duration_ms,
             sources: self.content.sources,
             has_meeting_notes: self.content.meeting_notes.is_some(),
+            has_notes: !self.content.notes.trim().is_empty()
+                || self
+                    .content
+                    .meeting_notes
+                    .as_deref()
+                    .is_some_and(|notes| !notes.trim().is_empty()),
             folder: self.folder.clone(),
             archived: self.archived,
         }
@@ -718,6 +727,13 @@ impl Content {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Placement {
+    Before,
+    After,
+}
+
 /// Why a change to the history was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -787,6 +803,9 @@ pub struct Listing {
 struct IndexFile {
     version: u64,
     meetings: Vec<Summary>,
+    /// Absent in older files: migrate their date ordering on read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    order: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     folders: Vec<String>,
 }
@@ -983,7 +1002,7 @@ impl Store {
         let index: IndexFile =
             serde_json::from_value(value).map_err(|_| Availability::Unavailable)?;
         let mut seen = std::collections::HashSet::new();
-        let meetings = index
+        let mut meetings: Vec<Summary> = index
             .meetings
             .into_iter()
             .filter(|entry| valid_id(&entry.id) && seen.insert(entry.id.clone()))
@@ -997,6 +1016,20 @@ impl Store {
             })
             .take(MAX_MEETINGS)
             .collect();
+        meetings.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
+        let ranks: std::collections::HashMap<&str, usize> = index
+            .order
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(rank, id)| (id.as_str(), rank))
+            .collect();
+        meetings.sort_by_key(|meeting| {
+            ranks
+                .get(meeting.id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         let mut seen_folders = std::collections::HashSet::new();
         let folders = index
             .folders
@@ -1028,13 +1061,12 @@ impl Store {
     }
 
     fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
-        let mut entries = entries.to_vec();
-        entries.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
         write_atomic(
             &Self::index_path(root),
             &render(&IndexFile {
                 version: VERSION,
-                meetings: entries,
+                meetings: entries.to_vec(),
+                order: entries.iter().map(|entry| entry.id.clone()).collect(),
                 folders: folders.to_vec(),
             }),
         )
@@ -1104,7 +1136,6 @@ impl Store {
                 Found::Newer | Found::Unreadable => unreadable += 1,
             }
         }
-        meetings.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
         Listing {
             availability: Availability::On,
             meetings,
@@ -1162,7 +1193,7 @@ impl Store {
             content,
         };
         Self::write_meeting(&root, &meeting)?;
-        entries.push(meeting.summary());
+        entries.insert(0, meeting.summary());
         if let Err(error) = Self::write_index(&root, &entries, &folders) {
             let _ = fs::remove_dir_all(root.join(&meeting.id));
             return Err(error);
@@ -1258,25 +1289,70 @@ impl Store {
     /// Assigns a kept meeting to an existing folder, or `None` to unfile it
     /// back to the top.
     pub fn set_folder(&self, id: &str, folder: Option<&str>) -> Result<Summary, Error> {
-        let target = match folder {
-            Some(name) => Some(valid_folder_name(name)?),
-            None => None,
+        self.position(id, folder, None, Placement::Before)
+    }
+
+    /// Move only this meeting. Hidden/archived entries and every other pair
+    /// retain relative order. `None` anchor appends to the destination group.
+    pub fn position(
+        &self,
+        id: &str,
+        folder: Option<&str>,
+        anchor_id: Option<&str>,
+        placement: Placement,
+    ) -> Result<Summary, Error> {
+        if !valid_id(id) || anchor_id.is_some_and(|anchor| !valid_id(anchor) || anchor == id) {
+            return Err(Error::Missing);
+        }
+        let _guard = self.lock.lock();
+        let (root, mut entries, folders) = self.writable()?;
+        let target = folder
+            .map(|name| {
+                let clean = valid_folder_name(name)?;
+                folders
+                    .iter()
+                    .find(|existing| existing.to_lowercase() == clean.to_lowercase())
+                    .cloned()
+                    .ok_or(Error::FolderMissing)
+            })
+            .transpose()?;
+        let position = entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .ok_or(Error::Missing)?;
+        if let Some(anchor) = anchor_id {
+            if !entries
+                .iter()
+                .any(|entry| entry.id == anchor && entry.folder == target)
+            {
+                return Err(Error::Missing);
+            }
+        }
+        let mut meeting = match read_meeting(&Self::meeting_path(&root, id), id) {
+            Found::Meeting(meeting) => *meeting,
+            Found::Newer => return Err(Error::Newer),
+            Found::Unreadable => return Err(Error::Unreadable),
         };
-        self.change(id, |meeting, folders| {
-            let resolved = match target {
-                Some(name) => {
-                    let canonical = folders
-                        .iter()
-                        .find(|existing| existing.to_lowercase() == name.to_lowercase())
-                        .cloned()
-                        .ok_or(Error::FolderMissing)?;
-                    Some(canonical)
-                }
-                None => None,
-            };
-            meeting.folder = resolved;
-            Ok(())
-        })
+        meeting.folder = target.clone();
+        meeting.revision += 1;
+        entries.remove(position);
+        let insert = if let Some(anchor) = anchor_id {
+            let index = entries
+                .iter()
+                .position(|entry| entry.id == anchor)
+                .ok_or(Error::Missing)?;
+            index + usize::from(placement == Placement::After)
+        } else {
+            entries
+                .iter()
+                .rposition(|entry| entry.folder == target)
+                .map_or(entries.len(), |index| index + 1)
+        };
+        let summary = meeting.summary();
+        entries.insert(insert, summary.clone());
+        Self::write_meeting(&root, &meeting)?;
+        Self::write_index(&root, &entries, &folders)?;
+        Ok(summary)
     }
 
     /// Marks a kept meeting as archived (permanently excluded from automatic

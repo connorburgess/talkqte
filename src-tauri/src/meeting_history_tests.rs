@@ -358,6 +358,7 @@ fn out_of_bounds_content_and_a_full_history_are_refused() {
             duration_ms: 0,
             sources: Sources::Microphone,
             has_meeting_notes: false,
+            has_notes: false,
             folder: None,
             archived: false,
         })
@@ -1011,4 +1012,159 @@ fn folder_changes_preserve_archives_and_recover_from_an_uncommitted_file_copy() 
         reopened.suggest_prior_context(&[], None, 3).unwrap().len(),
         1
     );
+}
+
+#[test]
+fn organization_survives_reopen_filters_and_unrelated_updates_without_losing_hidden_order() {
+    let dir = Folder::new("organization");
+    let store = dir.store();
+    store.create_folder("Orchard").unwrap();
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let saved = store
+            .keep(
+                &format!("Fictional {n}"),
+                content(n * 1_000, "Shared fictional content"),
+            )
+            .unwrap();
+        store.set_folder(&saved.id, Some("Orchard")).unwrap();
+        ids.push(saved.id);
+    }
+    store.set_archived(&ids[1], true).unwrap();
+    // Move 5 before visible 3; archived 2 and hidden 4 keep their order.
+    store
+        .position(&ids[4], Some("orchard"), Some(&ids[2]), Placement::Before)
+        .unwrap();
+    drop(store);
+    let store = dir.store();
+    let expected = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[2].clone(),
+        ids[3].clone(),
+    ];
+    let listed_ids = |store: &Store| {
+        store
+            .list(None)
+            .meetings
+            .into_iter()
+            .map(|meeting| meeting.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed_ids(&store), expected);
+    store
+        .position(&ids[0], Some("Orchard"), Some(&ids[3]), Placement::After)
+        .unwrap();
+    assert_eq!(
+        listed_ids(&store),
+        vec![
+            ids[1].clone(),
+            ids[4].clone(),
+            ids[2].clone(),
+            ids[3].clone(),
+            ids[0].clone()
+        ]
+    );
+    store
+        .position(&ids[0], Some("Orchard"), Some(&ids[1]), Placement::Before)
+        .unwrap();
+    store.rename(&ids[2], "Fictional renamed").unwrap();
+    store
+        .update(&ids[0], content(9_000, "Updated fictional words"))
+        .unwrap();
+    assert_eq!(listed_ids(&store), expected);
+    assert!(store.open_meeting(&ids[1]).unwrap().archived);
+    store
+        .position(&ids[2], None, None, Placement::After)
+        .unwrap();
+    assert!(store.open_meeting(&ids[2]).unwrap().folder.is_none());
+    assert_eq!(store.list(None).meetings.len(), 5);
+    // Notes/transcript remain intact, and automatic context ranking stays by date.
+    assert_eq!(
+        store.open_meeting(&ids[3]).unwrap().content,
+        content(4_000, "Shared fictional content")
+    );
+}
+
+#[test]
+fn organization_rejects_foreign_anchor_missing_folder_invalid_ids_and_lab_writes() {
+    let dir = Folder::new("organization-guards");
+    let store = dir.store();
+    store.create_folder("Orchard").unwrap();
+    let a = store.keep("Fictional A", content(1_000, "A")).unwrap();
+    let b = store.keep("Fictional B", content(2_000, "B")).unwrap();
+    store.set_folder(&b.id, Some("Orchard")).unwrap();
+    let before = fs::read(Store::index_path(&dir.root())).unwrap();
+    for result in [
+        store.position(&a.id, None, Some(&b.id), Placement::Before),
+        store.position(&a.id, Some("Missing"), None, Placement::Before),
+        store.position("../invalid", None, None, Placement::After),
+        store.position(&a.id, None, Some(&a.id), Placement::After),
+        store.position(&a.id, None, Some(&"f".repeat(32)), Placement::After),
+    ] {
+        assert!(result.is_err());
+    }
+    assert_eq!(fs::read(Store::index_path(&dir.root())).unwrap(), before);
+    let lab = Store::open(Some(dir.root()), true);
+    assert_eq!(
+        lab.position(&a.id, None, None, Placement::Before),
+        Err(Error::Off)
+    );
+    assert_eq!(fs::read(Store::index_path(&dir.root())).unwrap(), before);
+}
+
+#[test]
+fn legacy_index_order_and_has_notes_derive_from_actual_contents() {
+    let dir = Folder::new("organization-legacy");
+    let store = dir.store();
+    let mut user = content(1_000, "Fictional speech");
+    user.meeting_notes = None;
+    let a = store.keep("User notes", user).unwrap();
+    let mut model = content(2_000, "Fictional speech");
+    model.notes.clear();
+    let b = store.keep("Model notes", model).unwrap();
+    let mut blank = content(3_000, "Transcript is not notes");
+    blank.notes = " \n ".into();
+    blank.meeting_notes = Some(" \t ".into());
+    let c = store.keep("No notes", blank).unwrap();
+    let path = Store::index_path(&dir.root());
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("order");
+    legacy["meetings"].as_array_mut().unwrap().reverse();
+    for summary in legacy["meetings"].as_array_mut().unwrap() {
+        summary.as_object_mut().unwrap().remove("hasNotes");
+    }
+    fs::write(&path, render(&legacy)).unwrap();
+    let listing = dir.store().list(None);
+    assert_eq!(
+        listing
+            .meetings
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        [c.id.as_str(), b.id.as_str(), a.id.as_str()]
+    );
+    assert_eq!(
+        listing
+            .meetings
+            .iter()
+            .map(|m| m.has_notes)
+            .collect::<Vec<_>>(),
+        [false, true, true]
+    );
+    for summary in listing.meetings {
+        assert_eq!(
+            summary.has_notes,
+            store
+                .open_meeting(&summary.id)
+                .unwrap()
+                .context_item()
+                .is_some()
+        );
+    }
+    store
+        .position(&a.id, None, Some(&c.id), Placement::Before)
+        .unwrap();
+    assert_eq!(dir.store().list(None).meetings[0].id, a.id);
 }
