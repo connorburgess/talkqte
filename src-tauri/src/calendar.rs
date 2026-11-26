@@ -280,6 +280,7 @@ pub struct Watcher {
     active: Option<ActivePrompt>,
     seen: Vec<EventKey>,
     next_id: u64,
+    settings_revision: u64,
 }
 
 impl Watcher {
@@ -287,8 +288,25 @@ impl Watcher {
         self.enabled
     }
 
+    /// Reserves the latest setting intent before any asynchronous native work.
+    pub fn begin_settings_change(&mut self) -> u64 {
+        self.settings_revision = self.settings_revision.wrapping_add(1);
+        self.settings_revision
+    }
+
+    pub fn settings_change_is_current(&self, revision: u64) -> bool {
+        revision == self.settings_revision
+    }
+
+    /// A superseded permission/query result must neither enable nor be persisted.
+    pub fn finish_settings_change(&mut self, revision: u64, enabled: bool) -> Option<bool> {
+        self.settings_change_is_current(revision)
+            .then(|| self.set_enabled(enabled))
+    }
+
     /// Enables or disables calendar prompts. Disabling immediately clears any active prompt.
     pub fn set_enabled(&mut self, enabled: bool) -> bool {
+        self.begin_settings_change();
         let changed = self.enabled != enabled;
         self.enabled = enabled;
         if !enabled {

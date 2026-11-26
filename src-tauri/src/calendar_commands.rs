@@ -64,6 +64,41 @@ pub(crate) fn calendar_settings(
     Ok(current_settings(enabled, backend.0.as_ref()))
 }
 
+fn request_is_current(state: &AppState, revision: u64) -> bool {
+    state
+        .0
+        .lock()
+        .is_ok_and(|runtime| runtime.calendar.settings_change_is_current(revision))
+}
+
+fn settings_snapshot(state: &AppState, backend: &dyn CalendarSource) -> Result<Settings, String> {
+    let enabled = state
+        .0
+        .lock()
+        .map_err(|_| "The session is unavailable.")?
+        .calendar
+        .enabled();
+    Ok(current_settings(enabled, backend))
+}
+
+fn read_events_for_request(
+    state: &AppState,
+    backend: &dyn CalendarSource,
+    revision: u64,
+    now: i64,
+) -> Vec<calendar::CalendarEvent> {
+    let may_read = state.0.lock().is_ok_and(|runtime| {
+        runtime.calendar.settings_change_is_current(revision) && !runtime.live_session_open()
+    });
+    if !may_read {
+        return Vec::new();
+    }
+    backend.upcoming_events(
+        now - calendar::IN_PROGRESS_WINDOW_SECS,
+        now + calendar::UPCOMING_WINDOW_SECS,
+    )
+}
+
 /// Turns calendar pre-call prompts on or off and saves the choice. Turning on
 /// asks macOS for Calendar access if not yet determined, and immediately checks
 /// the tight window when connected.
@@ -89,6 +124,12 @@ pub(crate) async fn set_calendar_prompts(
         return Ok(current_settings(false, backend.0.as_ref()));
     }
 
+    let revision = state
+        .0
+        .lock()
+        .map_err(|_| "The session is unavailable.")?
+        .calendar
+        .begin_settings_change();
     let before = backend.0.authorization_status();
     if before == PermissionStatus::Unavailable {
         return Ok(Settings {
@@ -101,6 +142,9 @@ pub(crate) async fn set_calendar_prompts(
     let auth = if before == PermissionStatus::Off {
         let handle = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
+            if !request_is_current(&handle.state::<AppState>(), revision) {
+                return PermissionStatus::Off;
+            }
             handle.state::<CalendarBackend>().0.request_access()
         })
         .await
@@ -109,13 +153,19 @@ pub(crate) async fn set_calendar_prompts(
         before
     };
 
+    // A newer disable/reset wins even if an OS permission request just completed.
+    if !request_is_current(&state, revision) {
+        return settings_snapshot(&state, backend.0.as_ref());
+    }
     let events = if auth == PermissionStatus::Connected {
         let handle = app.clone();
         let now = calendar::now_epoch_secs();
         tauri::async_runtime::spawn_blocking(move || {
-            handle.state::<CalendarBackend>().0.upcoming_events(
-                now - calendar::IN_PROGRESS_WINDOW_SECS,
-                now + calendar::UPCOMING_WINDOW_SECS,
+            read_events_for_request(
+                &handle.state::<AppState>(),
+                handle.state::<CalendarBackend>().0.as_ref(),
+                revision,
+                now,
             )
         })
         .await
@@ -126,7 +176,11 @@ pub(crate) async fn set_calendar_prompts(
 
     {
         let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-        let mut changed = runtime.calendar.set_enabled(true);
+        let Some(mut changed) = runtime.calendar.finish_settings_change(revision, true) else {
+            let enabled = runtime.calendar.enabled();
+            drop(runtime);
+            return Ok(current_settings(enabled, backend.0.as_ref()));
+        };
         crate::settings_commands::record_calendar_prompts(&app, true);
         let busy = runtime.live_session_open();
         if auth == PermissionStatus::Connected {
@@ -252,6 +306,95 @@ mod tests {
         }
         fn upcoming_events(&self, _: i64, _: i64) -> Vec<calendar::CalendarEvent> {
             panic!("disabled Calendar settings must not read events");
+        }
+    }
+
+    #[test]
+    fn a_newer_disable_wins_over_delayed_permission_or_event_results() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::thread;
+
+        struct DelayedSource {
+            delay_permission: bool,
+            started: mpsc::Sender<()>,
+            resume: Mutex<mpsc::Receiver<()>>,
+            fetches: AtomicUsize,
+        }
+        impl DelayedSource {
+            fn delay(&self) {
+                self.started.send(()).unwrap();
+                self.resume.lock().unwrap().recv().unwrap();
+            }
+        }
+        impl CalendarSource for DelayedSource {
+            fn authorization_status(&self) -> PermissionStatus {
+                PermissionStatus::Connected
+            }
+            fn request_access(&self) -> PermissionStatus {
+                if self.delay_permission {
+                    self.delay();
+                }
+                PermissionStatus::Connected
+            }
+            fn upcoming_events(&self, _: i64, _: i64) -> Vec<calendar::CalendarEvent> {
+                self.fetches.fetch_add(1, Ordering::SeqCst);
+                if !self.delay_permission {
+                    self.delay();
+                }
+                vec![calendar::CalendarEvent {
+                    id: "fictional-event".into(),
+                    title: "Fictional Review".into(),
+                    start_epoch_s: 1_700_000_120,
+                    end_epoch_s: 1_700_001_800,
+                    has_meeting_link: true,
+                    is_all_day: false,
+                }]
+            }
+        }
+
+        for delay_permission in [true, false] {
+            let state = Arc::new(AppState(Mutex::new(crate::Runtime::default())));
+            let revision = state.0.lock().unwrap().calendar.begin_settings_change();
+            let (started, waiting) = mpsc::channel();
+            let (resume, resumed) = mpsc::channel();
+            let backend = Arc::new(DelayedSource {
+                delay_permission,
+                started,
+                resume: Mutex::new(resumed),
+                fetches: AtomicUsize::new(0),
+            });
+            let worker_state = state.clone();
+            let worker_backend = backend.clone();
+            let work = thread::spawn(move || {
+                assert_eq!(worker_backend.request_access(), PermissionStatus::Connected);
+                let events = read_events_for_request(
+                    &worker_state,
+                    worker_backend.as_ref(),
+                    revision,
+                    1_700_000_000,
+                );
+                let mut runtime = worker_state.0.lock().unwrap();
+                // This same gate precedes both persistence and prompt application in the command.
+                assert_eq!(
+                    runtime.calendar.finish_settings_change(revision, true),
+                    None
+                );
+                assert!(!runtime.calendar.observe(&events, false, 1_700_000_000));
+            });
+            waiting
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            state.0.lock().unwrap().calendar.set_enabled(false);
+            resume.send(()).unwrap();
+            work.join().unwrap();
+            assert_eq!(
+                backend.fetches.load(Ordering::SeqCst),
+                usize::from(!delay_permission)
+            );
+            let runtime = state.0.lock().unwrap();
+            assert!(!runtime.calendar.enabled());
+            assert!(runtime.calendar.prompt().is_none());
         }
     }
 

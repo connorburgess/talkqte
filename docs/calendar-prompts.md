@@ -31,6 +31,9 @@ local session and kept-meeting record. **Clear** explicitly starts without the
 calendar title. Starting directly from the notebook while an offer is visible
 also uses the matched title. Titles never enter transcription or cue-provider
 requests. Turning Calendar prompts off clears the native pending title and offer.
+A newer disable or reset invalidates in-flight enable requests: a late permission
+reply cannot start an event query, and late query results cannot re-enable or
+persist the setting. An already-running OS request cannot be cancelled.
 The setting is backward compatible with settings version 1 and defaults to false.
 Lab runs use an unavailable source and never query or request Calendar access.
 
