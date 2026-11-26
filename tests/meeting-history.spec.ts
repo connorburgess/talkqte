@@ -634,6 +634,7 @@ test('Meetings supports optional collapsible folders: create, move, collapse/exp
   });
   await expect(clientDetails).toBeVisible();
   await expect(clientDetails).toHaveAttribute('open', '');
+  await expect(clientDetails.locator('summary')).toBeFocused();
   await expect(clientDetails.locator('summary')).toContainText('Client A');
   await expect(clientDetails.locator('summary')).toContainText('0');
 
@@ -715,6 +716,7 @@ test('Meetings supports optional collapsible folders: create, move, collapse/exp
     hasText: 'Orchard Client',
   });
   await expect(renamedDetails).toBeVisible();
+  await expect(renamedDetails.locator('summary')).toBeFocused();
   await expect(
     page
       .getByRole('list', { name: 'Meetings in Orchard Client' })
@@ -734,6 +736,9 @@ test('Meetings supports optional collapsible folders: create, move, collapse/exp
     .click();
 
   await expect(renamedDetails).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'New folder', exact: true }),
+  ).toBeFocused();
   await expect(unfiledList.locator('.history-item')).toHaveCount(3);
   await expect(unfiledList.locator('.history-item').nth(0)).toContainText(
     'Orchard supplier sync',
@@ -782,6 +787,12 @@ test('Meetings folders remain accessible and overflow-free at narrow width', asy
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  const selector = page.getByRole('combobox', {
+    name: 'Folder for Fictional client sync',
+  });
+  const bounds = await selector.boundingBox();
+  expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  expect(bounds?.height).toBeLessThanOrEqual(52);
 });
 
 test('auto-selects relevant recent meetings on launch and Focus match, respects per-session Remove, Archive, and Settings toggle', async ({

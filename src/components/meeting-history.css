@@ -160,6 +160,7 @@
   font-size: 13px;
 }
 .history-row-folder {
+  align-self: center;
   flex: 0 1 180px;
   max-width: 100%;
 }
@@ -290,8 +291,12 @@
   .history-row .history-item {
     flex-basis: auto;
   }
+  .history-row-folder {
+    flex-basis: auto;
+    width: 100%;
+  }
   .history-archive-button {
-    justify-self: start;
+    align-self: flex-start;
   }
 }
 .history-item {

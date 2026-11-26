@@ -79,6 +79,13 @@ export function MeetingHistory({
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const newFolderInput = useRef<HTMLInputElement>(null);
+  const newFolderButton = useRef<HTMLButtonElement>(null);
+  const folderHeaders = useRef(new Map<string, HTMLElement>());
+  const folderSelectors = useRef(new Map<string, HTMLSelectElement>());
+  const focusFolder = (name: string) =>
+    requestAnimationFrame(() => folderHeaders.current.get(name)?.focus());
+  const focusNewFolder = () =>
+    requestAnimationFrame(() => newFolderButton.current?.focus());
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [draftFolderName, setDraftFolderName] = useState('');
   const renameFolderInput = useRef<HTMLInputElement>(null);
@@ -311,6 +318,7 @@ export function MeetingHistory({
       setNewFolderName('');
       setNotice(`Created folder “${createdName}”.`);
       await loadList(query);
+      focusFolder(createdName);
     } catch (problem) {
       setError(failure(problem, 'The folder could not be created.'));
     } finally {
@@ -342,6 +350,7 @@ export function MeetingHistory({
       setDraftFolderName('');
       setNotice(`Renamed folder to “${nextName}”.`);
       await loadList(query);
+      focusFolder(nextName);
     } catch (problem) {
       setError(failure(problem, 'The folder could not be renamed.'));
     } finally {
@@ -367,6 +376,7 @@ export function MeetingHistory({
         `Deleted folder “${target}”. Any meetings inside moved to the top.`,
       );
       await loadList(query);
+      focusNewFolder();
     } catch (problem) {
       setError(failure(problem, 'The folder could not be deleted.'));
     } finally {
@@ -398,6 +408,9 @@ export function MeetingHistory({
       setError(failure(problem, 'The meeting could not be moved.'));
     } finally {
       setBusy(false);
+      requestAnimationFrame(() =>
+        folderSelectors.current.get(meetingId)?.focus(),
+      );
     }
   };
 
@@ -818,6 +831,10 @@ export function MeetingHistory({
         </button>
         {folders.length > 0 && (
           <select
+            ref={(node) => {
+              if (node) folderSelectors.current.set(item.id, node);
+              else folderSelectors.current.delete(item.id);
+            }}
             className="history-row-folder"
             aria-label={`Folder for ${item.title}`}
             value={item.folder ?? ''}
@@ -901,6 +918,7 @@ export function MeetingHistory({
             {!creatingFolder && (
               <button
                 type="button"
+                ref={newFolderButton}
                 className="secondary-button history-new-folder-btn"
                 disabled={busy}
                 onClick={() => {
@@ -941,6 +959,7 @@ export function MeetingHistory({
                     if (event.key === 'Escape') {
                       setCreatingFolder(false);
                       setNewFolderName('');
+                      focusNewFolder();
                     }
                   }}
                 />
@@ -960,6 +979,7 @@ export function MeetingHistory({
                   onClick={() => {
                     setCreatingFolder(false);
                     setNewFolderName('');
+                    focusNewFolder();
                   }}
                 >
                   Cancel
@@ -1057,6 +1077,10 @@ export function MeetingHistory({
                   <div key={folder} className="history-folder-group">
                     <details className="history-folder" open={isOpen}>
                       <summary
+                        ref={(node) => {
+                          if (node) folderHeaders.current.set(folder, node);
+                          else folderHeaders.current.delete(folder);
+                        }}
                         className="history-folder-summary"
                         onClick={(event) => {
                           event.preventDefault();
@@ -1116,6 +1140,7 @@ export function MeetingHistory({
                                   if (event.key === 'Escape') {
                                     setRenamingFolder(null);
                                     setDraftFolderName('');
+                                    focusFolder(folder);
                                   }
                                 }}
                               />
@@ -1135,6 +1160,7 @@ export function MeetingHistory({
                                 onClick={() => {
                                   setRenamingFolder(null);
                                   setDraftFolderName('');
+                                  focusFolder(folder);
                                 }}
                               >
                                 Cancel
@@ -1170,7 +1196,10 @@ export function MeetingHistory({
                                 type="button"
                                 className="secondary-button"
                                 disabled={busy}
-                                onClick={() => setConfirmDeleteFolder(null)}
+                                onClick={() => {
+                                  setConfirmDeleteFolder(null);
+                                  focusFolder(folder);
+                                }}
                               >
                                 Cancel
                               </button>

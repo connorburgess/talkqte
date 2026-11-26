@@ -54,6 +54,7 @@ meetings/                 mode 700
   folder at mode 600, flushed, then renamed over the old one. A keep writes
   the meeting before the list, and removes the meeting again if the list
   cannot be written, so a failure part-way leaves the list as it was.
+- **Folder changes.** Optional names (up to 80 characters, 200 folders) and assignments live in the local index. Older version-1 files without folders remain readable. The atomic index is the assignment commit point: if a rename or deletion stops between file writes, listing, searching, opening, and later updates use the last committed assignment. Folder names never enter provider context or exports. Deleting a folder unfiles its meetings and preserves their archive state.
 - **Bounded and checked on read.** At most 1,000 meetings (a further keep
   asks the person to delete one; nothing is dropped on its own), an index of
   1 MiB, a meeting file of 16 MiB, 50,000 transcript lines of 8,000
@@ -109,11 +110,10 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
 | `kept_meeting_export_preview`    | Builds the Markdown preview for one kept meeting and holds it for save                                                                     |
 | `export_kept_meeting`            | Saves the exact reviewed Markdown for a kept meeting through the native dialog                                                             |
 | `list_kept_meetings_for_context` | Lists kept meetings' notes and meeting notes (never transcripts) for Prior context selection                                               |
-
-| `create_meeting_folder` | Creates an optional local folder name in `index.json` |
-| `rename_meeting_folder` | Renames a folder and updates every meeting assigned to it |
-| `delete_meeting_folder` | Removes a folder and moves its meetings back to unfiled (never deletes meetings) |
-| `set_kept_meeting_folder` | Assigns a kept meeting to a folder or `null` to unfile |
+| `create_meeting_folder`          | Creates an optional local folder name in `index.json`                                                                                      |
+| `rename_meeting_folder`          | Renames a folder and updates every meeting assigned to it                                                                                  |
+| `delete_meeting_folder`          | Removes a folder and moves its meetings back to unfiled (never deletes meetings)                                                           |
+| `set_kept_meeting_folder`        | Assigns a kept meeting to a folder or `null` to unfile                                                                                     |
 
 ## Evidence
 

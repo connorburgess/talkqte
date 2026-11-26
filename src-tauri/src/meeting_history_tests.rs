@@ -435,7 +435,15 @@ fn a_version_one_meeting_file_is_read() {
     let listing = store.list(None);
     assert_eq!(listing.meetings.len(), 1);
     assert!(!listing.meetings[0].has_meeting_notes);
+    assert!(listing.folders.is_empty());
+    assert!(listing.meetings[0].folder.is_none());
+    // The old files remain writable; creating/assigning/deleting a new folder
+    // neither refuses nor drops the legacy meeting.
+    store.create_folder("Fictional project").unwrap();
+    store.set_folder(id, Some("Fictional project")).unwrap();
+    store.delete_folder("Fictional project").unwrap();
     let meeting = store.open_meeting(id).unwrap();
+    assert!(meeting.folder.is_none());
     assert_eq!(meeting.content.sources, Sources::Both);
     assert!(meeting.content.transcript[1].echo);
     assert_eq!(meeting.content.transcript[2].label, Some(Label::Them));
