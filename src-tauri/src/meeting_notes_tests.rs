@@ -179,6 +179,7 @@ fn a_very_long_meeting_is_refused_before_anything_is_sent() {
         id: format!("s{n}"),
         at_ms: n * 1_000,
         speaker: String::new(),
+        speaker_id: None,
         text: "Noted.".into(),
     };
     let within_lines: Vec<_> = (0..1_500u64).map(short_line).collect();
