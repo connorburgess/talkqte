@@ -180,6 +180,7 @@ mod tests {
                     id: format!("line-{}", runtime.engine.state.elapsed_ms),
                     at_ms: runtime.engine.state.elapsed_ms,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "Who will review the garden guide?".into(),
                 },
             )

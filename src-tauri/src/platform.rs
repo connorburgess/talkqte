@@ -25,6 +25,8 @@ pub struct Capabilities {
     pub application_audio: bool,
     /// The "a call seems to be starting" offer: macOS only so far.
     pub call_prompt: bool,
+    /// Opt-in macOS Calendar pre-call prompts (EventKit): macOS only so far.
+    pub calendar_prompts: bool,
     /// The companion follows the person over full-screen apps on every
     /// Space: macOS only so far. Elsewhere it is an always-on-top window
     /// whose stacking depends on the window manager.
@@ -47,6 +49,7 @@ pub const fn capabilities() -> Capabilities {
         microphone: !matches!(os, Os::Other),
         application_audio: macos,
         call_prompt: macos,
+        calendar_prompts: macos,
         companion_over_full_screen: macos,
     }
 }
@@ -67,12 +70,14 @@ mod tests {
         let caps = capabilities();
         assert_eq!(caps.application_audio, cfg!(target_os = "macos"));
         assert_eq!(caps.call_prompt, cfg!(target_os = "macos"));
+        assert_eq!(caps.calendar_prompts, cfg!(target_os = "macos"));
         assert_eq!(
             caps.microphone,
             cfg!(any(target_os = "macos", windows, target_os = "linux"))
         );
         let json = serde_json::to_value(caps).unwrap();
         assert!(json.get("applicationAudio").is_some());
+        assert!(json.get("calendarPrompts").is_some());
         assert!(json.get("companionOverFullScreen").is_some());
         #[cfg(windows)]
         assert_eq!(json["os"], "windows");

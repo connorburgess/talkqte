@@ -42,6 +42,11 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
         settings.call_prompt_auto_start && !lab,
         &settings.call_prompt_not_for,
     );
+    let calendar_on = settings.calendar_prompts && !crate::settings::lab_run();
+    runtime.calendar.set_enabled(calendar_on);
+    if !calendar_on {
+        runtime.pending_calendar_title = None;
+    }
 }
 
 /// Reads the settings file and applies it, before the first snapshot is
@@ -70,6 +75,13 @@ pub(crate) fn record_call_prompt(app: &tauri::AppHandle, watcher: &crate::call_p
         settings.call_prompt_enabled = enabled;
         settings.call_prompt_auto_start = auto_start;
         settings.call_prompt_not_for = not_for;
+    });
+}
+
+/// Saves the opt-in calendar pre-call prompt choice.
+pub(crate) fn record_calendar_prompts(app: &tauri::AppHandle, enabled: bool) {
+    record(app, |settings| {
+        settings.calendar_prompts = enabled;
     });
 }
 

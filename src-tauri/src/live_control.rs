@@ -30,6 +30,10 @@ pub(crate) struct StartTicket {
     /// The capture sources the session will have; the microphone alone
     /// unless the start says otherwise.
     sources: engine::SessionSources,
+    /// Optional explicit meeting title override from the notebook:
+    /// `None` falls back to any pending/active calendar match;
+    /// `Some(title)` uses that exact value (clearing pending/active matches).
+    meeting_title: Option<Option<String>>,
 }
 
 impl StartGate {
@@ -56,6 +60,7 @@ impl StartGate {
             guard: StartGuard(flag),
             operation,
             sources: engine::SessionSources::microphone(),
+            meeting_title: None,
         })
     }
 
@@ -133,6 +138,11 @@ impl StartTicket {
     /// include that application.
     pub(crate) fn with_sources(mut self, sources: engine::SessionSources) -> Self {
         self.sources = sources;
+        self
+    }
+
+    pub(crate) fn with_meeting_title(mut self, title: Option<Option<String>>) -> Self {
+        self.meeting_title = title;
         self
     }
 
@@ -259,6 +269,13 @@ impl Runtime {
         ))]
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
         let mut engine = carry_over(&self.engine, next);
+        let pending_title = self.pending_calendar_title.take();
+        let active_title = self.calendar.take_active_title();
+        let resolved_title = match &ticket.meeting_title {
+            Some(explicit) => explicit.clone(),
+            None => pending_title.or(active_title),
+        };
+        engine.set_meeting_title(resolved_title);
         engine.start()?;
         engine.set_sources(ticket.sources.clone());
         engine.state.auto_started = auto_started;
@@ -560,6 +577,7 @@ mod tests {
                     id: "drained".into(),
                     at_ms: 10,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "Someone should take the checklist.".into(),
                 },
             )
@@ -612,6 +630,35 @@ mod tests {
         assert!(runtime.engine.has_processing_permission());
         assert!(runtime.engine.state.auto_started);
         assert!(runtime.engine.cue_snapshot().auto_started);
+    }
+
+    #[test]
+    fn calendar_title_is_local_and_explicit_edits_or_clear_override_the_match() {
+        for (explicit, expected) in [
+            (None, Some("Fictional Planning")),
+            (
+                Some(Some("Fictional Review".to_string())),
+                Some("Fictional Review"),
+            ),
+            (Some(None), None),
+        ] {
+            let mut runtime = Runtime {
+                pending_calendar_title: Some("Fictional Planning".into()),
+                ..Runtime::default()
+            };
+            let ticket = runtime
+                .begin_live_start()
+                .unwrap()
+                .with_meeting_title(explicit);
+            runtime
+                .install_live_start_engine(&ticket, engine::Engine::live(), false)
+                .unwrap();
+            assert_eq!(runtime.engine.meeting_title(), expected);
+            assert!(runtime.pending_calendar_title.is_none());
+            let companion = serde_json::to_string(&runtime.engine.cue_snapshot()).unwrap();
+            assert!(!companion.contains("Fictional"));
+            assert!(!companion.contains("meetingTitle"));
+        }
     }
 
     #[test]

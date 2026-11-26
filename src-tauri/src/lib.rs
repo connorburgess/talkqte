@@ -16,6 +16,8 @@ pub mod application_audio;
 #[cfg(target_os = "macos")]
 mod application_audio_host;
 pub mod audio_tap;
+pub mod calendar;
+mod calendar_commands;
 pub mod call_prompt;
 mod call_prompt_commands;
 mod capture_control;
@@ -165,6 +167,10 @@ struct Runtime {
     dev_join_declared: bool,
     /// The call-starting prompt: on by default (off in lab runs).
     call_prompt: call_prompt::Watcher,
+    /// Opt-in macOS Calendar pre-call prompt: off unless the person turns it on.
+    calendar: calendar::Watcher,
+    /// Matched calendar event title passed to the next live session start.
+    pending_calendar_title: Option<String>,
     /// End-of-call prompt for the floating companion when a non-empty live
     /// session ends.
     end_prompt: Option<engine::EndPrompt>,
@@ -216,6 +222,8 @@ impl Default for Runtime {
             dev_join_application: None,
             dev_join_declared: false,
             call_prompt: call_prompt::Watcher::default(),
+            calendar: calendar::Watcher::default(),
+            pending_calendar_title: None,
             end_prompt: None,
             ended_source_session: None,
             processing_reviews: processing_reviews::Reviews::default(),
@@ -698,6 +706,29 @@ fn resolve_echo_line(
     }
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     runtime.engine.resolve_echo(&id, keep)?;
+    runtime.export = None;
+    publish(&app, &mut runtime);
+    Ok(())
+}
+
+/// Renames a diarized remote speaker across this session's transcript and
+/// meeting record. Notebook only.
+#[tauri::command]
+fn rename_speaker(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    session: String,
+    speaker_id: u32,
+    name: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Only the notebook can rename speakers.".into());
+    }
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    runtime
+        .engine
+        .rename_session_speaker(&session, speaker_id, &name)?;
     runtime.export = None;
     publish(&app, &mut runtime);
     Ok(())
@@ -1858,14 +1889,16 @@ fn stop_after_cloud_failure(
 async fn start_live_session(
     app: tauri::AppHandle,
     application: Option<String>,
+    title: Option<String>,
 ) -> Result<(), String> {
-    start_live_session_now(app, application, false).await
+    start_live_session_now(app, application, false, title).await
 }
 
 pub(crate) async fn start_live_session_now(
     app: tauri::AppHandle,
     application: Option<String>,
     auto_started: bool,
+    title: Option<String>,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let microphone = app.state::<microphone::Controller>();
@@ -1882,6 +1915,10 @@ pub(crate) async fn start_live_session_now(
             None => None,
             Some(review) => Some(application_source::reviewed(&app, &review)?),
         };
+        let explicit_title = title.map(|raw| {
+            let trimmed = raw.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        });
         let (start, use_system_audio) = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             let has_joining = joining.is_some() || runtime.dev_join_application.is_some();
@@ -1893,7 +1930,10 @@ pub(crate) async fn start_live_session_now(
                 runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app))
             };
             (
-                runtime.begin_live_start()?.with_sources(sources),
+                runtime
+                    .begin_live_start()?
+                    .with_sources(sources)
+                    .with_meeting_title(explicit_title),
                 use_system_audio,
             )
         };
@@ -2348,11 +2388,16 @@ pub fn run() {
         .manage(dictation::Controller::default())
         .manage(menu_bar::Shown::default())
         .manage(login_item::LoginItems(login_item::for_app()))
+        .manage(calendar_commands::CalendarBackend(calendar::for_app()))
         .invoke_handler(tauri::generate_handler![
             #[cfg(target_os = "macos")]
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
             platform::platform_capabilities,
+            calendar_commands::calendar_settings,
+            calendar_commands::set_calendar_prompts,
+            calendar_commands::respond_to_calendar_prompt,
+            calendar_commands::open_calendar_settings,
             call_prompt_commands::call_prompt_settings,
             call_prompt_commands::set_call_prompt,
             call_prompt_commands::clear_call_prompt_apps,
@@ -2380,6 +2425,7 @@ pub fn run() {
             export_markdown,
             set_keep_meeting,
             resolve_echo_line,
+            rename_speaker,
             meeting_notes_commands::meeting_notes_plan,
             meeting_notes_commands::write_meeting_notes,
             meeting_notes_commands::cancel_meeting_notes,
@@ -2395,6 +2441,7 @@ pub fn run() {
             meeting_history_commands::kept_meetings,
             meeting_history_commands::open_kept_meeting,
             meeting_history_commands::rename_kept_meeting,
+            meeting_history_commands::rename_kept_meeting_speaker,
             meeting_history_commands::set_kept_meeting_archived,
             meeting_history_commands::set_auto_prior_context,
             meeting_history_commands::delete_kept_meeting,
@@ -2504,6 +2551,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             application_audio_host::install(app.handle())?;
             call_prompt_commands::install(app.handle());
+            calendar_commands::install(app.handle());
             // The menu bar item, from the first state.
             let first = app
                 .state::<AppState>()
@@ -3053,6 +3101,7 @@ mod export_tests {
                     id: "l1".into(),
                     at_ms: 1_000,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "The greenhouse keys are in the blue tin.".into(),
                 },
             )
@@ -3118,6 +3167,7 @@ mod export_tests {
                     id: "l1".into(),
                     at_ms: 65_000,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "Can someone take the fictional\ndraft soon?".into(),
                 },
             )

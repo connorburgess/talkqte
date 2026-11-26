@@ -76,6 +76,7 @@ pub struct Settings {
     pub overlay_enabled: bool,
     pub panels: Panels,
     pub user_name: Option<String>,
+    /// The "a call seems to be starting" offer: off until turned on.
     pub call_prompt_enabled: bool,
     /// Start a live session automatically when a known call app or browser
     /// activates the microphone. Off by default; never enabled in lab runs.
@@ -83,6 +84,8 @@ pub struct Settings {
     /// Bundle identifiers the call-starting prompt skips; each one is a
     /// known meeting application or browser.
     pub call_prompt_not_for: Vec<String>,
+    /// Opt-in macOS Calendar pre-call prompts: off until turned on.
+    pub calendar_prompts: bool,
     /// Closing the notebook leaves TalkQTE in the menu bar instead of
     /// quitting. Off until the person turns it on.
     pub keep_running_in_menu_bar: bool,
@@ -123,6 +126,7 @@ impl Default for Settings {
             call_prompt_enabled: true,
             call_prompt_auto_start: false,
             call_prompt_not_for: Vec::new(),
+            calendar_prompts: false,
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
             check_for_updates_at_launch: true,
@@ -247,6 +251,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
         call_prompt_enabled,
         call_prompt_auto_start,
         call_prompt_not_for,
+        calendar_prompts: field(&object, "calendarPrompts", defaults.calendar_prompts),
         keep_running_in_menu_bar: field(
             &object,
             "keepRunningInMenuBar",
@@ -283,6 +288,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
             "autoStart": settings.call_prompt_auto_start,
             "notFor": settings.call_prompt_not_for,
         },
+        "calendarPrompts": settings.calendar_prompts,
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
         "checkForUpdatesAtLaunch": settings.check_for_updates_at_launch,
@@ -588,6 +594,7 @@ mod tests {
             call_prompt_enabled: false,
             call_prompt_auto_start: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
+            calendar_prompts: true,
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
             check_for_updates_at_launch: false,
@@ -636,6 +643,7 @@ mod tests {
             [
                 "afterSessionKeep",
                 "autoPriorContext",
+                "calendarPrompts",
                 "callPrompt",
                 "checkForUpdatesAtLaunch",
                 "companionPosition",
@@ -880,6 +888,9 @@ mod tests {
             parse(br#"{"version": 1, "afterSessionKeep": "sometimes", "sensitivity": "quiet"}"#);
         assert_eq!(invalid.after_session_keep, AfterSessionKeep::Auto);
         assert_eq!(invalid.sensitivity, Sensitivity::Quiet);
+        assert!(!invalid.calendar_prompts);
+        let invalid_cal = parse(br#"{"version": 1, "calendarPrompts": "yes"}"#);
+        assert!(!invalid_cal.calendar_prompts);
     }
 
     #[test]

@@ -14,6 +14,7 @@ import type {
 
 const state: Snapshot = {
   revision: 0,
+  session: '0',
   title: '',
   description: '',
   status: 'ready',
@@ -61,6 +62,29 @@ export function command<K extends keyof Commands>(name: K, args?: Commands[K]) {
     case 'set_live_cues_paused':
     case 'turn_off_processing':
       throw new Error('Live sessions are available in the desktop app.');
+    case 'rename_speaker': {
+      const { session, speakerId, name } = args as Commands['rename_speaker'];
+      if (session !== state.session)
+        throw new Error(
+          'This meeting has changed. Open its transcript and try again.',
+        );
+      const normalized = name.trim().replace(/\s+/g, ' ');
+      const fallback = `Speaker ${speakerId + 1}`;
+      const nextNames = { ...(state.speakerNames ?? {}) };
+      if (!normalized || normalized === fallback) {
+        delete nextNames[speakerId];
+      } else {
+        nextNames[speakerId] = normalized;
+      }
+      state.speakerNames = nextNames;
+      const resolved = nextNames[speakerId] ?? fallback;
+      state.transcript = state.transcript.map((segment) =>
+        segment.speakerId === speakerId
+          ? { ...segment, speaker: resolved }
+          : segment,
+      );
+      break;
+    }
     case 'respond_to_cue':
     case 'inspect_cue':
       // The browser preview never has a cue.

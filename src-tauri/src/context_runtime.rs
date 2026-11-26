@@ -174,6 +174,7 @@ mod tests {
                     id: "w1".into(),
                     at_ms: 9_000,
                     speaker: "Speaker 1".into(),
+                    speaker_id: None,
                     text: line.into(),
                 },
             )

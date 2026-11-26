@@ -67,7 +67,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.lab_native_sha == ''
     name: Frontend and browser behavior
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     container:
       # Match the Playwright version resolved in package-lock.json.
       image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe

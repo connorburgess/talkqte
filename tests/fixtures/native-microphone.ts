@@ -67,6 +67,9 @@ let operation = 0;
 let heldStart = new URLSearchParams(location.search).has('hold-start');
 let releaseStart: (() => void) | undefined;
 let startFailure = '';
+let rejectSpeakerRename = new URLSearchParams(location.search).has(
+  'reject-speaker-rename',
+);
 let heldCaptureStop = false;
 let releaseCaptureStop: (() => void) | undefined;
 let heldDrain = false;
@@ -91,6 +94,14 @@ const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
+// Opt-in macOS Calendar prompt settings and answers.
+let calendarSettings = {
+  enabled: false,
+  status: 'off' as 'off' | 'connected' | 'denied' | 'unavailable',
+};
+let calendarGrantResult: 'connected' | 'denied' = 'connected';
+let calendarSettingsOpened = 0;
+const calendarPromptAnswers: unknown[] = [];
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -339,7 +350,7 @@ async function completeCaptureStop() {
     scopeRevision: processing.scopeRevision + 1,
   });
 }
-async function beginStart() {
+async function beginStart(meetingTitle?: string) {
   operation += 1;
   const id = operation.toString(16).padStart(64, '0');
   await sendProcessing({
@@ -360,7 +371,7 @@ async function beginStart() {
     startFailure = '';
     throw new Error(failure);
   }
-  await startLive();
+  await startLive({ meetingTitle });
   if (heldPermission) {
     heldPermission = false;
     await send({
@@ -429,6 +440,7 @@ async function publish(value: Partial<Snapshot>, forceSave = false) {
     ...session,
     ...value,
     revision: Math.max(session.revision, 1_000) + 1,
+    session: String(historySession),
   };
   let historyChanged = false;
   if (value.status === 'running') {
@@ -476,9 +488,13 @@ async function simulate(value: Partial<Snapshot> = {}) {
     cue: null,
   });
 }
-async function startLive(options?: { autoStarted?: boolean }) {
+async function startLive(options?: {
+  autoStarted?: boolean;
+  meetingTitle?: string;
+}) {
   const labRun = new URLSearchParams(location.search).has('lab');
   const autoApprove = !!processing.processor && !labRun;
+  const cleanTitle = options?.meetingTitle?.trim() || undefined;
   await publish({
     live: true,
     simulated: false,
@@ -486,6 +502,7 @@ async function startLive(options?: { autoStarted?: boolean }) {
     autoStarted: !!options?.autoStarted,
     status: 'running',
     title: 'Live session',
+    meetingTitle: cleanTitle,
     description: "Transcript lines from this session's transcription.",
     elapsedMs: 0,
     transcription: { provider: 'Deepgram' },
@@ -618,6 +635,7 @@ mockIPC(
           microphone: true,
           applicationAudio: !other,
           callPrompt: !other,
+          calendarPrompts: !other,
           companionOverFullScreen: !other,
         };
       }
@@ -950,6 +968,7 @@ mockIPC(
           notFor: [],
         };
         updatesState.checkAtLaunch = true;
+        calendarSettings = { enabled: false, status: 'off' };
         historyFixture.resetAfterSessionKeep();
         if (
           historyFixture.refreshAutoContext(
@@ -1080,6 +1099,35 @@ mockIPC(
           await emit('end-prompt:open-meeting', { id: res.openId });
         return;
       }
+      case 'calendar_settings': {
+        const os = new URLSearchParams(location.search).get('platform');
+        if (os === 'windows' || os === 'linux') {
+          return { enabled: false, status: 'unavailable' };
+        }
+        return structuredClone(calendarSettings);
+      }
+      case 'set_calendar_prompts': {
+        const os = new URLSearchParams(location.search).get('platform');
+        if (os === 'windows' || os === 'linux') {
+          return {
+            enabled: false,
+            status: 'unavailable',
+            error: 'Calendar prompts are not available on this platform yet.',
+          };
+        }
+        const enabled = (args as { enabled: boolean }).enabled;
+        calendarSettings = {
+          enabled,
+          status: enabled ? calendarGrantResult : 'off',
+        };
+        return structuredClone(calendarSettings);
+      }
+      case 'open_calendar_settings':
+        calendarSettingsOpened++;
+        return;
+      case 'respond_to_calendar_prompt':
+        calendarPromptAnswers.push(structuredClone(args));
+        return;
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
       case 'set_call_prompt': {
@@ -1135,7 +1183,7 @@ mockIPC(
       }
       case 'start_live_session':
         liveStarts.push(structuredClone(args ?? null));
-        await beginStart();
+        await beginStart((args as { title?: string } | undefined)?.title);
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
@@ -1169,6 +1217,42 @@ mockIPC(
       case 'resolve_echo_line':
         echoAnswers.push(structuredClone(args));
         return;
+      case 'rename_speaker': {
+        if (rejectSpeakerRename) {
+          rejectSpeakerRename = false;
+          throw new Error('The speaker could not be renamed. Try again.');
+        }
+        const {
+          session: expectedSession,
+          speakerId,
+          name,
+        } = args as Commands['rename_speaker'];
+        if (expectedSession !== session.session)
+          throw new Error(
+            'This meeting has changed. Open its transcript and try again.',
+          );
+        const normalized = name.trim().replace(/\s+/g, ' ');
+        if ([...normalized].length > 80 || /[\p{Cc}]/u.test(name)) {
+          throw new Error('Give the speaker a name of up to 80 characters.');
+        }
+        const fallback = `Speaker ${speakerId + 1}`;
+        const nextNames = { ...(session.speakerNames ?? {}) };
+        if (!normalized || normalized === fallback) {
+          delete nextNames[speakerId];
+        } else {
+          nextNames[speakerId] = normalized;
+        }
+        const resolved = nextNames[speakerId] ?? fallback;
+        await publish({
+          speakerNames: nextNames,
+          transcript: session.transcript.map((segment) =>
+            segment.speakerId === speakerId
+              ? { ...segment, speaker: resolved }
+              : segment,
+          ),
+        });
+        return;
+      }
       case 'set_keep_meeting':
         await publish({
           keepMeeting: (args as Commands['set_keep_meeting']).keep,
@@ -1248,6 +1332,20 @@ declare global {
       current: () => string | null;
     };
     permissionTest: typeof permissionFixture;
+    calendarTest: {
+      settings: () => {
+        enabled: boolean;
+        status: 'off' | 'connected' | 'denied' | 'unavailable';
+      };
+      answers: () => unknown[];
+      setGrantResult: (next: 'connected' | 'denied') => void;
+      setSettings: (next: {
+        enabled: boolean;
+        status: 'off' | 'connected' | 'denied' | 'unavailable';
+      }) => void;
+      settingsOpened: () => number;
+      triggerStart: (title: string) => Promise<void>;
+    };
     captureTest: {
       send: typeof sendProcessing;
       state: () => ProcessingSnapshot;
@@ -1347,6 +1445,18 @@ declare global {
 }
 window.permissionTest = permissionFixture;
 window.providerKeysTest = providerKeysFixture.providerKeysTest;
+window.calendarTest = {
+  settings: () => structuredClone(calendarSettings),
+  answers: () => structuredClone(calendarPromptAnswers),
+  setGrantResult: (next) => {
+    calendarGrantResult = next;
+  },
+  setSettings: (next) => {
+    calendarSettings = structuredClone(next);
+  },
+  settingsOpened: () => calendarSettingsOpened,
+  triggerStart: (title: string) => emit('calendar-prompt:start', { title }),
+};
 window.captureTest = {
   presence: () => structuredClone(presence),
   menuBarStart: () => emit('menu-bar:start-session'),

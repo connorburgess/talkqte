@@ -1612,6 +1612,24 @@
         margin-top: 8px;
       }
 
+      .speaker-spec-input {
+        min-height: 44px;
+        width: 160px;
+        max-width: 100%;
+        padding: 2px 8px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: var(--g-paper);
+        color: var(--g-ink);
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .speaker-spec-chip {
+        background: var(--g-band);
+        padding: 2px 8px;
+      }
+
       .sk-password {
         flex: 1 1 220px;
         min-height: 44px;
@@ -1681,6 +1699,24 @@
 
       .panel-card {
         min-width: 0;
+      }
+
+      .speaker-spec-input {
+        min-height: 44px;
+        width: 160px;
+        max-width: 100%;
+        padding: 2px 8px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: var(--g-paper);
+        color: var(--g-ink);
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .speaker-spec-chip {
+        background: var(--g-band);
+        padding: 2px 8px;
       }
 
       .sk-password {
@@ -5906,6 +5942,47 @@
               <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
               runs and <code>off</code> attach no prompt.
             </div>
+            <div class="dock-prompt-spec" id="dock-calendar-prompt">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >7 · Pre-Call Calendar Prompt (Opt-in EventKit)</span
+                >
+                <code>CalendarPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">
+                    Weekly Design Sync starts in 2 min
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Open the notebook with this meeting’s title, or dismiss.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary">Prepare session</span>
+                    <span class="dock-prompt-btn">Dismiss</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CalendarPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> when opt-in macOS Calendar
+              prompts match an upcoming event with a meeting link (~2 min before
+              start, once per occurrence). Carries only prompt ID, sanitized
+              title, and rounded minutes until start; never raw calendar URLs,
+              notes, or attendees. Settings live in
+              <code>src/components/CalendarSettings.tsx</code> (Panel 15).
+              Standard and large text share the dock's existing card rules. The
+              label changes to <code>starting now</code> at start and
+              <code>started 1 min ago</code> afterwards. Both actions disable
+              while submitting. No card is present while off or in a session. In
+              the notebook, Prepare session reveals an editable
+              <code>Meeting title</code> field and <code>Clear</code> control;
+              Start live session applies the title locally and removes the
+              field.
+            </div>
             <div class="dock-prompt-spec">
               <div class="dock-prompt-meta">
                 <span class="mono-label"
@@ -7873,6 +7950,51 @@ Cue processing stopped: -</pre>
                   >
                     The change was not confirmed. Try again.
                   </div>
+
+                  <div class="sk-row-head" style="margin-top: 16px">
+                    <strong class="panel-h3"
+                      >Settings · Calendar &amp; call prompts</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >CalendarSettings.tsx</span
+                    >
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Reads upcoming meeting titles and links locally from Apple
+                    Calendar (which syncs Google Calendar, iCloud, and Outlook)
+                    within a few minutes of start, and never uploads your
+                    calendar or reads attendees.
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="panel-box is-checked">✓</span>
+                    <span>Use macOS Calendar for upcoming meetings</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 6px; font-size: 12px"
+                  >
+                    Connected · Off · Permission denied — enable in System
+                    Settings → Privacy &amp; Security → Calendars · Not
+                    available on this platform yet
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="sk-btn">Open Calendar privacy settings</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Off is unchecked; Connected and Denied keep the opt-in
+                    checked. Denied shows the privacy-settings button.
+                    Unavailable platforms show an explanation without a toggle.
+                    Loading omits the toggle; saving disables it. Errors appear
+                    inline, with the existing setting retained: Calendar
+                    settings are unavailable. / The calendar setting could not
+                    be updated. Try again. / Could not open System Settings.
+                  </p>
                 </div>
               </div>
             </article>
@@ -9718,6 +9840,86 @@ Date: 2026-11-23 · Length: 06:42
                 TalkQTE Pro)</span
               >
             </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="speaker-names-spec" class="sheet" data-dir="c">
+        <div class="wrap">
+          <div class="sheet-head">
+            <div>
+              <div class="sheet-kicker">Built · Transcript</div>
+              <h2>Remote speaker names</h2>
+            </div>
+          </div>
+          <p>
+            Live Notebook and kept Meetings use the same inline editor.
+            Fictional content; speaker numbers are provider guesses and names
+            apply to this meeting only.
+          </p>
+          <div class="km-split">
+            <div class="km-pane">
+              <h3>Default, hover, focus and renamed</h3>
+              <p>
+                <button class="sk-btn speaker-spec-chip">Speaker 1 ✎</button>
+                <button class="sk-btn speaker-spec-chip">Speaker 2 ✎</button>
+                Them · You
+              </p>
+              <p>
+                <button
+                  class="sk-btn speaker-spec-chip"
+                  style="
+                    outline: 3px solid var(--g-amber-ink);
+                    outline-offset: 2px;
+                  "
+                >
+                  Priya Patel ✎
+                </button>
+                00:01
+              </p>
+              <p>I will check the fictional garden gate.</p>
+              <h3>Editing and reset</h3>
+              <label
+                >Speaker 1 name
+                <input
+                  class="speaker-spec-input"
+                  value="Priya Patel"
+                  maxlength="80"
+              /></label>
+              <button class="sk-btn">Save</button>
+              <button class="sk-btn">Cancel</button>
+              <p>
+                Enter or Save commits; leaving saves; Escape or Cancel discards.
+                Clear the name to restore Speaker 1.
+              </p>
+            </div>
+            <div class="km-pane">
+              <h3>Saving, disabled and error recovery</h3>
+              <label
+                >Speaker 1 name
+                <input class="speaker-spec-input" value="Priya Patel" disabled
+              /></label>
+              <button class="sk-btn" disabled>Save</button>
+              <button class="sk-btn" disabled>Cancel</button>
+              <p>Controls are disabled during the request.</p>
+              <label
+                >Speaker 1 name
+                <input
+                  class="speaker-spec-input"
+                  value="Priya Patel"
+                  aria-invalid="true"
+              /></label>
+              <button class="sk-btn">Save</button>
+              <button class="sk-btn">Cancel</button>
+              <p class="panel-error-box">
+                The speaker could not be renamed. Try again.
+              </p>
+              <p>
+                A failed request keeps the draft editable. Success updates every
+                matching line. Numbered and custom names remain keyboard
+                buttons; plain Them and You are not rename controls.
+              </p>
+            </div>
           </div>
         </div>
       </section>

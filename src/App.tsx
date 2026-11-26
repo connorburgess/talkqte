@@ -42,6 +42,7 @@ import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
 import { MeetingHistory } from './components/MeetingHistory';
+import { SpeakerChip } from './components/SpeakerChip';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
 import type { HistoryStatus } from './lib/meetingHistory';
@@ -70,9 +71,11 @@ import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
+import { CalendarPrompt } from './components/CalendarPrompt';
 import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
+import { CalendarSettings } from './components/CalendarSettings';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
 import { UpdateSettings } from './components/UpdateSettings';
@@ -538,6 +541,20 @@ function FloatingQuestion() {
               )
             }
           />
+        ) : state?.calendarPrompt && state.overlayEnabled ? (
+          <CalendarPrompt
+            offer={state.calendarPrompt}
+            busy={busy}
+            large={state.questionSize === 'large'}
+            onAnswer={(answer) =>
+              void run(() =>
+                bridge.command('respond_to_calendar_prompt', {
+                  id: state.calendarPrompt!.id,
+                  answer,
+                }),
+              )
+            }
+          />
         ) : (
           <p className="floating-empty">
             {state?.overlayEnabled === false
@@ -652,6 +669,10 @@ function Notebook() {
   const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
+  const [editingSpeaker, setEditingSpeaker] = useState<{
+    key: string;
+    speakerId: number;
+  } | null>(null);
   useEffect(() => {
     if (startPending && state?.live && state.status === 'running')
       setStartInstalled(true);
@@ -680,17 +701,41 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
+  // Pre-filled meeting title from an opt-in calendar pre-call prompt.
+  const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
+      setView('notebook');
+      if (payload?.title) setMeetingTitle(payload.title);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
+    const explicitTitle = meetingTitle === null ? undefined : meetingTitle;
     void run(async () => {
       setNotice('');
       if (dictation.active) await dictation.stop();
       try {
-        await bridge.command('start_live_session');
+        await bridge.command(
+          'start_live_session',
+          explicitTitle !== undefined ? { title: explicitTitle } : undefined,
+        );
+        setMeetingTitle(null);
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -1869,6 +1914,36 @@ function Notebook() {
                         {platformName(platform)} yet.
                       </p>
                     )}
+                  {state.live && state.meetingTitle && !preparing && (
+                    <p className="small muted">Meeting: {state.meetingTitle}</p>
+                  )}
+                  {!state.live &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing &&
+                    meetingTitle !== null && (
+                      <div className="calendar-meeting-title">
+                        <label htmlFor="pre-call-title">Meeting title</label>
+                        <div className="calendar-meeting-title-row">
+                          <input
+                            id="pre-call-title"
+                            type="text"
+                            maxLength={120}
+                            value={meetingTitle}
+                            disabled={busy}
+                            onChange={(e) => setMeetingTitle(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            disabled={busy}
+                            onClick={() => setMeetingTitle('')}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   {transcriptionStopText(state.transcription) && (
                     <p role="alert">
                       {transcriptionStopText(state.transcription)}
@@ -2148,6 +2223,9 @@ function Notebook() {
                           ? (sourcesHeading(
                               state.sources,
                               state.transcription,
+                              state.transcript.some(
+                                (segment) => segment.speakerId !== undefined,
+                              ),
                             ) ??
                             (sourceApp
                               ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
@@ -2186,7 +2264,41 @@ function Notebook() {
                                 key={segment.id}
                               >
                                 <div className="transcript-segment-head">
-                                  <strong>{segment.speaker}</strong>
+                                  {segment.speakerId !== undefined ? (
+                                    <SpeakerChip
+                                      speakerId={segment.speakerId}
+                                      label={
+                                        state.speakerNames?.[
+                                          segment.speakerId
+                                        ] ?? segment.speaker
+                                      }
+                                      disabled={busy}
+                                      isEditing={
+                                        editingSpeaker?.key === segment.id &&
+                                        editingSpeaker.speakerId ===
+                                          segment.speakerId
+                                      }
+                                      onStartEdit={() =>
+                                        setEditingSpeaker({
+                                          key: segment.id,
+                                          speakerId: segment.speakerId!,
+                                        })
+                                      }
+                                      onCancelEdit={() =>
+                                        setEditingSpeaker(null)
+                                      }
+                                      onRename={async (speakerId, name) => {
+                                        await bridge.command('rename_speaker', {
+                                          session: state.session,
+                                          speakerId,
+                                          name,
+                                        });
+                                        setEditingSpeaker(null);
+                                      }}
+                                    />
+                                  ) : (
+                                    <strong>{segment.speaker}</strong>
+                                  )}
                                   <time>{clockTime(segment.atMs)}</time>
                                   {echo && !echo.kept && (
                                     <span className="transcript-echo-label">
@@ -2840,6 +2952,7 @@ function Notebook() {
               </button>
             </section>
             <CallPromptSetting key={settingsEpoch} />
+            <CalendarSettings key={`calendar-${settingsEpoch}`} />
             <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             {!liveCaptureBar && (
               <MicrophoneControl

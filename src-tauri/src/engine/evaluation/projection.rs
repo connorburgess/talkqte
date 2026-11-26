@@ -639,6 +639,7 @@ mod tests {
                 id: format!("line-{}", e.state.elapsed_ms),
                 at_ms: e.state.elapsed_ms,
                 speaker: "PRIVATE_SPEAKER_SENTINEL".into(),
+                speaker_id: None,
                 text: "PRIVATE_TRANSCRIPT_SENTINEL".into(),
             },
         )

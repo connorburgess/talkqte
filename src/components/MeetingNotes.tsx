@@ -202,7 +202,8 @@ export function MeetingNotes({
         <>
           <p className="meeting-notes-help">
             Summary, decisions, action items, and open questions from this
-            transcript, cited to the lines they came from.
+            transcript, cited to the lines they came from. Remote speaker
+            labels, including names you assigned, are sent with the transcript.
           </p>
           <div className="meeting-notes-controls">
             <button

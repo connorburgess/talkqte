@@ -21,6 +21,7 @@ fn segment(i: usize, at_ms: u64, text: &str) -> Segment {
         id: format!("line-{i}"),
         at_ms,
         speaker: "Speaker".into(),
+        speaker_id: None,
         text: text.into(),
     }
 }

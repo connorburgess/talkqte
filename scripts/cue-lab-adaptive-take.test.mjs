@@ -453,22 +453,37 @@ test('Stop during an active line rejects completion and never judges it', async 
   await f.gate.close();
 });
 
-test('synthesis deadline aborts its work without fallback or playback', async () => {
+test('synthesis deadline aborts its work without fallback or playback', async (t) => {
+  const synthesisStarted = deferred();
+  let synthesisSignal;
   const f = fixture({
     body: { operationMs: 10 },
-    voice: ({ signal }) =>
-      new Promise((_, reject) =>
+    voice: ({ signal }) => {
+      synthesisSignal = signal;
+      synthesisStarted.resolve();
+      return new Promise((_, reject) =>
         signal.addEventListener(
           'abort',
           () => reject(Error('fixture stopped')),
           { once: true },
         ),
-      ),
+      );
+    },
   });
+  // Startup also has an operation deadline. Freeze timers until synthesis is
+  // actually pending, so slow fixture I/O cannot test startup by accident.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
-    await assert.rejects(f.body({ runId: 'fictional-run', run: f.run }), {
-      category: 'deadline',
-    });
+    const stopped = assert.rejects(
+      f.body({ runId: 'fictional-run', run: f.run }),
+      {
+        category: 'deadline',
+      },
+    );
+    await synthesisStarted.promise;
+    t.mock.timers.tick(10);
+    await stopped;
+    assert.equal(synthesisSignal.aborted, true);
     assert.equal(f.trace.includes('play'), false);
     assert.deepEqual(
       f.calls.map((c) => c.role),
