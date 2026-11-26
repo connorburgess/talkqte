@@ -4,6 +4,11 @@
 
 This foundation supports timely context by rejecting late or obsolete proposals before they can reach the cue lifecycle. Structure and source-membership checks do not establish that a proposal is true, relevant, or useful to someone listening.
 
+The live API policy asks for useful new evidence over restatement, with a narrow
+Rust copied-question backstop; see [usefulness policy and limits](own-key-cues.md#usefulness-policy-and-limits).
+The backstop uses only the approved request, with no speaker inference or new
+context retrieval. Authored offline decisions are not live semantic evidence.
+
 ## Input and output
 
 The caller constructs an immutable request with a session ID, eligibility revision, selected sources, and optional existing cue. Each source has a unique ID, revision, text, and provenance: transcript time/speaker or prior-note provider/date/title. Imported notes remain distinguishable from current speech. Source text is untrusted data, not instructions or permission to act.

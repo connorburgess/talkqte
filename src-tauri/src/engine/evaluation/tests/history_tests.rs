@@ -351,7 +351,7 @@ fn old_only_or_expired_cited_anchor_cannot_publish_even_with_fresh_input() {
 fn stop_reset_and_revocation_regrant_discard_an_inflight_history_reply() {
     for reset in [false, true] {
         let mut h = history();
-        h.line("Who owns the checklist?");
+        h.line("The checklist still needs an owner.");
         let old = h.request();
         if reset {
             h.engine.end();
@@ -367,7 +367,9 @@ fn stop_reset_and_revocation_regrant_discard_an_inflight_history_reply() {
             &["transcript:line-1"],
         );
         assert!(h.engine.state.cue.is_none());
-        h.line("Who owns the release?");
+        // A useful new gap, rather than a copied question: this test checks
+        // regrant/replacement, independently of the question-repeat guard.
+        h.line("The release still needs an owner.");
         let next = h.request();
         assert_ne!(old, next);
         h.reply(
@@ -485,7 +487,8 @@ fn append_only_lab_history_accepts_new_speech_but_not_mutation_or_real_buffer_ev
         let mut h = history();
         let link = std::sync::Arc::new(OfflineLink::default());
         h.engine.evaluation.as_mut().unwrap().lab = Some(link.clone());
-        h.line("Who owns the checklist?");
+        // Keep display eligibility independent of copied-question filtering.
+        h.line("The checklist still needs an owner.");
         let original = h.request();
         match change {
             0 => h.line("The checklist is still being discussed."),

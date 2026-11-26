@@ -98,9 +98,8 @@ export function anthropicSchemaFor(input) {
 
 /**
  * The byte-stable system prompt for the live API route: the live evaluator
- * prompt (CUE-REPLAY-01: a positive definition of when to show, without the
- * old "a question already asked but still unanswered" quiet rule, and an
- * explicit rule for the cue-on-screen state) with the glance rule and both
+ * prompt (useful new evidence, quiet for redundant questions/brainstorming,
+ * and an explicit rule for the cue-on-screen state) with the glance rule and
  * field notes always included. userName and earlierCues travel only in the
  * user message, so the system block never changes. The shared compact
  * prompt (Codex and CLI routes) is unchanged.

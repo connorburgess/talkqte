@@ -19,7 +19,7 @@ export const SELECTED_POLICY = 'fictional-lab-selected-prior-v2';
 export const SELECTED_FRAME = 'talkqte.lab.selected.v2';
 export const SELECTED_DESCRIPTOR = 'talkqte.lab.selected.descriptor.v2';
 export const SELECTED_PROMPT =
-  '440a3a947d1cf1842a0e844bf447132463d74f4a1d0ab7ab2efd94211c02b636';
+  '576769095b06c4fdedb76d8c519d4978dc7e8e1f1f84dc6872e485aca10e81a9';
 export const selectedIdentity = () => ({
   contextPolicy: SELECTED_CONTEXT,
   inputContract: SELECTED_INPUT,

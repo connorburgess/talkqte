@@ -24,6 +24,8 @@ This fictional exchange illustrates the intended experience, not a measured resu
 
 The goal is relevant help while you keep listening. Accuracy, semantic understanding, and participation benefits remain unproven; phrase-based rules still run alongside model cues. See the [design and research notes](docs/research.md).
 
+The live model policy favors useful sourced context over repeated questions, treats brainstorming as exploration, and stays quiet without an evidenced reason to interrupt. A narrow local check also suppresses copied questions without new cited speech. These checks do not establish live model quality; see [cue policy and limits](docs/own-key-cues.md#usefulness-policy-and-limits).
+
 ## What the alpha includes
 
 - **A floating companion and live notebook.** Source quotes, Hold, Dismiss, Pause cues, Stop, your own notes, and the transcript. [Controls and limits](docs/glance-mode.md).
