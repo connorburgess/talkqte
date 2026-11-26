@@ -288,6 +288,68 @@ pub(crate) async fn rename_kept_meeting(
 }
 
 #[tauri::command]
+pub(crate) async fn create_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    blocking(&app, move |store| store.create_folder(&name))
+        .await?
+        .map_err(message)
+}
+
+#[tauri::command]
+pub(crate) async fn rename_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    let folders = blocking(&app, move |store| store.rename_folder(&old_name, &new_name))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(folders)
+}
+
+#[tauri::command]
+pub(crate) async fn delete_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<Vec<String>, String> {
+    main_only(&window)?;
+    let folders = blocking(&app, move |store| store.delete_folder(&name))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(folders)
+}
+
+#[tauri::command]
+pub(crate) async fn set_kept_meeting_folder(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    folder: Option<String>,
+) -> Result<Summary, String> {
+    main_only(&window)?;
+    let summary = blocking(&app, move |store| store.set_folder(&id, folder.as_deref()))
+        .await?
+        .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
 pub(crate) async fn delete_kept_meeting(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,

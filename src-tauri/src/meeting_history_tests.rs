@@ -245,6 +245,7 @@ fn damaged_oversized_or_out_of_bounds_files_are_not_shown_and_never_replaced() {
                     id: bad.id.clone(),
                     title: "Bad".into(),
                     revision: 1,
+                    folder: None,
                     content: long,
                 },
             })
@@ -261,6 +262,7 @@ fn damaged_oversized_or_out_of_bounds_files_are_not_shown_and_never_replaced() {
                 id: bad.id.clone(),
                 title: "Bad\u{7}".into(),
                 revision: 1,
+                folder: None,
                 content: content(1, "Fine."),
             },
         }),
@@ -352,9 +354,10 @@ fn out_of_bounds_content_and_a_full_history_are_refused() {
             duration_ms: 0,
             sources: Sources::Microphone,
             has_meeting_notes: false,
+            folder: None,
         })
         .collect();
-    Store::write_index(&folder.root(), &entries).unwrap();
+    Store::write_index(&folder.root(), &entries, &[]).unwrap();
     assert_eq!(store.keep("One more", content(1, "Hi.")), Err(Error::Full));
 }
 
@@ -533,4 +536,148 @@ fn a_kept_meeting_context_item_sends_notes_and_meeting_notes_only_never_transcri
 
     let lab = Store::open(Some(folder.root()), true);
     assert!(matches!(HistorySource::read(&lab), Err(Error::Off)));
+}
+
+#[test]
+fn folders_can_be_created_assigned_renamed_searched_and_deleted_without_losing_meetings() {
+    let folder = Folder::new("folders");
+    let store = folder.store();
+
+    let first = store
+        .keep("Orchard sync", content(1_000, "Gate bolts need checking."))
+        .unwrap();
+    let second = store
+        .keep(
+            "Compost planning",
+            content(2_000, "Legal said review takes two days."),
+        )
+        .unwrap();
+    assert_eq!(first.folder, None);
+    assert_eq!(second.folder, None);
+
+    // Validation and duplicate checks.
+    assert_eq!(store.create_folder("   "), Err(Error::Folder));
+    assert_eq!(
+        store.create_folder(&"f".repeat(MAX_FOLDER_CHARS + 1)),
+        Err(Error::Folder)
+    );
+    assert_eq!(store.create_folder("Client\u{7}"), Err(Error::Folder));
+    assert_eq!(store.create_folder("Client\u{202E}A"), Err(Error::Folder));
+
+    assert_eq!(
+        store.create_folder("  Client   A \n").unwrap(),
+        vec!["Client A"]
+    );
+    assert_eq!(store.create_folder("client a"), Err(Error::FolderExists));
+    assert_eq!(
+        store.create_folder("Project B").unwrap(),
+        vec!["Client A", "Project B"]
+    );
+
+    // Assigning to a missing folder is refused.
+    assert_eq!(
+        store.set_folder(&first.id, Some("Missing")),
+        Err(Error::FolderMissing)
+    );
+
+    // Assign first meeting to Client A (case-insensitive match stores canonical name).
+    let moved = store.set_folder(&first.id, Some("client a")).unwrap();
+    assert_eq!(moved.folder.as_deref(), Some("Client A"));
+    assert_eq!(moved.revision, 2);
+    assert_eq!(
+        store.open_meeting(&first.id).unwrap().folder.as_deref(),
+        Some("Client A")
+    );
+
+    // Updating content preserves the folder assignment.
+    let mut updated_content = content(1_000, "Gate bolts need checking.");
+    updated_content.notes = "Updated notes inside folder.".into();
+    let updated = store.update(&first.id, updated_content).unwrap();
+    assert_eq!(updated.folder.as_deref(), Some("Client A"));
+
+    // Search filters across unfiled and foldered meetings, and matches folder name.
+    let listing = store.list(None);
+    assert_eq!(listing.folders, vec!["Client A", "Project B"]);
+    assert_eq!(listing.meetings.len(), 2);
+    assert_eq!(store.list(Some("Client A")).meetings.len(), 1);
+    assert_eq!(store.list(Some("Client A")).meetings[0].id, first.id);
+    assert_eq!(store.list(Some("ladder")).meetings.len(), 2);
+
+    // Renaming a folder updates all meetings inside it and prevents collisions.
+    assert_eq!(
+        store.rename_folder("Client A", "project b"),
+        Err(Error::FolderExists)
+    );
+    assert_eq!(
+        store.rename_folder("Missing", "Other"),
+        Err(Error::FolderMissing)
+    );
+    assert_eq!(
+        store.rename_folder("Client A", "Client Alpha").unwrap(),
+        vec!["Client Alpha", "Project B"]
+    );
+    assert_eq!(
+        store.open_meeting(&first.id).unwrap().folder.as_deref(),
+        Some("Client Alpha")
+    );
+    assert_eq!(store.open_meeting(&second.id).unwrap().folder, None);
+
+    // Deleting a folder moves its meetings back to unfiled (None) and never deletes them.
+    assert_eq!(
+        store.delete_folder("Client Alpha").unwrap(),
+        vec!["Project B"]
+    );
+    assert_eq!(store.open_meeting(&first.id).unwrap().folder, None);
+    let after_delete = store.list(None);
+    assert_eq!(after_delete.folders, vec!["Project B"]);
+    assert_eq!(after_delete.meetings.len(), 2);
+
+    // Assigning and explicitly unfiling back to None works.
+    store.set_folder(&second.id, Some("Project B")).unwrap();
+    let unfiled = store.set_folder(&second.id, None).unwrap();
+    assert_eq!(unfiled.folder, None);
+
+    // Lab runs neither read nor modify folders.
+    let lab = Store::open(Some(folder.root()), true);
+    assert!(lab.list(None).folders.is_empty());
+    assert_eq!(lab.create_folder("Lab folder"), Err(Error::Off));
+    assert_eq!(lab.rename_folder("Project B", "Lab"), Err(Error::Off));
+    assert_eq!(lab.delete_folder("Project B"), Err(Error::Off));
+    assert_eq!(
+        lab.set_folder(&first.id, Some("Project B")),
+        Err(Error::Off)
+    );
+    assert_eq!(store.list(None).folders, vec!["Project B"]);
+}
+
+#[test]
+fn newer_history_and_invalid_folder_fields_are_handled_safely() {
+    let folder = Folder::new("folder-safety");
+    let store = folder.store();
+    store.create_folder("Client A").unwrap();
+    let kept = store.keep("Fictional sync", content(1, "Hello.")).unwrap();
+    store.set_folder(&kept.id, Some("Client A")).unwrap();
+
+    // A meeting file with an out-of-bounds folder name is marked unreadable and untouched.
+    let meeting_path = folder.root().join(&kept.id).join(MEETING);
+    let mut bad_meeting = store.open_meeting(&kept.id).unwrap();
+    bad_meeting.folder = Some("x".repeat(MAX_FOLDER_CHARS + 1));
+    let bad_bytes = render(&MeetingFileOut {
+        version: VERSION,
+        meeting: &bad_meeting,
+    });
+    fs::write(&meeting_path, &bad_bytes).unwrap();
+    let listing = store.list(None);
+    assert_eq!(listing.unreadable, 1);
+    assert!(listing.meetings.is_empty());
+    assert_eq!(fs::read(&meeting_path).unwrap(), bad_bytes);
+
+    // Newer index version blocks folder mutations without overwriting index.json.
+    let index_path = folder.root().join(INDEX);
+    let newer = br#"{"version": 2, "meetings": [], "folders": ["Future"]}"#;
+    fs::write(&index_path, newer).unwrap();
+    assert_eq!(store.create_folder("Client B"), Err(Error::Newer));
+    assert_eq!(store.rename_folder("Future", "Renamed"), Err(Error::Newer));
+    assert_eq!(store.delete_folder("Future"), Err(Error::Newer));
+    assert_eq!(fs::read(&index_path).unwrap(), newer);
 }

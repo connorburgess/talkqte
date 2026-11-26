@@ -10,7 +10,7 @@ By default, non-empty live sessions save automatically into local **Meetings** h
 - **Ask each time (`ask`).** Under **Settings → Meetings → After a live session ends**, choosing **Ask each time** holds writes until chosen: the floating companion shows **`Meeting ended`** with **Keep meeting** (briefly confirming **`Kept`**), **Write notes**, and **Dismiss**, while Notebook shows **Save this meeting?** below meeting notes with an editable **Title** and optional **Include application name (…)** checkbox. **Not this one**, **Dismiss**, quitting, or starting another session stores nothing.
 - **Don’t save (`off`).** Neither auto-saves nor shows a post-session dock card or notebook offer. The **Settings → Meetings → After a live session ends** preference persists in `settings.json` (and resets to **Save automatically (default)** on **Reset settings**).
 - Once saved (whether auto-saved or manually saved), notes typed afterwards, meeting notes kept afterwards, or echo answers change nothing on disk until the person chooses **Update saved meeting**, which appears only when the session differs from what was saved. A new session ends that link: a saved meeting is only ever updated from the session it came from.
-- **Meetings page (`src/components/MeetingHistory.tsx`).** Lists saved meetings newest first, searches across titles, notes, kept meeting notes, cues and transcript text, opens any meeting read-only (metadata, notes, kept meeting notes, cues shown and transcript with `You`/`Them` and echo labels), renames a meeting inline, deletes one with an inline confirmation, and exports a saved meeting as Markdown through the same preview-before-destination dialog.
+- **Meetings page (`src/components/MeetingHistory.tsx`).** Lists unfiled meetings at the top newest first, lets people optionally create collapsible folder sections (`+ New folder`, rename, or delete a folder without deleting its meetings), searches across titles, folders, notes, kept meeting notes, cues and transcript text (auto-expanding matching folders), opens any meeting read-only (metadata, folder selector, notes, kept meeting notes, cues shown and transcript with `You`/`Them` and echo labels), moves a meeting between folders or back to unfiled, renames a meeting inline, deletes one with an inline confirmation, and exports a saved meeting as Markdown through the same preview-before-destination dialog.
 - **Prior context (`Choose kept meetings`).** Lists kept meetings that have kept meeting notes or the person's own notes (`HistorySource` in `src-tauri/src/meeting_history.rs`) into the same `Prior context` chooser (`Provider::History`). Only the ticked meetings' kept meeting notes and user notes (bounded to 2,000 characters, never transcripts, cues, or application names) enter memory, off unless selected, and appear explicitly in the session's processing review with citations back to that meeting (`prior:history:<id>`).
 - The export review's **Include transcript and shown cues** is unchanged: it only decides whether that one Markdown export includes the transcript and cues.
 
@@ -39,10 +39,12 @@ folder (`~/Library/Application Support/com.talkqte.desktop/` on macOS):
 
 ```text
 meetings/                 mode 700
-  index.json              mode 600: version, and per meeting its id, title,
-                          revision, start, length, sources, whether it has
-                          meeting notes
-  <id>/meeting.json       mode 600: version and the whole meeting
+  index.json              mode 600: version, optional folder list, and per
+                          meeting its id, title, revision, start, length,
+                          sources, whether it has meeting notes, and optional
+                          folder
+  <id>/meeting.json       mode 600: version and the whole meeting (including
+                          optional folder)
 ```
 
 - **No new dependency.** JSON files with `serde_json`; identifiers are 16
@@ -100,6 +102,10 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
 | `kept_meetings`                  | The list, newest first, optionally filtered by a search                                                                |
 | `open_kept_meeting`              | One meeting in full                                                                                                    |
 | `rename_kept_meeting`            | A new title                                                                                                            |
+| `create_meeting_folder`          | Creates an optional local folder name in `index.json`                                                                  |
+| `rename_meeting_folder`          | Renames a folder and updates every meeting assigned to it                                                              |
+| `delete_meeting_folder`          | Removes a folder and moves its meetings back to unfiled (never deletes meetings)                                       |
+| `set_kept_meeting_folder`        | Assigns a kept meeting to a folder or `null` to unfile                                                                 |
 | `delete_kept_meeting`            | Deletes one for good                                                                                                   |
 | `delete_all_kept_meetings`       | Deletes the whole folder                                                                                               |
 | `kept_meeting_export_preview`    | Builds the Markdown preview for one kept meeting and holds it for save                                                 |
@@ -119,7 +125,7 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
   out-of-bounds files neither shown nor rewritten, ids and titles checked before
   any write, full history refused, update keeps the title, lab runs and missing
   folder read and write nothing, every lab setting turns it off, fixed version-1
-  file is read, kept-meeting Markdown export omits unkept fields), and
+  file is read, kept-meeting Markdown export omits unkept fields, and folder create/rename/delete/assign keep unfiled meetings, preserve meetings when deleting a folder, block lab runs, and reject out-of-bounds folder names), and
   `engine::history` (offers nothing before the end or when completely empty,
   drops provider speaker labels, keeps You/Them and echo marks with both sources,
   and keeps the application's name only when asked).
@@ -130,9 +136,11 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
   **Open** opening the kept meeting, **Delete** removing it, **Off** and lab
   runs saving nothing, inline retry on failure, later notes updates via **Update
   kept meeting**, Settings `After a live session ends` selector and **Delete all
-  meetings** confirmation, and the **Meetings** page (newest-first list, search,
-  read-only detail, rename, reviewed Markdown export, delete confirmation,
-  narrow layout, unreadable/newer/lab-run notices).
+  meetings** confirmation, and the **Meetings** page (newest-first unfiled list,
+  optional collapsible folder sections with create/rename/delete and moving
+  meetings without losing any on folder delete, search across folders,
+  read-only detail with folder selector, rename, reviewed Markdown export,
+  delete confirmation, narrow layout, unreadable/newer/lab-run notices).
 - `tests/accessibility.spec.ts`: automated axe-core checks on the **Meetings**
   list, opened meeting detail and export review dialog.
 

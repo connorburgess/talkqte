@@ -217,6 +217,20 @@ test('an ended session, its meeting notes offer and the export review have no au
     page.getByRole('heading', { name: 'Meetings', level: 1 }),
   ).toBeVisible();
   expect(await violations(page), 'meetings list').toEqual([]);
+
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Folder name' }).fill('Client A');
+  await page
+    .getByRole('button', { name: 'Create folder', exact: true })
+    .click();
+  await page
+    .getByRole('combobox', { name: 'Folder for Fictional orchard sync' })
+    .selectOption('Client A');
+  await expect(
+    page.getByRole('list', { name: 'Meetings in Client A' }),
+  ).toBeVisible();
+  expect(await violations(page), 'meetings list with folder').toEqual([]);
+
   await page.getByRole('button', { name: /Fictional orchard sync/ }).click();
   await expect(
     page.getByRole('heading', { name: 'Fictional orchard sync', level: 1 }),

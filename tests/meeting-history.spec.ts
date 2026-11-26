@@ -564,3 +564,210 @@ test('kept meetings can be selected into Prior context (notes only), approved in
   );
   await expect(cue).toContainText('Legal needs two days for review.');
 });
+
+test('Meetings supports optional collapsible folders: create, move, collapse/expand, search, rename, and delete without losing meetings', async ({
+  page,
+}) => {
+  await openNative(page);
+  await page.evaluate(() => {
+    window.historyTest.add({
+      title: 'Orchard supplier sync',
+      startedAtMs: Date.UTC(2026, 10, 4, 14),
+      durationMs: 1_200_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'The cedar posts arrive Monday.' }],
+      notes: 'Check delivery gate.',
+      cues: [],
+    });
+    window.historyTest.add({
+      title: 'Greenhouse roof check',
+      startedAtMs: Date.UTC(2026, 10, 3, 10),
+      durationMs: 900_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'Glass panels need new putty.' }],
+      notes: 'Order glazing clips.',
+      cues: [],
+    });
+    window.historyTest.add({
+      title: 'Potluck seating plan',
+      startedAtMs: Date.UTC(2026, 10, 2, 9),
+      durationMs: 600_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'Put the benches under the oak.' }],
+      notes: 'Bring extra napkins.',
+      cues: [],
+    });
+  });
+
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+
+  // Default zero-clutter state: all meetings unfiled at top, single New folder button.
+  const unfiledList = page.getByRole('list', { name: 'Meetings', exact: true });
+  await expect(unfiledList.getByRole('button')).toHaveCount(3);
+  await expect(
+    page.getByRole('button', { name: 'New folder', exact: true }),
+  ).toBeVisible();
+
+  // Create a folder.
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  const folderInput = page.getByRole('textbox', { name: 'Folder name' });
+  await expect(folderInput).toBeFocused();
+  await folderInput.fill('Client A');
+  await page
+    .getByRole('button', { name: 'Create folder', exact: true })
+    .click();
+
+  const clientDetails = page.locator('details.history-folder', {
+    hasText: 'Client A',
+  });
+  await expect(clientDetails).toBeVisible();
+  await expect(clientDetails).toHaveAttribute('open', '');
+  await expect(clientDetails.locator('summary')).toContainText('Client A');
+  await expect(clientDetails.locator('summary')).toContainText('0');
+
+  // Move two meetings into Client A: one from the row selector, one from detail view.
+  await page
+    .getByRole('combobox', { name: 'Folder for Orchard supplier sync' })
+    .selectOption('Client A');
+  await expect(unfiledList.getByRole('button')).toHaveCount(2);
+  const clientList = page.getByRole('list', { name: 'Meetings in Client A' });
+  await expect(clientList.getByRole('button')).toHaveCount(1);
+  await expect(clientList.getByRole('button').nth(0)).toContainText(
+    'Orchard supplier sync',
+  );
+
+  // Open second meeting and move it inside detail view.
+  await unfiledList
+    .getByRole('button', { name: /Greenhouse roof check/ })
+    .click();
+  await page
+    .getByRole('combobox', { name: 'Folder', exact: true })
+    .selectOption('Client A');
+  await page
+    .getByRole('button', { name: 'Back to meetings', exact: true })
+    .click();
+
+  // Unfiled stays at top (1 meeting), Client A has 2 meetings newest first.
+  await expect(unfiledList.getByRole('button')).toHaveCount(1);
+  await expect(unfiledList.getByRole('button').nth(0)).toContainText(
+    'Potluck seating plan',
+  );
+  await expect(clientList.getByRole('button')).toHaveCount(2);
+  await expect(clientList.getByRole('button').nth(0)).toContainText(
+    'Orchard supplier sync',
+  );
+  await expect(clientList.getByRole('button').nth(1)).toContainText(
+    'Greenhouse roof check',
+  );
+  await expect(clientDetails.locator('summary')).toContainText('2');
+
+  // Collapse and expand the accordion.
+  await clientDetails.locator('summary').click();
+  await expect(clientDetails).not.toHaveAttribute('open', '');
+  await expect(clientList).not.toBeVisible();
+
+  // Searching filters across unfiled and folders, auto-expanding matching folders.
+  const search = page.getByRole('searchbox', { name: 'Search meetings' });
+  await search.fill('glazing');
+  await expect(clientDetails).toHaveAttribute('open', '');
+  await expect(clientList.getByRole('button')).toHaveCount(1);
+  await expect(clientList.getByRole('button').nth(0)).toContainText(
+    'Greenhouse roof check',
+  );
+  await expect(unfiledList).toHaveCount(0);
+
+  // Search matching an unfiled meeting hides folders with zero matches.
+  await search.fill('napkins');
+  await expect(unfiledList.getByRole('button')).toHaveCount(1);
+  await expect(unfiledList.getByRole('button').nth(0)).toContainText(
+    'Potluck seating plan',
+  );
+  await expect(clientDetails).toHaveCount(0);
+
+  // Clearing search restores collapsed state and shows all folders again.
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect(clientDetails).toBeVisible();
+  await expect(clientDetails).not.toHaveAttribute('open', '');
+  await clientDetails.locator('summary').click();
+  await expect(clientDetails).toHaveAttribute('open', '');
+
+  // Rename folder.
+  await page
+    .getByRole('button', { name: 'Rename folder Client A', exact: true })
+    .click();
+  const renameBox = page.getByRole('textbox', { name: 'Folder name' });
+  await expect(renameBox).toBeFocused();
+  await renameBox.fill('Orchard Client');
+  await page.getByRole('button', { name: 'Save folder', exact: true }).click();
+  const renamedDetails = page.locator('details.history-folder', {
+    hasText: 'Orchard Client',
+  });
+  await expect(renamedDetails).toBeVisible();
+  await expect(
+    page
+      .getByRole('list', { name: 'Meetings in Orchard Client' })
+      .getByRole('button'),
+  ).toHaveCount(2);
+
+  // Delete folder: confirmation explicitly reassures meetings stay, and moves them back to unfiled at top.
+  await page
+    .getByRole('button', { name: 'Delete folder Orchard Client', exact: true })
+    .click();
+  const deleteGroup = page.getByRole('group', {
+    name: /Delete folder “Orchard Client”\?/,
+  });
+  await expect(deleteGroup).toContainText('none will be deleted');
+  await deleteGroup
+    .getByRole('button', { name: 'Delete folder', exact: true })
+    .click();
+
+  await expect(renamedDetails).toHaveCount(0);
+  await expect(unfiledList.getByRole('button')).toHaveCount(3);
+  await expect(unfiledList.getByRole('button').nth(0)).toContainText(
+    'Orchard supplier sync',
+  );
+  await expect(unfiledList.getByRole('button').nth(1)).toContainText(
+    'Greenhouse roof check',
+  );
+  await expect(unfiledList.getByRole('button').nth(2)).toContainText(
+    'Potluck seating plan',
+  );
+});
+
+test('Meetings folders remain accessible and overflow-free at narrow width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openNative(page);
+  await page.evaluate(() => {
+    window.historyTest.add({
+      title: 'Fictional unfiled sync',
+      startedAtMs: Date.UTC(2026, 10, 4, 10),
+      durationMs: 600_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'Hello.' }],
+      notes: '',
+      cues: [],
+    });
+    window.historyTest.add({
+      title: 'Fictional client sync',
+      folder: 'Client A',
+      startedAtMs: Date.UTC(2026, 10, 3, 10),
+      durationMs: 600_000,
+      sources: 'microphone',
+      transcript: [{ atMs: 1_000, text: 'Hello.' }],
+      notes: '',
+      cues: [],
+    });
+  });
+
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  await expect(
+    page.getByRole('list', { name: 'Meetings in Client A' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
