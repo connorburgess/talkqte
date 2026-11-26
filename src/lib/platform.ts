@@ -9,6 +9,7 @@ export interface PlatformCapabilities {
   microphone: boolean;
   applicationAudio: boolean;
   callPrompt: boolean;
+  calendarPrompts?: boolean;
   companionOverFullScreen: boolean;
 }
 
@@ -18,6 +19,7 @@ export const macos: PlatformCapabilities = {
   microphone: true,
   applicationAudio: true,
   callPrompt: true,
+  calendarPrompts: true,
   companionOverFullScreen: true,
 };
 

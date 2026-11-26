@@ -4,5 +4,9 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>TalkQTE uses the microphone only after you start it: to show whether there is input and, during a live session you start, to transcribe speech. TalkQTE does not save audio. It sends audio to Deepgram for transcription, with your own Deepgram key, only after you approve that for the session.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>TalkQTE reads upcoming meeting titles and links locally from Apple Calendar only after you turn on Calendar prompts in Settings, to show a pre-call prompt and pre-fill the meeting title. Your calendar stays on this Mac and is never uploaded.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>TalkQTE reads upcoming meeting titles and links locally from Apple Calendar only after you turn on Calendar prompts in Settings, to show a pre-call prompt and pre-fill the meeting title. Your calendar stays on this Mac and is never uploaded.</string>
 </dict>
 </plist>

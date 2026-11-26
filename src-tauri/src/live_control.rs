@@ -30,6 +30,10 @@ pub(crate) struct StartTicket {
     /// The capture sources the session will have; the microphone alone
     /// unless the start says otherwise.
     sources: engine::SessionSources,
+    /// Optional explicit meeting title override from the notebook:
+    /// `None` falls back to any pending/active calendar match;
+    /// `Some(title)` uses that exact value (clearing pending/active matches).
+    meeting_title: Option<Option<String>>,
 }
 
 impl StartGate {
@@ -56,6 +60,7 @@ impl StartGate {
             guard: StartGuard(flag),
             operation,
             sources: engine::SessionSources::microphone(),
+            meeting_title: None,
         })
     }
 
@@ -133,6 +138,11 @@ impl StartTicket {
     /// include that application.
     pub(crate) fn with_sources(mut self, sources: engine::SessionSources) -> Self {
         self.sources = sources;
+        self
+    }
+
+    pub(crate) fn with_meeting_title(mut self, title: Option<Option<String>>) -> Self {
+        self.meeting_title = title;
         self
     }
 
@@ -232,6 +242,13 @@ impl Runtime {
         ))]
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Replace);
         let mut engine = carry_over(&self.engine, crate::live_engine(&ticket.sources));
+        let pending_title = self.pending_calendar_title.take();
+        let active_title = self.calendar.take_active_title();
+        let resolved_title = match &ticket.meeting_title {
+            Some(explicit) => explicit.clone(),
+            None => pending_title.or(active_title),
+        };
+        engine.set_meeting_title(resolved_title);
         engine.start()?;
         engine.set_sources(ticket.sources.clone());
         // The last session's meeting notes, if still being written, stop:

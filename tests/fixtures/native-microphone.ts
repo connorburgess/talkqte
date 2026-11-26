@@ -71,6 +71,14 @@ const applicationAudio: unknown[] = [];
 const liveStarts: unknown[] = [];
 // The call-starting prompt's settings and the companion's answers.
 let callPrompt = { enabled: false, notFor: [] as string[] };
+// Opt-in macOS Calendar prompt settings and answers.
+let calendarSettings = {
+  enabled: false,
+  status: 'off' as 'off' | 'connected' | 'denied' | 'unavailable',
+};
+let calendarGrantResult: 'connected' | 'denied' = 'connected';
+let calendarSettingsOpened = 0;
+const calendarPromptAnswers: unknown[] = [];
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -197,7 +205,7 @@ async function completeCaptureStop() {
     scopeRevision: processing.scopeRevision + 1,
   });
 }
-async function beginStart() {
+async function beginStart(meetingTitle?: string) {
   operation += 1;
   const id = operation.toString(16).padStart(64, '0');
   await sendProcessing({
@@ -218,7 +226,7 @@ async function beginStart() {
     startFailure = '';
     throw new Error(failure);
   }
-  await startLive();
+  await startLive(meetingTitle);
   if (heldPermission) {
     heldPermission = false;
     await send({
@@ -309,13 +317,15 @@ async function simulate(value: Partial<Snapshot> = {}) {
     cue: null,
   });
 }
-async function startLive() {
+async function startLive(meetingTitle?: string) {
+  const cleanTitle = meetingTitle?.trim() || undefined;
   await publish({
     live: true,
     simulated: false,
     cuesPaused: false,
     status: 'running',
     title: 'Live session',
+    meetingTitle: cleanTitle,
     description: "Transcript lines from this session's transcription.",
     elapsedMs: 0,
     // Every live session is transcribed by the launch's cloud provider,
@@ -426,6 +436,7 @@ mockIPC(
           microphone: true,
           applicationAudio: !other,
           callPrompt: !other,
+          calendarPrompts: !other,
           companionOverFullScreen: !other,
         };
       }
@@ -664,6 +675,7 @@ mockIPC(
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
         callPrompt = { enabled: false, notFor: [] };
+        calendarSettings = { enabled: false, status: 'off' };
         historyFixture.resetAfterSessionKeep();
         return;
       case 'respond_to_end_prompt': {
@@ -682,6 +694,35 @@ mockIPC(
           await emit('end-prompt:open-meeting', { id: res.openId });
         return;
       }
+      case 'calendar_settings': {
+        const os = new URLSearchParams(location.search).get('platform');
+        if (os === 'windows' || os === 'linux') {
+          return { enabled: false, status: 'unavailable' };
+        }
+        return structuredClone(calendarSettings);
+      }
+      case 'set_calendar_prompts': {
+        const os = new URLSearchParams(location.search).get('platform');
+        if (os === 'windows' || os === 'linux') {
+          return {
+            enabled: false,
+            status: 'unavailable',
+            error: 'Calendar prompts are not available on this platform yet.',
+          };
+        }
+        const enabled = (args as { enabled: boolean }).enabled;
+        calendarSettings = {
+          enabled,
+          status: enabled ? calendarGrantResult : 'off',
+        };
+        return structuredClone(calendarSettings);
+      }
+      case 'open_calendar_settings':
+        calendarSettingsOpened++;
+        return;
+      case 'respond_to_calendar_prompt':
+        calendarPromptAnswers.push(structuredClone(args));
+        return;
       case 'call_prompt_settings':
         return structuredClone(callPrompt);
       case 'set_call_prompt':
@@ -698,7 +739,7 @@ mockIPC(
         return;
       case 'start_live_session':
         liveStarts.push(structuredClone(args ?? null));
-        await beginStart();
+        await beginStart((args as { title?: string } | undefined)?.title);
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
@@ -810,6 +851,20 @@ declare global {
       current: () => string | null;
     };
     permissionTest: typeof permissionFixture;
+    calendarTest: {
+      settings: () => {
+        enabled: boolean;
+        status: 'off' | 'connected' | 'denied' | 'unavailable';
+      };
+      answers: () => unknown[];
+      setGrantResult: (next: 'connected' | 'denied') => void;
+      setSettings: (next: {
+        enabled: boolean;
+        status: 'off' | 'connected' | 'denied' | 'unavailable';
+      }) => void;
+      settingsOpened: () => number;
+      triggerStart: (title: string) => Promise<void>;
+    };
     captureTest: {
       send: typeof sendProcessing;
       state: () => ProcessingSnapshot;
@@ -887,6 +942,18 @@ declare global {
 }
 window.permissionTest = permissionFixture;
 window.providerKeysTest = providerKeysFixture.providerKeysTest;
+window.calendarTest = {
+  settings: () => structuredClone(calendarSettings),
+  answers: () => structuredClone(calendarPromptAnswers),
+  setGrantResult: (next) => {
+    calendarGrantResult = next;
+  },
+  setSettings: (next) => {
+    calendarSettings = structuredClone(next);
+  },
+  settingsOpened: () => calendarSettingsOpened,
+  triggerStart: (title: string) => emit('calendar-prompt:start', { title }),
+};
 window.captureTest = {
   presence: () => structuredClone(presence),
   menuBarStart: () => emit('menu-bar:start-session'),

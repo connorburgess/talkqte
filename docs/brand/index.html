@@ -5699,6 +5699,41 @@
               <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
               runs and <code>off</code> attach no prompt.
             </div>
+            <div class="dock-prompt-spec" id="dock-calendar-prompt">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >7 · Pre-Call Calendar Prompt (Opt-in EventKit)</span
+                >
+                <code>CalendarPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">
+                    Weekly Design Sync starts in 2 min
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Start listening with this meeting’s title, or dismiss.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary"
+                      >▶ Start listening</span
+                    >
+                    <span class="dock-prompt-btn">Dismiss</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CalendarPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> when opt-in macOS Calendar
+              prompts match an upcoming event with a meeting link (~2 min before
+              start, once per occurrence). Carries only prompt ID, sanitized
+              title, and rounded minutes until start; never raw calendar URLs,
+              notes, or attendees. Settings live in
+              <code>src/components/CalendarSettings.tsx</code> (Panel 15).
+            </div>
           </div>
         </div>
       </section>
@@ -6850,7 +6885,10 @@ Cue processing stopped: -</pre>
                   <div class="sk-input-row">
                     <span
                       class="sk-password"
-                      style="background: var(--g-band); border-color: var(--g-line)"
+                      style="
+                        background: var(--g-band);
+                        border-color: var(--g-line);
+                      "
                       >••••••••••••••••••••••••</span
                     >
                     <span class="sk-btn">Replace key</span>
@@ -7064,7 +7102,9 @@ Cue processing stopped: -</pre>
                 <div class="sk-row">
                   <div class="sk-row-head">
                     <strong style="font-size: 14px">OpenAI</strong>
-                    <span class="sk-chip is-set">✓ Saved · not checked yet</span>
+                    <span class="sk-chip is-set"
+                      >✓ Saved · not checked yet</span
+                    >
                   </div>
                   <p
                     class="panel-muted"
@@ -7474,6 +7514,36 @@ Cue processing stopped: -</pre>
                   >
                     The change was not confirmed. Try again.
                   </div>
+
+                  <div class="sk-row-head" style="margin-top: 16px">
+                    <strong class="panel-h3"
+                      >Settings · Calendar &amp; call prompts</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >CalendarSettings.tsx</span
+                    >
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Reads upcoming meeting titles and links locally from Apple
+                    Calendar (which syncs Google Calendar, iCloud, and Outlook)
+                    within a few minutes of start, and never uploads your
+                    calendar or reads attendees.
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="panel-box is-checked">✓</span>
+                    <span>Use macOS Calendar for upcoming meetings</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 6px; font-size: 12px"
+                  >
+                    Connected · Off · Permission denied — enable in System
+                    Settings → Privacy &amp; Security → Calendars · Not
+                    available on this platform yet
+                  </p>
                 </div>
               </div>
             </article>
@@ -9401,9 +9471,8 @@ Date: 2026-11-23 · Length: 06:42
                 <code>KeepInHistory.tsx</code> (after a non-empty live session
                 ends: kept confirmation or Update kept meeting under default
                 <code>auto</code>, or keep offer under <code>ask</code>; a
-                failed keep),
-                <code>EndPrompt.tsx</code> (floating dock card on non-empty live
-                session stop: <code>Meeting saved</code> /
+                failed keep), <code>EndPrompt.tsx</code> (floating dock card on
+                non-empty live session stop: <code>Meeting saved</code> /
                 <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
                 list, search, empty/unreadable/lab-run/newer states, read-only

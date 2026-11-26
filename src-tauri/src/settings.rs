@@ -76,10 +76,13 @@ pub struct Settings {
     pub overlay_enabled: bool,
     pub panels: Panels,
     pub user_name: Option<String>,
+    /// The "a call seems to be starting" offer: off until turned on.
     pub call_prompt_enabled: bool,
     /// Bundle identifiers the call-starting prompt skips; each one is a
     /// known meeting application or browser.
     pub call_prompt_not_for: Vec<String>,
+    /// Opt-in macOS Calendar pre-call prompts: off until turned on.
+    pub calendar_prompts: bool,
     /// Closing the notebook leaves TalkQTE in the menu bar instead of
     /// quitting. Off until the person turns it on.
     pub keep_running_in_menu_bar: bool,
@@ -112,6 +115,7 @@ impl Default for Settings {
             user_name: None,
             call_prompt_enabled: false,
             call_prompt_not_for: Vec::new(),
+            calendar_prompts: false,
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
         }
@@ -229,6 +233,7 @@ pub fn parse(bytes: &[u8]) -> Settings {
         user_name,
         call_prompt_enabled,
         call_prompt_not_for,
+        calendar_prompts: field(&object, "calendarPrompts", defaults.calendar_prompts),
         keep_running_in_menu_bar: field(
             &object,
             "keepRunningInMenuBar",
@@ -258,6 +263,7 @@ pub fn render(settings: &Settings) -> Vec<u8> {
             "enabled": settings.call_prompt_enabled,
             "notFor": settings.call_prompt_not_for,
         },
+        "calendarPrompts": settings.calendar_prompts,
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
     });
@@ -553,6 +559,7 @@ mod tests {
             user_name: Some("Zoë O’Neil-Ray".into()),
             call_prompt_enabled: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
+            calendar_prompts: true,
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
         }
@@ -598,6 +605,7 @@ mod tests {
             keys,
             [
                 "afterSessionKeep",
+                "calendarPrompts",
                 "callPrompt",
                 "companionPosition",
                 "cueModelOverride",
@@ -818,5 +826,8 @@ mod tests {
             parse(br#"{"version": 1, "afterSessionKeep": "sometimes", "sensitivity": "quiet"}"#);
         assert_eq!(invalid.after_session_keep, AfterSessionKeep::Auto);
         assert_eq!(invalid.sensitivity, Sensitivity::Quiet);
+        assert!(!invalid.calendar_prompts);
+        let invalid_cal = parse(br#"{"version": 1, "calendarPrompts": "yes"}"#);
+        assert!(!invalid_cal.calendar_prompts);
     }
 }

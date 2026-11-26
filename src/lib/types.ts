@@ -58,6 +58,9 @@ export interface CueSnapshot {
   /** A call seems to be starting: the offer, when the person turned the
    * prompt on. */
   callPrompt?: import('../components/CallPrompt').CallPromptOffer;
+  /** An upcoming calendar meeting pre-call prompt, when opt-in Calendar
+   * prompts are enabled. Narrow metadata only. */
+  calendarPrompt?: import('../components/CalendarPrompt').CalendarPromptOffer;
   /** An ended non-empty live session prompt: counts and keep status only. */
   endPrompt?: EndPrompt;
   cuesPaused: boolean;
@@ -98,6 +101,8 @@ export interface Snapshot extends CueSnapshot {
   keepMeeting?: boolean;
   /** Session-only: where this session's model-written notes stand. */
   meetingNotes?: import('./meetingNotes').MeetingNotesPhase;
+  /** Optional default meeting title from an opt-in calendar match. */
+  meetingTitle?: string;
 }
 export type EndPromptState = 'ask' | 'saved' | 'kept';
 export type EndPromptAction =
@@ -127,11 +132,15 @@ export type Commands = {
   resolve_echo_line: { id: string; keep: boolean };
   /** `application`: the review of an application to hear beside the
    * microphone; the session declares it, and its review names both. */
-  start_live_session: { application?: string } | undefined;
+  start_live_session: { application?: string; title?: string } | undefined;
   stop_live_session: undefined;
   respond_to_call_prompt: {
     id: number;
     answer: import('../components/CallPrompt').CallPromptAnswer;
+  };
+  respond_to_calendar_prompt: {
+    id: number;
+    answer: import('../components/CalendarPrompt').CalendarPromptAnswer;
   };
   respond_to_end_prompt: {
     session: number;

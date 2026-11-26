@@ -296,6 +296,7 @@ impl Runtime {
         let mut snapshot = self.engine.cue_snapshot();
         snapshot.source_session = self.source_session_running();
         snapshot.call_prompt = self.call_prompt.prompt().cloned();
+        snapshot.calendar_prompt = self.calendar.prompt().cloned();
         snapshot.end_prompt = self
             .end_prompt
             .as_ref()

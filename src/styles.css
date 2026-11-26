@@ -1432,6 +1432,42 @@ svg {
   color: var(--danger);
   font-size: 13px;
 }
+.calendar-permission-status {
+  margin-top: var(--space-8);
+}
+.calendar-meeting-title {
+  margin-top: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.calendar-meeting-title label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.calendar-meeting-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.calendar-meeting-title-row input {
+  flex: 1 1 220px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+}
+.calendar-meeting-title-row .secondary-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
 .visually-hidden {
   position: absolute;
   width: 1px;
