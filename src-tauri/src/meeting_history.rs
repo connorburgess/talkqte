@@ -129,6 +129,8 @@ const AUTO_CONTEXT_STOP_WORDS: &[&str] = &[
 const MAX_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_MEETING_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_TITLE_CHARS: usize = 200;
+pub const MAX_FOLDER_CHARS: usize = 80;
+pub const MAX_FOLDERS: usize = 200;
 const MAX_LINES: usize = 50_000;
 const MAX_LINE_CHARS: usize = 8_000;
 /// The notebook's own limit on the person's notes.
@@ -210,8 +212,11 @@ pub struct Content {
 pub struct Meeting {
     pub id: String,
     pub title: String,
-    /// Increases on every change: rename, update, or archive.
+    /// Increases on every change: rename, folder move, update, or archive.
     pub revision: u64,
+    /// Optional folder name; `None` means unfiled at the top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     /// Excluded from automatic prior-context selection when true.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -232,6 +237,9 @@ pub struct Summary {
     /// Whether the meeting holds kept meeting notes.
     #[serde(default)]
     pub has_meeting_notes: bool,
+    /// Optional folder name; `None` means unfiled at the top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     /// Whether the meeting is archived (excluded from auto prior context).
     #[serde(default)]
     pub archived: bool,
@@ -247,13 +255,15 @@ impl Meeting {
             duration_ms: self.content.duration_ms,
             sources: self.content.sources,
             has_meeting_notes: self.content.meeting_notes.is_some(),
+            folder: self.folder.clone(),
             archived: self.archived,
         }
     }
 
-    /// Whether every word of `query` appears in the title or the text.
+    /// Whether every word of `query` appears in the title, folder, or text.
     fn matches(&self, words: &[String]) -> bool {
         let haystack = std::iter::once(self.title.as_str())
+            .chain(self.folder.as_deref())
             .chain(std::iter::once(self.content.notes.as_str()))
             .chain(self.content.meeting_notes.as_deref())
             .chain(
@@ -531,6 +541,32 @@ pub fn default_title(started_at_ms: u64) -> String {
     }
 }
 
+fn has_bidi_override(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(
+            c,
+            '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{061C}'
+        )
+    })
+}
+
+/// A folder name as the person typed it, trimmed and bounded, or why it
+/// cannot be one.
+pub fn valid_folder_name(name: &str) -> Result<String, Error> {
+    if has_controls(name) || has_bidi_override(name) {
+        return Err(Error::Folder);
+    }
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() || chars(&name) > MAX_FOLDER_CHARS {
+        return Err(Error::Folder);
+    }
+    Ok(name)
+}
+
 /// A title as the person typed it, or why it cannot be one.
 pub fn valid_title(title: &str) -> Result<String, Error> {
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -607,6 +643,10 @@ pub enum Error {
     Newer,
     Full,
     Title,
+    Folder,
+    FolderExists,
+    FolderMissing,
+    FoldersFull,
     Missing,
     Unreadable,
     Write,
@@ -620,6 +660,10 @@ impl Error {
             Error::Newer => "Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.",
             Error::Full => "You have kept 1,000 meetings. Delete one to keep another.",
             Error::Title => "Give the meeting a title of up to 200 characters.",
+            Error::Folder => "Give the folder a name of up to 80 characters.",
+            Error::FolderExists => "A folder with that name already exists.",
+            Error::FolderMissing => "That folder no longer exists.",
+            Error::FoldersFull => "You can create up to 200 folders. Delete one to create another.",
             Error::Missing => "That meeting is no longer kept.",
             Error::Unreadable => "That meeting could not be read.",
             Error::Write => "The meeting could not be saved. Nothing was changed.",
@@ -647,6 +691,7 @@ pub enum Availability {
 pub struct Listing {
     pub availability: Availability,
     pub meetings: Vec<Summary>,
+    pub folders: Vec<String>,
     /// Kept meetings that could not be read or were saved by a newer
     /// version; not shown, never changed, removed by Delete all.
     pub unreadable: usize,
@@ -656,6 +701,8 @@ pub struct Listing {
 struct IndexFile {
     version: u64,
     meetings: Vec<Summary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folders: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -706,6 +753,10 @@ fn read_meeting(path: &Path, id: &str) -> Found {
         Ok(meeting)
             if meeting.id == id
                 && valid_title(&meeting.title).as_deref() == Ok(meeting.title.as_str())
+                && meeting
+                    .folder
+                    .as_deref()
+                    .is_none_or(|folder| valid_folder_name(folder).as_deref() == Ok(folder))
                 && meeting.content.valid() =>
         {
             Found::Meeting(Box::new(meeting))
@@ -829,12 +880,12 @@ impl Store {
         root.join(id).join(MEETING)
     }
 
-    /// The index's entries, or `Newer`/`Unreadable`. A missing index is an
-    /// empty history.
-    fn read_index(&self, root: &Path) -> Result<Vec<Summary>, Availability> {
+    /// The index's entries and folders, or `Newer`/`Unreadable`. A missing
+    /// index is an empty history.
+    fn read_index(&self, root: &Path) -> Result<(Vec<Summary>, Vec<String>), Availability> {
         let path = Self::index_path(root);
         if !path.exists() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         let bytes = read_bounded(&path, MAX_INDEX_BYTES).ok_or(Availability::Unavailable)?;
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| Availability::Unavailable)?;
@@ -846,22 +897,39 @@ impl Store {
         let index: IndexFile =
             serde_json::from_value(value).map_err(|_| Availability::Unavailable)?;
         let mut seen = std::collections::HashSet::new();
-        Ok(index
+        let meetings = index
             .meetings
             .into_iter()
             .filter(|entry| valid_id(&entry.id) && seen.insert(entry.id.clone()))
             .filter(|entry| valid_title(&entry.title).as_deref() == Ok(entry.title.as_str()))
+            .map(|mut entry| {
+                entry.folder = entry
+                    .folder
+                    .as_deref()
+                    .and_then(|folder| valid_folder_name(folder).ok());
+                entry
+            })
             .take(MAX_MEETINGS)
-            .collect())
+            .collect();
+        let mut seen_folders = std::collections::HashSet::new();
+        let folders = index
+            .folders
+            .into_iter()
+            .filter_map(|folder| valid_folder_name(&folder).ok())
+            .filter(|folder| seen_folders.insert(folder.to_lowercase()))
+            .take(MAX_FOLDERS)
+            .collect();
+        Ok((meetings, folders))
     }
 
-    /// The root and current entries for a change, refusing a newer history.
-    fn writable(&self) -> Result<(PathBuf, Vec<Summary>), Error> {
+    /// The root, current entries, and folders for a change, refusing a newer
+    /// history.
+    fn writable(&self) -> Result<(PathBuf, Vec<Summary>, Vec<String>), Error> {
         let root = self.root.clone().ok_or(Error::Off)?;
         match self.read_index(&root) {
-            Ok(entries) => {
+            Ok((entries, folders)) => {
                 self.set_availability(Availability::On);
-                Ok((root, entries))
+                Ok((root, entries, folders))
             }
             Err(Availability::Newer) => {
                 self.set_availability(Availability::Newer);
@@ -873,7 +941,7 @@ impl Store {
         }
     }
 
-    fn write_index(root: &Path, entries: &[Summary]) -> Result<(), Error> {
+    fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
         let mut entries = entries.to_vec();
         entries.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
         write_atomic(
@@ -881,6 +949,7 @@ impl Store {
             &render(&IndexFile {
                 version: VERSION,
                 meetings: entries,
+                folders: folders.to_vec(),
             }),
         )
         .map_err(|_| Error::Write)
@@ -898,7 +967,7 @@ impl Store {
     }
 
     /// The kept meetings, newest first, matching `query` (every word, in the
-    /// title or the text, ignoring case) when one is given.
+    /// title, folder or text, ignoring case) when one is given.
     pub fn list(&self, query: Option<&str>) -> Listing {
         let _guard = self.lock.lock();
         let availability = self.availability();
@@ -906,13 +975,14 @@ impl Store {
             return Listing {
                 availability,
                 meetings: vec![],
+                folders: vec![],
                 unreadable: 0,
             };
         };
-        let entries = match self.read_index(&root) {
-            Ok(entries) => {
+        let (entries, folders) = match self.read_index(&root) {
+            Ok(data) => {
                 self.set_availability(Availability::On);
-                entries
+                data
             }
             Err(availability) => {
                 if availability == Availability::Newer {
@@ -921,6 +991,7 @@ impl Store {
                 return Listing {
                     availability: self.availability(),
                     meetings: vec![],
+                    folders: vec![],
                     unreadable: usize::from(availability != Availability::Newer),
                 };
             }
@@ -936,7 +1007,10 @@ impl Store {
         let mut unreadable = 0;
         for entry in entries {
             match read_meeting(&Self::meeting_path(&root, &entry.id), &entry.id) {
-                Found::Meeting(meeting) => {
+                Found::Meeting(mut meeting) => {
+                    // The atomic index is the folder commit point. A failed
+                    // multi-file rename/delete may leave a newer file copy.
+                    meeting.folder = entry.folder;
                     if words.is_empty() || meeting.matches(&words) {
                         meetings.push(meeting.summary());
                     }
@@ -948,6 +1022,7 @@ impl Store {
         Listing {
             availability: Availability::On,
             meetings,
+            folders,
             unreadable,
         }
     }
@@ -959,14 +1034,22 @@ impl Store {
         }
         let _guard = self.lock.lock();
         let root = self.root.clone().ok_or(Error::Off)?;
-        match self.read_index(&root) {
-            Ok(entries) if entries.iter().any(|entry| entry.id == id) => {}
-            Ok(_) => return Err(Error::Missing),
+        let folder = match self.read_index(&root) {
+            Ok((entries, _)) => {
+                entries
+                    .into_iter()
+                    .find(|entry| entry.id == id)
+                    .ok_or(Error::Missing)?
+                    .folder
+            }
             Err(Availability::Newer) => return Err(Error::Newer),
             Err(_) => return Err(Error::Unreadable),
-        }
+        };
         match read_meeting(&Self::meeting_path(&root, id), id) {
-            Found::Meeting(meeting) => Ok(*meeting),
+            Found::Meeting(mut meeting) => {
+                meeting.folder = folder;
+                Ok(*meeting)
+            }
             Found::Newer => Err(Error::Newer),
             Found::Unreadable => Err(Error::Unreadable),
         }
@@ -980,7 +1063,7 @@ impl Store {
             return Err(Error::Invalid);
         }
         let _guard = self.lock.lock();
-        let (root, mut entries) = self.writable()?;
+        let (root, mut entries, folders) = self.writable()?;
         if entries.len() >= MAX_MEETINGS {
             return Err(Error::Full);
         }
@@ -988,12 +1071,13 @@ impl Store {
             id: new_id()?,
             title,
             revision: 1,
+            folder: None,
             archived: false,
             content,
         };
         Self::write_meeting(&root, &meeting)?;
         entries.push(meeting.summary());
-        if let Err(error) = Self::write_index(&root, &entries) {
+        if let Err(error) = Self::write_index(&root, &entries, &folders) {
             let _ = fs::remove_dir_all(root.join(&meeting.id));
             return Err(error);
         }
@@ -1003,13 +1087,13 @@ impl Store {
     fn change(
         &self,
         id: &str,
-        apply: impl FnOnce(&mut Meeting) -> Result<(), Error>,
+        apply: impl FnOnce(&mut Meeting, &[String]) -> Result<(), Error>,
     ) -> Result<Summary, Error> {
         if !valid_id(id) {
             return Err(Error::Missing);
         }
         let _guard = self.lock.lock();
-        let (root, mut entries) = self.writable()?;
+        let (root, mut entries, folders) = self.writable()?;
         let Some(position) = entries.iter().position(|entry| entry.id == id) else {
             return Err(Error::Missing);
         };
@@ -1018,30 +1102,55 @@ impl Store {
             Found::Newer => return Err(Error::Newer),
             Found::Unreadable => return Err(Error::Unreadable),
         };
-        apply(&mut meeting)?;
+        meeting.folder = entries[position].folder.clone();
+        apply(&mut meeting, &folders)?;
         if !meeting.content.valid() {
             return Err(Error::Invalid);
         }
         meeting.revision += 1;
         Self::write_meeting(&root, &meeting)?;
         entries[position] = meeting.summary();
-        Self::write_index(&root, &entries)?;
+        Self::write_index(&root, &entries, &folders)?;
         Ok(meeting.summary())
     }
 
     pub fn rename(&self, id: &str, title: &str) -> Result<Summary, Error> {
         let title = valid_title(title)?;
-        self.change(id, |meeting| {
+        self.change(id, |meeting, _| {
             meeting.title = title;
             Ok(())
         })
     }
 
     /// Replaces a kept meeting's content with a newer copy of the same
-    /// session, keeping its title.
+    /// session, keeping its title and folder.
     pub fn update(&self, id: &str, content: Content) -> Result<Summary, Error> {
-        self.change(id, |meeting| {
+        self.change(id, |meeting, _| {
             meeting.content = content;
+            Ok(())
+        })
+    }
+
+    /// Assigns a kept meeting to an existing folder, or `None` to unfile it
+    /// back to the top.
+    pub fn set_folder(&self, id: &str, folder: Option<&str>) -> Result<Summary, Error> {
+        let target = match folder {
+            Some(name) => Some(valid_folder_name(name)?),
+            None => None,
+        };
+        self.change(id, |meeting, folders| {
+            let resolved = match target {
+                Some(name) => {
+                    let canonical = folders
+                        .iter()
+                        .find(|existing| existing.to_lowercase() == name.to_lowercase())
+                        .cloned()
+                        .ok_or(Error::FolderMissing)?;
+                    Some(canonical)
+                }
+                None => None,
+            };
+            meeting.folder = resolved;
             Ok(())
         })
     }
@@ -1049,10 +1158,125 @@ impl Store {
     /// Marks a kept meeting as archived (permanently excluded from automatic
     /// prior-context selection) or restores it.
     pub fn set_archived(&self, id: &str, archived: bool) -> Result<Summary, Error> {
-        self.change(id, |meeting| {
+        self.change(id, |meeting, _| {
             meeting.archived = archived;
             Ok(())
         })
+    }
+
+    /// Creates a new empty folder in the history index.
+    pub fn create_folder(&self, name: &str) -> Result<Vec<String>, Error> {
+        let name = valid_folder_name(name)?;
+        let _guard = self.lock.lock();
+        let (root, entries, mut folders) = self.writable()?;
+        if folders
+            .iter()
+            .any(|existing| existing.to_lowercase() == name.to_lowercase())
+        {
+            return Err(Error::FolderExists);
+        }
+        if folders.len() >= MAX_FOLDERS {
+            return Err(Error::FoldersFull);
+        }
+        folders.push(name);
+        Self::write_index(&root, &entries, &folders)?;
+        Ok(folders)
+    }
+
+    /// Renames a folder and updates every readable meeting assigned to it.
+    pub fn rename_folder(&self, old_name: &str, new_name: &str) -> Result<Vec<String>, Error> {
+        let old_name = valid_folder_name(old_name).map_err(|_| Error::FolderMissing)?;
+        let new_name = valid_folder_name(new_name)?;
+        let _guard = self.lock.lock();
+        let (root, mut entries, mut folders) = self.writable()?;
+        let Some(old_idx) = folders
+            .iter()
+            .position(|existing| existing.to_lowercase() == old_name.to_lowercase())
+        else {
+            return Err(Error::FolderMissing);
+        };
+        if folders
+            .iter()
+            .enumerate()
+            .any(|(i, existing)| i != old_idx && existing.to_lowercase() == new_name.to_lowercase())
+        {
+            return Err(Error::FolderExists);
+        }
+        let canonical_old = folders[old_idx].clone();
+        if canonical_old == new_name {
+            return Ok(folders);
+        }
+        let mut loaded = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            let in_folder = entry
+                .folder
+                .as_deref()
+                .is_some_and(|f| f.to_lowercase() == canonical_old.to_lowercase());
+            if !in_folder {
+                continue;
+            }
+            match read_meeting(&Self::meeting_path(&root, &entry.id), &entry.id) {
+                Found::Meeting(meeting) => loaded.push((index, Some(*meeting))),
+                Found::Newer => return Err(Error::Newer),
+                Found::Unreadable => loaded.push((index, None)),
+            }
+        }
+        for (index, meeting) in loaded {
+            if let Some(mut meeting) = meeting {
+                meeting.folder = Some(new_name.clone());
+                meeting.revision += 1;
+                Self::write_meeting(&root, &meeting)?;
+                entries[index] = meeting.summary();
+            } else {
+                entries[index].folder = Some(new_name.clone());
+            }
+        }
+        folders[old_idx] = new_name;
+        Self::write_index(&root, &entries, &folders)?;
+        Ok(folders)
+    }
+
+    /// Deletes a folder without deleting any meetings; meetings inside it move
+    /// back to `None` (unfiled at the top).
+    pub fn delete_folder(&self, name: &str) -> Result<Vec<String>, Error> {
+        let name = valid_folder_name(name).map_err(|_| Error::FolderMissing)?;
+        let _guard = self.lock.lock();
+        let (root, mut entries, mut folders) = self.writable()?;
+        let Some(idx) = folders
+            .iter()
+            .position(|existing| existing.to_lowercase() == name.to_lowercase())
+        else {
+            return Err(Error::FolderMissing);
+        };
+        let canonical = folders[idx].clone();
+        let mut loaded = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            let in_folder = entry
+                .folder
+                .as_deref()
+                .is_some_and(|f| f.to_lowercase() == canonical.to_lowercase());
+            if !in_folder {
+                continue;
+            }
+            match read_meeting(&Self::meeting_path(&root, &entry.id), &entry.id) {
+                Found::Meeting(meeting) => loaded.push((index, Some(*meeting))),
+                Found::Newer => return Err(Error::Newer),
+                Found::Unreadable => loaded.push((index, None)),
+            }
+        }
+        for (index, meeting) in loaded {
+            if let Some(mut meeting) = meeting {
+                meeting.folder = None;
+                meeting.revision += 1;
+                Self::write_meeting(&root, &meeting)?;
+                entries[index] = meeting.summary();
+            } else {
+                entries[index].folder = None;
+            }
+        }
+        folders.remove(idx);
+        Self::write_index(&root, &entries, &folders)?;
+        Ok(folders)
     }
 
     /// Selects up to `max_items` non-archived kept meetings that actually hold
@@ -1070,7 +1294,7 @@ impl Store {
             return Err(Error::Off);
         };
         let mut entries = match self.read_index(&root) {
-            Ok(entries) => {
+            Ok((entries, _)) => {
                 self.set_availability(Availability::On);
                 entries
             }
@@ -1175,7 +1399,7 @@ impl Store {
             return Err(Error::Missing);
         }
         let _guard = self.lock.lock();
-        let (root, mut entries) = self.writable()?;
+        let (root, mut entries, folders) = self.writable()?;
         let Some(position) = entries.iter().position(|entry| entry.id == id) else {
             return Err(Error::Missing);
         };
@@ -1184,7 +1408,7 @@ impl Store {
             fs::remove_dir_all(&folder).map_err(|_| Error::Write)?;
         }
         entries.remove(position);
-        Self::write_index(&root, &entries)
+        Self::write_index(&root, &entries, &folders)
     }
 
     /// Deletes every kept meeting, including any that could not be read or
@@ -1193,7 +1417,9 @@ impl Store {
     pub fn delete_all(&self) -> Result<usize, Error> {
         let _guard = self.lock.lock();
         let root = self.root.clone().ok_or(Error::Off)?;
-        let count = self.read_index(&root).map_or(0, |entries| entries.len());
+        let count = self
+            .read_index(&root)
+            .map_or(0, |(entries, _)| entries.len());
         if root.exists() {
             fs::remove_dir_all(&root).map_err(|_| Error::Write)?;
         }

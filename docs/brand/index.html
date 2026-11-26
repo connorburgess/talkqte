@@ -5930,10 +5930,11 @@
               <code>src/components/CallEndPrompt.tsx</code> (styled alongside
               <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
               in <code>FloatingQuestion</code> while a live session is running
-              when macOS call-end detection attaches <code>callEndPrompt</code>
-              after a previously active call’s camera and non-TalkQTE mic go
-              inactive for 18 seconds. Two controls: <code>Stop &amp; save</code>
-              (stops and saves the session) and <code>Keep recording</code>
+              when macOS call-end detection attaches
+              <code>callEndPrompt</code> after a previously active call’s camera
+              and non-TalkQTE mic go inactive for 18 seconds. Two controls:
+              <code>Stop &amp; save</code> (stops and saves the session) and
+              <code>Keep recording</code>
               (dismisses the prompt and continues recording).
             </div>
           </div>
@@ -9795,8 +9796,9 @@ Date: 2026-11-23 · Length: 06:42
                 (<code>KeepInHistory.tsx</code>, <code>EndPrompt.tsx</code>,
                 <code>MeetingHistory.tsx</code>,
                 <code>MeetingHistorySettings.tsx</code>): built plainly with
-                shared tokens and no one-sided borders; tiles for every state
-                are still to be added here. Component boundaries:
+                shared tokens and no one-sided borders; the folder states below
+                cover the organization controls. Other history states still
+                await dedicated specimens. Component boundaries:
                 <code>KeepInHistory.tsx</code> (after a non-empty live session
                 ends: kept confirmation or Update kept meeting under default
                 <code>auto</code>, or keep offer under <code>ask</code>; a
@@ -9804,11 +9806,11 @@ Date: 2026-11-23 · Length: 06:42
                 non-empty live session stop: <code>Meeting saved</code> /
                 <code>Meeting ended</code> / <code>Kept</code>),
                 <code>MeetingHistory.tsx</code> (**Meetings** page: newest-first
-                list, search, Archive/Unarchive with
-                <code>Show archived</code> filter,
+                unfiled list, optional collapsible folder sections, search,
                 empty/unreadable/lab-run/newer states, read-only meeting detail
-                with notes/meeting notes/cues/transcript, inline rename, inline
-                delete confirmation, and export review dialog), and
+                with folder selector and notes/meeting notes/cues/transcript,
+                inline rename, Archive/Unarchive with Show archived filter,
+                inline delete confirmation, and export review dialog), and
                 <code>MeetingHistorySettings.tsx</code> (Settings → Kept
                 meetings: the <code>After a live session ends</code> choice
                 (<code>auto</code> default, <code>ask</code>, <code>off</code>),
@@ -9817,6 +9819,24 @@ Date: 2026-11-23 · Length: 06:42
                 confirmation, and the lab-run, unavailable and newer-version
                 states). Styles: <code>meeting-history.css</code>.
               </p>
+              <h3 id="meeting-folder-states">Meeting folders · built states</h3>
+              <p class="studio-line">
+                Fictional content. Shared app tokens and meeting-history styles
+                cover unfiled, open/collapsed/empty folders, create,
+                rename/error, delete confirmation, search/results, busy, move
+                error/success, archived and long-name states. Focus and hover
+                use the app styles. Native VoiceOver remains unverified.
+              </p>
+              <iframe
+                title="Meeting folder states"
+                src="meeting-folders.html"
+                style="
+                  width: 100%;
+                  height: 2300px;
+                  border: 1px solid var(--g-line);
+                  border-radius: 8px;
+                "
+              ></iframe>
             </div>
           </div>
         </div>
