@@ -6,6 +6,7 @@
 pub mod cloud;
 pub mod deepgram;
 pub mod elevenlabs;
+pub mod vad;
 
 /// 16 kHz mono samples, the format every capture path hands to transcription.
 pub const SAMPLE_RATE: usize = 16_000;
