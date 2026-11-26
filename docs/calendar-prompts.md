@@ -17,7 +17,7 @@ retains only an occurrence identifier, sanitized title, timestamps, and a meetin
 link boolean. It uses the existing objc2, Foundation, and block2 dependencies with
 a small EventKit framework bridge; no dependency or license notice is added.
 
-About two minutes before start, one dock card offers **Start listening** and
+About two minutes before start, one dock card offers **Prepare session** and
 **Dismiss**. The same occurrence is offered once per app launch (a recurring
 meeting's next occurrence is separate). A prompt disappears when the event ends,
 changes outside the window, loses its meeting link, permission is revoked, or a
@@ -25,7 +25,7 @@ session starts. The companion receives only a numeric prompt ID, title bounded
 to 120 characters, and rounded minutes until start. It never receives event IDs,
 URLs, descriptions, locations, attendees, or the live session's meeting title.
 
-**Start listening** opens the notebook with an editable default meeting title;
+**Prepare session** opens the notebook with an editable default meeting title;
 it does not start capture. **Start live session** then uses that title for the
 local session and kept-meeting record. **Clear** explicitly starts without the
 calendar title. Starting directly from the notebook while an offer is visible

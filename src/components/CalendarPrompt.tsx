@@ -1,4 +1,4 @@
-import { Play } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
 
 /** Narrow pre-call prompt from opt-in local Calendar awareness. */
 export interface CalendarPromptOffer {
@@ -42,7 +42,7 @@ export function CalendarPrompt({
         {headingText(offer)}
       </p>
       <p className="call-prompt-detail">
-        Start listening with this meeting’s title, or dismiss.
+        Open the notebook with this meeting’s title, or dismiss.
       </p>
       <div className="call-prompt-actions">
         <button
@@ -50,8 +50,8 @@ export function CalendarPrompt({
           disabled={busy}
           onClick={() => onAnswer('start')}
         >
-          <Play size={13} fill="currentColor" aria-hidden="true" />
-          Start listening
+          <BookOpen size={13} aria-hidden="true" />
+          Prepare session
         </button>
         <button
           className="secondary-button"

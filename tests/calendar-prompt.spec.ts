@@ -77,7 +77,7 @@ test('non-macOS platforms show Calendar prompts as not available yet', async ({
   }
 });
 
-test('floating dock shows pre-call prompt with Start listening / Dismiss and fits companion bounds', async ({
+test('floating dock shows pre-call prompt with Prepare session / Dismiss and fits companion bounds', async ({
   page,
 }) => {
   await companion(page);
@@ -118,7 +118,7 @@ test('floating dock shows pre-call prompt with Start listening / Dismiss and fit
     .analyze();
   expect(axe.violations).toEqual([]);
 
-  await card.getByRole('button', { name: 'Start listening' }).click();
+  await card.getByRole('button', { name: 'Prepare session' }).click();
   await card.getByRole('button', { name: 'Dismiss' }).click();
   expect(await page.evaluate(() => window.calendarTest.answers())).toEqual([
     { id: 11, answer: 'start' },
