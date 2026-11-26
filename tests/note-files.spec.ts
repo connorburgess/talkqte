@@ -68,7 +68,7 @@ test('a Markdown note without a date waits for the date the person enters, then 
     })
     .click();
   await expect(panel(page).getByRole('listitem')).toHaveCount(0);
-  await expect(panel(page)).toContainText('No prior notes selected.');
+  await expect(panel(page)).toContainText('0 notes selected');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
@@ -163,7 +163,7 @@ for (const [kind, message] of [
       page.getByRole('dialog', { name: /Choose notes/ }),
     ).toBeHidden();
     await expect(panel(page).getByRole('listitem')).toHaveCount(0);
-    await expect(panel(page)).toContainText('No prior notes selected.');
+    await expect(panel(page)).toContainText('0 notes selected');
     await expect(panel(page)).toContainText(
       'add a Markdown (.md), text (.txt), or TalkQTE JSON notes file',
     );
@@ -184,7 +184,7 @@ test('local path fallback lists notes without importing and clears the transient
   const input = panel(page).getByLabel('Local notes file path');
   await expect(panel(page)).toContainText('excluded from Markdown exports');
   await expect(panel(page)).toContainText(
-    'never sent to a cue provider without approval.',
+    'Review and approve them separately before sending them to a cue provider.',
   );
   await input.fill('/fictional/notes.md');
   await panel(page).getByRole('button', { name: 'Cancel file path' }).click();

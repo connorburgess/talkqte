@@ -1,0 +1,26 @@
+# Prior context availability
+
+Saving a meeting and selecting prior context are separate actions. Saved meetings can contain a transcript without any written notes or kept meeting notes. Transcripts, cues and application names are not reused as prior context.
+
+Open **Prior context** in the notebook to see why nothing is selected. When the selection is empty, the interface reads the existing kept-meeting listing and history settings as metadata. It does not open a saved meeting, import notes, generate meeting notes or approve processing. The listing's `hasNotes` flag means nonblank written notes or kept model-written meeting notes; `hasMeetingNotes` alone does not establish whether written notes exist.
+
+| State                                                 | Explanation and next step                                                                                                                                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No readable saved entries and no unreadable entries   | No saved meetings yet. Add a notes file or Granola notes. For a future session, save written notes or explicitly generate and keep meeting notes after the session.                                                                        |
+| Readable saved entries but none with notes            | Saving a transcript alone does not add reusable notes. Review saved meetings, or add a notes file or Granola notes.                                                                                                                        |
+| Notes exist only in archived meetings                 | Archived meetings are excluded from automatic selection. Their notes remain manually selectable through **Choose kept meetings**; review **Meetings** to unarchive them.                                                                   |
+| Automatic prior context is off                        | Existing notes remain available for manual review and selection. **Settings → Meetings** controls automatic selection. Turning automatic saving off does not make existing saved history unavailable.                                      |
+| Notes available but none selected                     | Choose kept meetings to review and add notes. A removed note is not silently restored for this session. This is not presented as "no matching meetings": automatic selection falls back to recent notes when there are no keyword matches. |
+| Lab run, newer history format, or unavailable storage | The interface names the availability reason and offers an appropriate alternative. It never treats unavailable history as empty or changes it to make it readable.                                                                         |
+| Unreadable entries                                    | The count is disclosed. An entirely unreadable listing is not described as empty; with a partial listing, the explanation applies only to readable entries.                                                                                |
+| Metadata check fails                                  | Retry the check, try the existing notes chooser, or use a file or Granola. A failed metadata check does not import anything.                                                                                                               |
+
+The chooser starts with no notes ticked. **Import selected** imports only the chosen written/kept meeting notes into this session; it neither starts model-note generation nor expands a provider grant. Sending prior notes to a cue provider still requires the separate processing review and approval. File and Granola controls remain available under their existing rules.
+
+The notebook supplies optional **Review saved meetings** and **Review meeting settings** navigation actions. Without those callbacks, the same destinations remain in the notebook navigation. Closing the disclosure, a history-change event or a newer check retires older metadata results, so an obsolete reply cannot restore an incorrect empty state.
+
+## Acceptance and remaining gaps
+
+Fictional component/browser checks cover metadata-only reads, no saved meetings, saved entries without notes, archived manual import, automatic-selection off versus automatic-saving off, available-but-unselected notes, unreadable/newer/lab/unavailable states, failure/retry, stale replies, narrow layout, keyboard focus and automated accessibility. They use in-memory stand-ins and perform no provider calls or real history reads.
+
+The next acceptance check is the combined notebook/Meetings journey on the integrated build: inspect a fictional saved transcript-only meeting, add usable notes through an existing explicit workflow, return to Prior context, review/import the notes, and separately approve the exact sources for processing. Native webview and VoiceOver behavior remain unverified. Metadata availability is not evidence of semantic relevance or live-model cue quality.

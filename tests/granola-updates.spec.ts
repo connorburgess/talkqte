@@ -253,7 +253,7 @@ test('a note removed during a check is not restored, and removing all ends the c
   await expect(notes(page)).toHaveCount(0);
   await expect(button(page, 'Stop check')).toHaveCount(0);
   await page.evaluate(() => window.granolaTest.releaseCheck());
-  await expect(context(page)).toContainText('No prior notes selected.');
+  await expect(context(page)).toContainText('0 notes selected');
   await expect(notes(page)).toHaveCount(0);
 });
 
