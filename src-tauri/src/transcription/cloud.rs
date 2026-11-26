@@ -824,14 +824,64 @@ pub const OWN_KEY_MINUTE_CAP: u32 = 480;
 /// they, even if invalid), otherwise a stored key for the chosen provider.
 pub fn source() -> Result<Source, ReadinessFailure> {
     let chosen = provider();
-    source_for(
-        dev_selected().then(settings),
-        chosen,
+    source_with_lookup(dev_selected().then(settings), chosen, || {
         crate::provider_keys::global()
             .status()
             .of(chosen.key_provider())
-            .state,
+            .state
+    })
+}
+
+fn source_with_lookup(
+    dev: Option<Result<Settings, SttFailure>>,
+    chosen: Provider,
+    lookup: impl FnOnce() -> crate::provider_keys::KeyState,
+) -> Result<Source, ReadinessFailure> {
+    // Explicit development configuration must never touch the person's store.
+    let key = if dev.is_some() {
+        crate::provider_keys::KeyState::NotSet
+    } else {
+        lookup()
+    };
+    source_for(dev, chosen, key)
+}
+
+#[cfg(test)]
+mod metadata_short_circuit_tests {
+    use super::*;
+
+    #[test]
+    fn unusable_explicit_development_source_does_not_query_personal_key_metadata() {
+        assert_eq!(
+            source_with_lookup(
+                Some(Err(SttFailure::Settings)),
+                Provider::Deepgram,
+                || panic!("personal metadata queried")
+            ),
+            Err(ReadinessFailure::Settings)
+        );
+    }
+}
+
+/// Reuse one fresh metadata snapshot throughout a readiness operation.
+pub(crate) fn source_with_status(
+    status: &crate::provider_keys::KeysStatus,
+) -> Result<Source, ReadinessFailure> {
+    let chosen = provider();
+    source_for(
+        dev_selected().then(settings),
+        chosen,
+        status.of(chosen.key_provider()).state,
     )
+}
+
+pub(crate) fn selected_with_status(status: &crate::provider_keys::KeysStatus) -> bool {
+    use crate::provider_keys::KeyState;
+    dev_selected()
+        || matches!(
+            status.of(provider().key_provider()).state,
+            KeyState::Set | KeyState::Rejected
+        )
 }
 
 fn source_for(
@@ -942,6 +992,15 @@ pub enum ReadinessFailure {
 /// No token or key content is read and no connection is opened.
 pub fn readiness() -> Result<(), ReadinessFailure> {
     match source()? {
+        Source::Dev(settings) => readiness_for(Ok(settings)),
+        Source::OwnKey(_) => Ok(()),
+    }
+}
+
+pub(crate) fn readiness_with_status(
+    status: &crate::provider_keys::KeysStatus,
+) -> Result<(), ReadinessFailure> {
+    match source_with_status(status)? {
         Source::Dev(settings) => readiness_for(Ok(settings)),
         Source::OwnKey(_) => Ok(()),
     }

@@ -51,7 +51,7 @@ npm run desktop
 
 `npm run dev` opens the notebook at `http://127.0.0.1:1420` as a browser-only preview. It has no native capture or live provider session. `npm run build` checks and builds the frontend; `npm test` runs browser behavior tests.
 
-For platform prerequisites, unsigned Windows/Ubuntu test artifacts, and their limits, see the [platform guide](docs/platforms.md). Signed installation, updates, and recovery remain [release-readiness work](docs/release-path.md); mobile companions are a [future direction](docs/mobile.md).
+For platform prerequisites, unsigned Windows/Ubuntu test artifacts, and their limits, see the [platform guide](docs/platforms.md). Local ad-hoc rebuilds can repeat macOS access prompts because their code identity changes; [prompt and key-store limits](docs/provider-keys.md#repeated-macos-access-prompts) explain the distinction. Signed installation, updates, and recovery remain [release-readiness work](docs/release-path.md); mobile companions are a [future direction](docs/mobile.md).
 
 ## Live session
 

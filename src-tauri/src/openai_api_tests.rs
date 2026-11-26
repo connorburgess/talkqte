@@ -294,3 +294,37 @@ fn unsent_network_error_charges_nothing() {
     assert_eq!(r.evaluate(&request(None)), Err(Failure::Unreachable));
     assert_eq!(r.usage.snapshot().spent_micro_usd, Some(0));
 }
+
+#[test]
+fn cancellation_during_key_access_sends_no_request() {
+    let transport = Scripted::default();
+    let (entered, observed) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let read: KeySource = Box::new(move || {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(Secret::for_test(KEY))
+    });
+    let adapter = OpenAiApi::new(
+        built_in_model(),
+        transport.clone(),
+        read,
+        Box::new(|| {}),
+        Arc::new(CueUsageTracker::new(
+            CueProvider::OpenAi,
+            "fictional",
+            false,
+        )),
+    );
+    let mut worker = Worker::start(adapter, Duration::from_secs(10)).unwrap();
+    worker.submit(request(None)).unwrap();
+    observed.recv_timeout(Duration::from_secs(5)).unwrap();
+    worker.cancel_pending();
+    release.send(()).unwrap();
+    let limit = Instant::now() + Duration::from_secs(5);
+    while !worker.adapter_finished() {
+        assert!(Instant::now() < limit, "adapter did not finish");
+        std::thread::yield_now();
+    }
+    assert!(transport.sent().is_empty());
+}

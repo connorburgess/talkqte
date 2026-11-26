@@ -1012,3 +1012,33 @@ fn filler_lines_do_not_trigger_anthropic_requests_in_live_session() {
         .to_string();
     assert!(content.contains("Who owns the fictional Atlas checklist?"));
 }
+
+#[test]
+fn cancellation_during_key_access_sends_no_request() {
+    let transport = Scripted::default();
+    let (entered, observed) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let read: KeySource = Box::new(move || {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        Ok(Secret::for_test(KEY))
+    });
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        read,
+        Box::new(|| {}),
+        Arc::new(Usage::default()),
+    );
+    let mut worker = Worker::start(adapter, Duration::from_secs(10)).unwrap();
+    worker.submit(request(None)).unwrap();
+    observed.recv_timeout(Duration::from_secs(5)).unwrap();
+    worker.cancel_pending();
+    release.send(()).unwrap();
+    let limit = Instant::now() + Duration::from_secs(5);
+    while !worker.adapter_finished() {
+        assert!(Instant::now() < limit, "adapter did not finish");
+        std::thread::yield_now();
+    }
+    assert!(transport.sent().is_empty());
+}

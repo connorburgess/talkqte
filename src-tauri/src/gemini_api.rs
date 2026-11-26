@@ -333,12 +333,17 @@ impl<T: Transport> Evaluator for GeminiApi<T> {
             MAX_OUTPUT_TOKENS,
             self.spend_cap,
         )?;
+        // Request preparation can outlast the deadline. Avoid a Keychain
+        // access prompt for work that has already been cancelled.
+        if cancel.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
         let key = match (self.key)() {
             Ok(key) => key,
             Err(_) => return Err(Failure::Credentials),
         };
         let timeout = cancel.deadline().saturating_duration_since(Instant::now());
-        if timeout.is_zero() {
+        if cancel.is_cancelled() || timeout.is_zero() {
             return Err(Failure::Cancelled);
         }
         self.usage.record_request();

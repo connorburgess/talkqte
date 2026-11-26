@@ -922,7 +922,7 @@ impl LiveUnavailable {
 /// Whether this build registers a cue connection for live sessions: the
 /// lab's, the development Claude Code connection, or the person's own
 /// chosen cue provider key.
-fn cue_connection() -> Result<(), LiveUnavailable> {
+fn cue_connection(status: &impl Fn() -> provider_keys::KeysStatus) -> Result<(), LiveUnavailable> {
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -935,7 +935,7 @@ fn cue_connection() -> Result<(), LiveUnavailable> {
     if cfg!(feature = "claude-cli") {
         return Ok(());
     }
-    let status = provider_keys::global().status();
+    let status = status();
     let key_status = match llm_provider::cue_provider() {
         llm_provider::CueProvider::Anthropic => status.anthropic,
         llm_provider::CueProvider::OpenAi => status.openai,
@@ -950,10 +950,26 @@ fn cue_connection() -> Result<(), LiveUnavailable> {
 }
 
 pub(crate) fn live_availability() -> Result<(), LiveUnavailable> {
+    let status = std::cell::OnceCell::new();
+    live_availability_with_status(&|| *status.get_or_init(|| provider_keys::global().status()))
+}
+
+fn live_availability_with_status(
+    status: &impl Fn() -> provider_keys::KeysStatus,
+) -> Result<(), LiveUnavailable> {
     classify_live_availability(
-        cue_connection(),
-        transcription::cloud::selected,
-        transcription::cloud::readiness,
+        cue_connection(status),
+        || {
+            transcription::cloud::dev_selected()
+                || transcription::cloud::selected_with_status(&status())
+        },
+        || {
+            if transcription::cloud::dev_selected() {
+                transcription::cloud::readiness()
+            } else {
+                transcription::cloud::readiness_with_status(&status())
+            }
+        },
         transcription::cloud::active_provider(),
     )
 }
@@ -988,8 +1004,8 @@ pub(crate) fn live_unavailable() -> Option<&'static str> {
         .map(|err| err.message_for(provider))
 }
 
-fn cue_provider_name() -> Option<&'static str> {
-    if cue_connection().is_err() {
+fn cue_provider_name(status: &impl Fn() -> provider_keys::KeysStatus) -> Option<&'static str> {
+    if cue_connection(status).is_err() {
         return None;
     }
     #[cfg(all(
@@ -1009,13 +1025,22 @@ fn cue_provider_name() -> Option<&'static str> {
 
 #[tauri::command]
 fn live_status() -> LiveStatus {
-    let reason = live_unavailable();
+    live_status_with_keys(provider_keys::global())
+}
+
+fn live_status_with_keys(keys: &provider_keys::Keys) -> LiveStatus {
+    let snapshot = std::cell::OnceCell::new();
+    let status = || *snapshot.get_or_init(|| keys.status());
+    let reason = live_availability_with_status(&status)
+        .err()
+        .map(|err| err.message_for(llm_provider::cue_provider()));
     LiveStatus {
         available: reason.is_none(),
         reason,
-        transcription: transcription::cloud::selected()
-            .then_some(transcription::cloud::active_provider_name()),
-        cue_provider: cue_provider_name(),
+        transcription: (transcription::cloud::dev_selected()
+            || transcription::cloud::selected_with_status(&status()))
+        .then_some(transcription::cloud::active_provider_name()),
+        cue_provider: cue_provider_name(&status),
     }
 }
 
@@ -3340,6 +3365,80 @@ mod session_clock_tests {
 mod live_readiness_diagnostics_tests {
     use super::*;
     use transcription::cloud::{Provider as SttProvider, ReadinessFailure};
+
+    #[cfg(feature = "claude-cli")]
+    #[test]
+    fn cli_cue_readiness_does_not_query_personal_key_metadata() {
+        assert_eq!(
+            cue_connection(&|| panic!("personal metadata queried")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_live_status_checks_metadata_once_and_next_operation_observes_external_changes() {
+        use provider_keys::{Secret, SecretStore, StoreError};
+        use std::sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc,
+        };
+        struct MetadataOnly {
+            present: Arc<AtomicBool>,
+            scans: Arc<AtomicUsize>,
+        }
+        impl SecretStore for MetadataOnly {
+            fn contains(&self, _: &str) -> Result<bool, StoreError> {
+                self.scans.fetch_add(1, Ordering::SeqCst);
+                Ok(self.present.load(Ordering::SeqCst))
+            }
+            fn get(&self, _: &str) -> Result<Option<Secret>, StoreError> {
+                panic!("readiness must not retrieve secrets")
+            }
+            fn set(&self, _: &str, _: &Secret) -> Result<(), StoreError> {
+                panic!("readiness must not write")
+            }
+            fn delete(&self, _: &str) -> Result<(), StoreError> {
+                panic!("readiness must not delete")
+            }
+        }
+        struct NoProbe;
+        impl provider_keys::Probe for NoProbe {
+            fn check(&self, _: provider_keys::Provider, _: &Secret) -> provider_keys::ProbeResult {
+                panic!("readiness must not contact providers")
+            }
+        }
+        let present = Arc::new(AtomicBool::new(true));
+        let scans = Arc::new(AtomicUsize::new(0));
+        let keys = provider_keys::Keys::new(
+            Box::new(MetadataOnly {
+                present: present.clone(),
+                scans: scans.clone(),
+            }),
+            Box::new(NoProbe),
+        );
+        assert!(live_status_with_keys(&keys).available);
+        assert_eq!(scans.load(Ordering::SeqCst), 5);
+        // A later operation must see an external removal, without a secret cache.
+        present.store(false, Ordering::SeqCst);
+        let missing = live_status_with_keys(&keys);
+        assert!(!missing.available);
+        assert!(missing.transcription.is_none());
+        assert_eq!(missing.cue_provider.is_some(), cfg!(feature = "claude-cli"));
+        assert_eq!(scans.load(Ordering::SeqCst), 10);
+        present.store(true, Ordering::SeqCst);
+        for provider in [
+            provider_keys::Provider::Anthropic,
+            provider_keys::Provider::OpenAi,
+            provider_keys::Provider::Gemini,
+        ] {
+            keys.mark_rejected(provider);
+        }
+        assert_eq!(
+            live_status_with_keys(&keys).available,
+            cfg!(feature = "claude-cli")
+        );
+        assert_eq!(scans.load(Ordering::SeqCst), 15);
+    }
 
     #[test]
     fn readiness_preserves_short_circuit_order_and_public_refusals() {
