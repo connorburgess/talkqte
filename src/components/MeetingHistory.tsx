@@ -1176,12 +1176,9 @@ export function MeetingHistory({
                             aria-labelledby={`${id}-delete-folder-title`}
                           >
                             <p id={`${id}-delete-folder-title`}>
-                              Delete folder “{folder}”?{' '}
-                              {folderMeetings.length === 0
-                                ? 'No meetings are inside.'
-                                : folderMeetings.length === 1
-                                  ? 'Its 1 meeting will move to unfiled at the top (it will not be deleted).'
-                                  : `Its ${folderMeetings.length} meetings will move to unfiled at the top (none will be deleted).`}
+                              Delete folder “{folder}”? Any meetings in this
+                              folder will move to unfiled at the top (none will
+                              be deleted).
                             </p>
                             <div className="history-actions">
                               <button

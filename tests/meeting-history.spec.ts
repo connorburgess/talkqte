@@ -1005,14 +1005,19 @@ test('folder keyboard controls and archive filtering preserve meetings when a fo
   await expect(section.locator('.history-item')).toHaveCount(0);
   await page.getByRole('checkbox', { name: /Show archived/ }).check();
   await expect(section.locator('.history-item')).toContainText('Archived');
+  await page.getByRole('checkbox', { name: /Show archived/ }).uncheck();
   await page
     .getByRole('button', { name: 'Delete folder constructor', exact: true })
     .click();
+  await expect(
+    page.getByRole('group', { name: /Delete folder/ }),
+  ).toContainText('Any meetings in this folder');
   await page
     .getByRole('group', { name: /Delete folder/ })
     .getByRole('button', { name: 'Delete folder', exact: true })
     .click();
   await expect(section).toHaveCount(0);
+  await page.getByRole('checkbox', { name: /Show archived/ }).check();
   const list = page.getByRole('list', { name: 'Meetings', exact: true });
   await expect(list.locator('.history-item')).toContainText(
     'Fictional gate review',
