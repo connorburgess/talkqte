@@ -25,7 +25,10 @@ impl Mode {
     pub fn for_snapshot(state: &CueSnapshot, microphone: MicrophoneStatus) -> Self {
         if !state.overlay_enabled {
             Self::Hidden
-        } else if state.cue.is_some() || state.end_prompt.is_some() {
+        } else if state.cue.is_some()
+            || state.end_prompt.is_some()
+            || state.call_end_prompt.is_some()
+        {
             Self::Question
         } else if state.call_prompt.is_some() {
             Self::Prompt
@@ -339,12 +342,11 @@ pub fn refresh(app: &tauri::AppHandle) {
         let layout = if mode == Mode::Hidden {
             None
         } else {
-            // Follow the notebook's display, falling back after a display disconnect.
-            let monitor = handle
-                .get_webview_window("main")
-                .and_then(|main| main.current_monitor().ok().flatten())
-                .or_else(|| window.primary_monitor().ok().flatten());
-            let Some(monitor) = monitor else { return };
+            // Follow the active display (frontmost call/browser app or cursor),
+            // falling back to the notebook's display and then primary.
+            let Some(monitor) = select_monitor(&handle, &window) else {
+                return;
+            };
             let area = monitor.work_area();
             scale = monitor.scale_factor();
             Some(frame_at(
@@ -357,7 +359,11 @@ pub fn refresh(app: &tauri::AppHandle) {
                 placement.dragged,
             ))
         };
-        if placement.applied == Some((mode, layout)) {
+        let currently_visible = window.is_visible().unwrap_or(false);
+        if !should_apply(placement.applied, mode, layout, currently_visible) {
+            if layout.is_some() {
+                ensure_front(&window);
+            }
             return;
         }
         placement.expected = layout.map(|frame| ((frame.x, frame.y), Instant::now()));
@@ -370,7 +376,7 @@ pub fn refresh(app: &tauri::AppHandle) {
             );
         }
         let result = if let Some(frame) = layout {
-            set_frame(&window, frame, scale).and_then(|_| window.show())
+            set_frame(&window, frame, scale).and_then(|_| show_window(&window))
         } else {
             window.hide()
         };
@@ -379,6 +385,248 @@ pub fn refresh(app: &tauri::AppHandle) {
         }
     });
 }
+
+/// Whether the window must be updated (`show` / `hide` / frame change).
+/// Never treats an actually-hidden window as already applied for a visible
+/// mode so the companion cannot silently stay hidden.
+fn should_apply(
+    applied: Option<(Mode, Option<Frame>)>,
+    mode: Mode,
+    layout: Option<Frame>,
+    currently_visible: bool,
+) -> bool {
+    if applied != Some((mode, layout)) {
+        return true;
+    }
+    if layout.is_some() {
+        !currently_visible
+    } else {
+        currently_visible
+    }
+}
+
+/// Display rectangle in top-left global coordinates matching the active
+/// platform's pointer/window query coordinates (logical points on macOS,
+/// physical pixels elsewhere).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MonitorBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ActiveDisplayHint {
+    frontmost_is_self: bool,
+    frontmost_window: Option<MonitorBounds>,
+    cursor: Option<(f64, f64)>,
+    main_monitor: Option<usize>,
+    main_visible: bool,
+    main_focused: bool,
+    companion_monitor: Option<usize>,
+    primary_monitor: Option<usize>,
+}
+
+fn monitor_containing_point(monitors: &[MonitorBounds], (px, py): (f64, f64)) -> Option<usize> {
+    if !px.is_finite() || !py.is_finite() {
+        return None;
+    }
+    monitors
+        .iter()
+        .position(|m| px >= m.x && px < m.x + m.width && py >= m.y && py < m.y + m.height)
+        .or_else(|| {
+            monitors
+                .iter()
+                .position(|m| px >= m.x && px <= m.x + m.width && py >= m.y && py <= m.y + m.height)
+        })
+}
+
+fn monitor_for_rect(monitors: &[MonitorBounds], rect: MonitorBounds) -> Option<usize> {
+    let mut best: Option<(usize, f64)> = None;
+    for (idx, m) in monitors.iter().enumerate() {
+        let ix = (m.x + m.width).min(rect.x + rect.width) - m.x.max(rect.x);
+        let iy = (m.y + m.height).min(rect.y + rect.height) - m.y.max(rect.y);
+        let area = ix.max(0.0) * iy.max(0.0);
+        if area > 0.0 && best.is_none_or(|(_, best_area)| area > best_area) {
+            best = Some((idx, area));
+        }
+    }
+    best.map(|(idx, _)| idx).or_else(|| {
+        monitor_containing_point(
+            monitors,
+            (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0),
+        )
+    })
+}
+
+/// Chooses the monitor index for the companion dock.
+///
+/// Priority:
+/// 1. When TalkQTE itself is frontmost and the `main` notebook window is
+///    visible and focused, anchor to `main`'s monitor.
+/// 2. When another app (such as Chrome or Zoom) is frontmost with an onscreen
+///    window, anchor to the display containing that window.
+/// 3. Otherwise anchor to the monitor containing the mouse cursor (which also
+///    keeps the companion on the call's display when clicked while `main` is
+///    hidden or unfocused).
+/// 4. Fall back to a visible `main`, `companion_monitor`, `main_monitor`,
+///    `primary_monitor`, or the first available monitor.
+fn select_monitor_index(monitors: &[MonitorBounds], hint: &ActiveDisplayHint) -> Option<usize> {
+    if monitors.is_empty() {
+        return None;
+    }
+    let valid = |idx: Option<usize>| idx.filter(|&i| i < monitors.len());
+
+    if hint.frontmost_is_self && hint.main_visible && hint.main_focused {
+        if let Some(idx) = valid(hint.main_monitor) {
+            return Some(idx);
+        }
+    }
+    if let Some(rect) = hint.frontmost_window {
+        if let Some(idx) = monitor_for_rect(monitors, rect) {
+            return Some(idx);
+        }
+    }
+    if let Some(cursor) = hint.cursor {
+        if let Some(idx) = monitor_containing_point(monitors, cursor) {
+            return Some(idx);
+        }
+    }
+    if hint.main_visible {
+        if let Some(idx) = valid(hint.main_monitor) {
+            return Some(idx);
+        }
+    }
+    valid(hint.companion_monitor)
+        .or_else(|| valid(hint.main_monitor))
+        .or_else(|| valid(hint.primary_monitor))
+        .or(Some(0))
+}
+
+fn same_monitor(a: &tauri::Monitor, b: &tauri::Monitor) -> bool {
+    a.position() == b.position()
+        && a.size() == b.size()
+        && a.name() == b.name()
+        && (a.scale_factor() - b.scale_factor()).abs() < 1e-6
+}
+
+fn monitor_bounds(monitor: &tauri::Monitor) -> MonitorBounds {
+    #[cfg(target_os = "macos")]
+    {
+        let scale = if monitor.scale_factor().is_finite() && monitor.scale_factor() > 0.0 {
+            monitor.scale_factor()
+        } else {
+            1.0
+        };
+        MonitorBounds {
+            x: f64::from(monitor.position().x) / scale,
+            y: f64::from(monitor.position().y) / scale,
+            width: f64::from(monitor.size().width) / scale,
+            height: f64::from(monitor.size().height) / scale,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        MonitorBounds {
+            x: f64::from(monitor.position().x),
+            y: f64::from(monitor.position().y),
+            width: f64::from(monitor.size().width),
+            height: f64::from(monitor.size().height),
+        }
+    }
+}
+
+fn select_monitor(
+    handle: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Option<tauri::Monitor> {
+    let monitors = handle
+        .available_monitors()
+        .ok()
+        .filter(|list| !list.is_empty())
+        .or_else(|| window.available_monitors().ok())
+        .unwrap_or_default();
+    let main_window = handle.get_webview_window("main");
+    let main_mon = main_window
+        .as_ref()
+        .and_then(|main| main.current_monitor().ok().flatten());
+    let companion_mon = window.current_monitor().ok().flatten();
+    let primary_mon = window.primary_monitor().ok().flatten();
+
+    if monitors.is_empty() {
+        return main_mon.or(companion_mon).or(primary_mon);
+    }
+
+    let find_index = |target: Option<&tauri::Monitor>| {
+        target.and_then(|t| monitors.iter().position(|m| same_monitor(m, t)))
+    };
+
+    #[cfg(target_os = "macos")]
+    let (frontmost_is_self, frontmost_window, cursor) = {
+        let primary_height = primary_mon
+            .as_ref()
+            .filter(|p| p.scale_factor().is_finite() && p.scale_factor() > 0.0)
+            .map(|p| f64::from(p.size().height) / p.scale_factor());
+        let signals = crate::companion_macos::active_display_signals(primary_height);
+        let frontmost_window = signals.frontmost_window.map(|r| MonitorBounds {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        });
+        (signals.frontmost_is_self, frontmost_window, signals.cursor)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (frontmost_is_self, frontmost_window, cursor) = {
+        let cursor = handle.cursor_position().ok().map(|pos| (pos.x, pos.y));
+        (false, None, cursor)
+    };
+
+    let main_visible = main_window
+        .as_ref()
+        .and_then(|main| main.is_visible().ok())
+        .unwrap_or(false);
+    let main_focused = main_window
+        .as_ref()
+        .and_then(|main| main.is_focused().ok())
+        .unwrap_or(false);
+
+    let bounds: Vec<MonitorBounds> = monitors.iter().map(monitor_bounds).collect();
+    let hint = ActiveDisplayHint {
+        frontmost_is_self,
+        frontmost_window,
+        cursor,
+        main_monitor: find_index(main_mon.as_ref()),
+        main_visible,
+        main_focused,
+        companion_monitor: find_index(companion_mon.as_ref()),
+        primary_monitor: find_index(primary_mon.as_ref()),
+    };
+    select_monitor_index(&bounds, &hint)
+        .and_then(|idx| monitors.into_iter().nth(idx))
+        .or(main_mon)
+        .or(companion_mon)
+        .or(primary_mon)
+}
+
+#[cfg(target_os = "macos")]
+fn show_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    crate::companion_macos::show(window).or_else(|()| window.show())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.show()
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_front(window: &tauri::WebviewWindow) {
+    crate::companion_macos::ensure_front(window);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_front(_: &tauri::WebviewWindow) {}
 
 /// Moves and resizes the companion as one change on macOS, so no
 /// transitional frame exists between them.
@@ -503,6 +751,27 @@ mod tests {
         hidden.call_prompt = snapshot.call_prompt.clone();
         assert_eq!(
             Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn a_call_end_prompt_keeps_the_companion_open_unless_hidden() {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        let mut snapshot = engine.cue_snapshot();
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
+            Mode::Compact
+        );
+        snapshot.call_end_prompt = Some(crate::call_prompt::CallEndPrompt { id: 1 });
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
+            Mode::Question
+        );
+        snapshot.overlay_enabled = false;
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Listening),
             Mode::Hidden
         );
     }
@@ -917,6 +1186,230 @@ mod tests {
             Mode::Question
         );
         engine.respond("1:s2", Response::Dismiss).unwrap();
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    fn display(x: f64, y: f64, width: f64, height: f64) -> MonitorBounds {
+        MonitorBounds {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn active_display_prefers_frontmost_call_window_over_notebook_display() {
+        let builtin = display(0.0, 0.0, 1512.0, 982.0);
+        let external = display(1512.0, 0.0, 1920.0, 1080.0);
+        let monitors = [builtin, external];
+
+        // Notebook is visible on the built-in display while a browser call runs
+        // in the foreground on the external display; even with the pointer left
+        // on the built-in display, the companion anchors to the call display.
+        let hint = ActiveDisplayHint {
+            frontmost_is_self: false,
+            frontmost_window: Some(display(1560.0, 40.0, 1400.0, 900.0)),
+            cursor: Some((400.0, 500.0)),
+            main_monitor: Some(0),
+            main_visible: true,
+            main_focused: false,
+            companion_monitor: Some(0),
+            primary_monitor: Some(0),
+        };
+        assert_eq!(select_monitor_index(&monitors, &hint), Some(1));
+    }
+
+    #[test]
+    fn active_display_picks_largest_overlap_and_negative_coordinate_displays() {
+        let left = display(-2560.0, 0.0, 2560.0, 1440.0);
+        let center = display(0.0, 0.0, 1512.0, 982.0);
+        let above = display(0.0, -1080.0, 1920.0, 1080.0);
+        let monitors = [center, left, above];
+
+        // Window mostly on the left external display, slightly straddling center.
+        let mostly_left = ActiveDisplayHint {
+            frontmost_window: Some(display(-1200.0, 100.0, 1400.0, 800.0)),
+            main_monitor: Some(0),
+            main_visible: true,
+            ..ActiveDisplayHint::default()
+        };
+        assert_eq!(select_monitor_index(&monitors, &mostly_left), Some(1));
+
+        // Cursor on the upper display when frontmost app has no onscreen window.
+        let cursor_above = ActiveDisplayHint {
+            cursor: Some((600.0, -400.0)),
+            main_monitor: Some(0),
+            main_visible: true,
+            ..ActiveDisplayHint::default()
+        };
+        assert_eq!(select_monitor_index(&monitors, &cursor_above), Some(2));
+    }
+
+    #[test]
+    fn clicking_companion_or_hiding_notebook_keeps_companion_on_cursor_display() {
+        let builtin = display(0.0, 0.0, 1512.0, 982.0);
+        let external = display(1512.0, 0.0, 1920.0, 1080.0);
+        let monitors = [builtin, external];
+
+        // Notebook hidden in the menu bar on display 0; user clicked the
+        // companion on display 1 so TalkQTE is briefly frontmost.
+        let clicked_while_main_hidden = ActiveDisplayHint {
+            frontmost_is_self: true,
+            frontmost_window: None,
+            cursor: Some((3100.0, 900.0)),
+            main_monitor: Some(0),
+            main_visible: false,
+            main_focused: false,
+            companion_monitor: Some(1),
+            primary_monitor: Some(0),
+        };
+        assert_eq!(
+            select_monitor_index(&monitors, &clicked_while_main_hidden),
+            Some(1)
+        );
+
+        // Notebook visible and unfocused on display 0 while user interacts with
+        // companion on display 1.
+        let clicked_while_main_unfocused = ActiveDisplayHint {
+            main_visible: true,
+            main_focused: false,
+            ..clicked_while_main_hidden
+        };
+        assert_eq!(
+            select_monitor_index(&monitors, &clicked_while_main_unfocused),
+            Some(1)
+        );
+
+        // User explicitly focused the notebook on display 0.
+        let focused_notebook = ActiveDisplayHint {
+            main_visible: true,
+            main_focused: true,
+            ..clicked_while_main_hidden
+        };
+        assert_eq!(select_monitor_index(&monitors, &focused_notebook), Some(0));
+    }
+
+    #[test]
+    fn active_display_fallback_order_handles_missing_signals_and_empty_lists() {
+        let monitors = [
+            display(0.0, 0.0, 1440.0, 900.0),
+            display(1440.0, 0.0, 1920.0, 1080.0),
+        ];
+        assert_eq!(
+            select_monitor_index(&[], &ActiveDisplayHint::default()),
+            None
+        );
+        // Visible notebook wins over stale companion/primary if no window/cursor.
+        assert_eq!(
+            select_monitor_index(
+                &monitors,
+                &ActiveDisplayHint {
+                    main_monitor: Some(1),
+                    main_visible: true,
+                    companion_monitor: Some(0),
+                    primary_monitor: Some(0),
+                    ..ActiveDisplayHint::default()
+                },
+            ),
+            Some(1)
+        );
+        // Hidden notebook falls back to companion, then main, then primary, then 0.
+        assert_eq!(
+            select_monitor_index(
+                &monitors,
+                &ActiveDisplayHint {
+                    main_monitor: Some(0),
+                    main_visible: false,
+                    companion_monitor: Some(1),
+                    primary_monitor: Some(0),
+                    ..ActiveDisplayHint::default()
+                },
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            select_monitor_index(
+                &monitors,
+                &ActiveDisplayHint {
+                    primary_monitor: Some(1),
+                    ..ActiveDisplayHint::default()
+                },
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            select_monitor_index(&monitors, &ActiveDisplayHint::default()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn overlay_defaults_to_enabled_and_visible_modes_never_stay_silently_hidden() {
+        let settings = crate::settings::Settings::default();
+        assert!(settings.overlay_enabled);
+        assert!(crate::settings::parse(b"{}").overlay_enabled);
+
+        let mut engine = Engine::live();
+        assert!(engine.cue_snapshot().overlay_enabled);
+
+        // Call-starting offer -> Prompt -> live session -> Compact -> cue -> Hidden.
+        let mut offer = engine.cue_snapshot();
+        offer.call_prompt = Some(crate::call_prompt::Prompt {
+            application: Some("Fictional Browser".into()),
+            kind: Some(crate::call_prompt::Kind::Browser),
+            id: 7,
+        });
+        assert_eq!(
+            Mode::for_snapshot(&offer, MicrophoneStatus::Off),
+            Mode::Prompt
+        );
+
+        engine.start().unwrap();
+        assert_eq!(
+            Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Listening),
+            Mode::Compact
+        );
+
+        let prompt_frame = frame(
+            (1512, 0),
+            (1920, 1080),
+            1.0,
+            Mode::Prompt,
+            CompanionPosition::BottomRight,
+            QuestionSize::Standard,
+        );
+        // Matching cached state still re-applies if the native window is not visible.
+        assert!(should_apply(
+            Some((Mode::Prompt, Some(prompt_frame))),
+            Mode::Prompt,
+            Some(prompt_frame),
+            false,
+        ));
+        assert!(!should_apply(
+            Some((Mode::Prompt, Some(prompt_frame))),
+            Mode::Prompt,
+            Some(prompt_frame),
+            true,
+        ));
+        // Hidden mode does not hide again once already hidden, but does if still visible.
+        assert!(!should_apply(
+            Some((Mode::Hidden, None)),
+            Mode::Hidden,
+            None,
+            false,
+        ));
+        assert!(should_apply(
+            Some((Mode::Hidden, None)),
+            Mode::Hidden,
+            None,
+            true,
+        ));
+
+        engine.end();
         assert_eq!(
             Mode::for_snapshot(&engine.cue_snapshot(), MicrophoneStatus::Off),
             Mode::Hidden

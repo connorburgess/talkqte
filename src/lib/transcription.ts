@@ -27,7 +27,7 @@ export function transcriptionLowText(
     left <= 0
       ? 'Transcription is about to reach'
       : `About ${left} ${left === 1 ? 'minute' : 'minutes'} of transcription ${left === 1 ? 'is' : 'are'} left before`;
-  return `${when} this session's 120-minute cap; then the session ends. With your microphone and an application, each minute of the meeting uses two. Stop and start a new session to continue after it.`;
+  return `${when} this session's 480-minute cap; then the session ends. With your microphone and an application, each minute of the meeting uses two. Stop and start a new session to continue after it.`;
 }
 
 const STOP_REASONS: Record<string, string> = {

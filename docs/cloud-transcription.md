@@ -31,13 +31,13 @@ sent once in the WebSocket handshake (`Authorization: Token …` for Deepgram,
 `xi-api-key: …` for ElevenLabs); replacement streams after a connection failure
 read it again. Each stream attempt reads the Keychain once: a missing key, or a
 Keychain that refuses, is not asked again while the stream waits, and the stream
-stops with `settings` or `key_unavailable`. A session may send at most 120
+stops with `settings` or `key_unavailable`. A session may send at most 480
 minutes of audio (`OWN_KEY_MINUTE_CAP`), across its reconnects; the chosen
 provider bills the person's account for it. The budget is made once per live
 start, after the start gate is taken, and handed to that session's stream and
 its replacements only, so another start cannot replace or reuse it. An
 application started into a microphone session (both sides of a call) opens its
-own stream, but spends that session's budget: the 120 minutes are counted
+own stream, but spends that session's budget: the 480 minutes are counted
 across both streams, so two streams at once use them twice as fast, as
 both providers bill each stream. From ten minutes of meeting left (counting both
 streams when both are heard) the notebook says how many minutes remain before
@@ -137,12 +137,12 @@ recorded audio only, per its
 page), so the app cannot start in English and switch by itself. **Settings →
 Transcription language** applies to the chosen provider:
 
-| Provider & Choice                  | Query                                                                                                                                                                                                |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Deepgram — English** (default)   | `model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true`    |
-| **Deepgram — Multilingual**        | `model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true` |
-| **ElevenLabs — English** (default) | `model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad&include_timestamps=true&language_code=en`                                                                                    |
-| **ElevenLabs — Multilingual**      | `model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad&include_timestamps=true`                                                                                                     |
+| Provider & Choice                  | Query                                                                                                                                                                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Deepgram — English** (default)   | `model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=600&utterance_end_ms=1000&vad_events=true&mip_opt_out=true`    |
+| **Deepgram — Multilingual**        | `model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true` |
+| **ElevenLabs — English** (default) | `model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad&include_timestamps=true&language_code=en`                                                                                                      |
+| **ElevenLabs — Multilingual**      | `model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad&include_timestamps=true`                                                                                                                       |
 
 Multilingual is Deepgram's code-switching mode for Nova-3: several languages,
 following switches within one stream
@@ -217,19 +217,22 @@ inline in the transcript. These labels stay on the Mac for the live cue
 model, which still receives the fixed label "Speaker". A kept meeting writes
 the source and speaker labels, with any custom names the person assigned.
 When the microphone also hears the application through the speakers, the same
-words arrive twice. A microphone line is treated as a likely echo only when it
-is a close copy of one application line timed within 4 seconds: at least six
-words, the shorter line at least 70% of the longer, and the longest run of the
-same words in the same order at least 85% of the longer line
-(`engine/sources.rs`). Lines are compared one at a time, never pooled, so
-replies such as "I don't know", "yes I agree" or a repeated figure are kept.
-A likely echo is never silent: it stays in the transcript, marked "Likely an
-echo of Them · not used for cues", with **It was me** and **Remove**, and is
+words arrive twice. A microphone line is treated as a likely echo when it
+is a close copy of an application line timed within 4 seconds (at least six
+words, shorter line at least 70% of the longer, and longest common word run at
+least 85% of the longer line), or when it is a 1-2 word exact normalized match or
+a short-phrase character-bigram match within 1.5 seconds (`engine/sources.rs`).
+Lines are compared one at a time, never pooled, so replies such as "I don't know",
+"yes I agree" or a repeated figure are kept. When the microphone line arrives
+slightly ahead of the application line, the engine retroactively moves that
+microphone line into the suppressed echo list once the matching application line
+arrives.
+A likely echo is never silent: it is hidden by default in the transcript behind
+a `Show N likely echo lines` toggle (marked "Likely an echo of Them · not used for cues",
+with **It was me** and **Remove** when expanded), and is
 kept in the meeting marked "You (likely an echo of Them)" unless the person
-removes it. It is never sent to a cue model, even after **It was me**. The
-guard cannot catch a microphone copy that arrives before the application's
-line, short copies, copies Deepgram recognises very differently, or copies
-split across lines; headphones avoid the problem. If the application's stream fails, or the application stops or
+removes it. It is never sent to a cue model or meeting notes, even after **It was me**. The
+guard cannot catch copies split across lines; headphones avoid the problem. If the application's stream fails, or the application stops or
 never starts, the session runs on with the microphone and says "Audio from
 _App_ stopped. Only your microphone is heard now"; a microphone stream failure
 ends the session and its application as before.
@@ -247,7 +250,7 @@ ends the session and its application as before.
 | Pause cues, with your own Anthropic key                                                                                                                                                                                                                            | Cue requests stop and the review still holds, so audio is still sent to the chosen transcription provider (Deepgram or ElevenLabs) and billed to your account, and the transcript continues (a kept meeting stays complete). The review, the Pause help in the notebook and the companion ("Mic still on · audio to {Provider}") say so. Turning processing off or Stop ends the audio.                                                                                                                                                                                   |
 | Pause cues, with the `claude-cli` backend                                                                                                                                                                                                                          | Cues stop, the review still holds, and audio is still transcribed. The companion says "Mic still on · audio to {Provider}".                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Pause cues, or any end of the run, with the lab evaluator                                                                                                                                                                                                          | The lab's cue run ends, which ends its approval, so sending stops and the session ends with "the lab run ended, so audio stopped being sent". With the lab evaluator, turning the review off also ends the lab's cue run, so the code there is `lab_ended`, not `withdrawn` (`invalidate_evaluation` in `engine/evaluation.rs`).                                                                                                                                                                                                                                          |
-| The minute cap is reached (including ElevenLabs `session_time_limit_exceeded`)                                                                                                                                                                                     | The stream is closed and the session ends ("the transcription minute limit was reached"). With the person's key the cap is the session's 120 minutes; with a development token file it counts all sessions and both sources of the launch.                                                                                                                                                                                                                                                                                                                                |
+| The minute cap is reached (including ElevenLabs `session_time_limit_exceeded`)                                                                                                                                                                                     | The stream is closed and the session ends ("the transcription minute limit was reached"). With the person's key the cap is the session's 480 minutes; with a development token file it counts all sessions and both sources of the launch.                                                                                                                                                                                                                                                                                                                                |
 | The send queue is full because the connection fell behind                                                                                                                                                                                                          | The audio that does not fit is dropped, not sent later. The session continues, and the notebook says "Some audio was not sent to {Provider} because the connection fell behind; lines from it are missing."                                                                                                                                                                                                                                                                                                                                                               |
 | Provider refuses the key or token (401/403 or ElevenLabs `auth_error`), cannot pay (402 or `quota_exceeded`), or rate-limits (429 or `rate_limited`)                                                                                                               | The session ends with a fixed reason naming the active provider. There is no retry and no fallback.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Provider answers the handshake with a server error (5xx) or ElevenLabs `transcriber_error`                                                                                                                                                                         | Treated as an outage on the provider's side (`unavailable` / `network`) and replaced like a lost connection; if it cannot be, the session ends with "the service is having a problem on its side".                                                                                                                                                                                                                                                                                                                                                                        |
@@ -259,7 +262,7 @@ ends the session and its application as before.
 
 A stream that fails for a network reason (lost, closed, `stalled`, a server
 error, or an unreadable reply) is replaced by a new one, under the same approval, the same
-session and the same minute budget, at most twice per session for each
+session and the same minute budget, up to ten times per session for each
 capture source. A refused token, a spent budget, rate limiting, a withdrawn
 review and the end of a lab run are not retried.
 

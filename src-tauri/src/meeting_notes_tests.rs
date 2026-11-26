@@ -175,8 +175,25 @@ fn a_very_long_meeting_is_refused_before_anything_is_sent() {
         speaker_id: None,
         text: "word ".repeat(12),
     };
-    let lines: Vec<_> = (0..=MAX_TRANSCRIPT_LINES as u64).map(line).collect();
-    assert_eq!(prepare(opus(), &lines, None).unwrap_err(), Refusal::TooLong);
+    let short_line = |n: u64| Segment {
+        id: format!("s{n}"),
+        at_ms: n * 1_000,
+        speaker: String::new(),
+        text: "Noted.".into(),
+    };
+    let within_lines: Vec<_> = (0..1_500u64).map(short_line).collect();
+    assert_eq!(
+        prepare(opus(), &within_lines, None)
+            .unwrap()
+            .plan()
+            .transcript_lines,
+        1_500
+    );
+    let over_lines: Vec<_> = (0..=MAX_TRANSCRIPT_LINES as u64).map(short_line).collect();
+    assert_eq!(
+        prepare(opus(), &over_lines, None).unwrap_err(),
+        Refusal::TooLong
+    );
     let long = vec![Segment {
         text: "a".repeat(MAX_TRANSCRIPT_BYTES + 1),
         ..line(1)

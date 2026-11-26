@@ -435,6 +435,7 @@ function saveSessionMeeting(
 export function onSessionEnded(
   current: Snapshot,
   session: number,
+  forceSave = false,
 ): { endPrompt: EndPrompt | null; changed: boolean } {
   const transcriptLines = current.transcript.length;
   const hasNotes = current.notes.trim().length > 0;
@@ -443,12 +444,12 @@ export function onSessionEnded(
     current.status !== 'ended' ||
     availability !== 'on' ||
     (transcriptLines === 0 && !hasNotes) ||
-    afterSessionKeep === 'off'
+    (!forceSave && afterSessionKeep === 'off')
   ) {
     endPrompt = null;
     return { endPrompt: null, changed: false };
   }
-  if (afterSessionKeep === 'auto') {
+  if (afterSessionKeep === 'auto' || forceSave) {
     const existing =
       sessionKept && sessionKept.session === session
         ? meetings.find((item) => item.id === sessionKept!.id)

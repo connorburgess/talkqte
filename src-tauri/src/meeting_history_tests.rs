@@ -764,3 +764,35 @@ fn v1_meetings_without_speaker_fields_still_load_and_speaker_renames_persist() {
     let raw_after = fs::read_to_string(folder.root().join(&kept.id).join(MEETING)).unwrap();
     assert!(!raw_after.contains("speakerNames"));
 }
+
+#[test]
+fn long_meetings_over_400_lines_keep_and_export_intact() {
+    let folder = Folder::new("long-meeting");
+    let store = folder.store();
+    let mut long = content(1_795_000_000_000, "First fictional line.");
+    long.sources = Sources::Both;
+    long.transcript = (0..1_500u64)
+        .map(|i| Line {
+            at_ms: i * 4_000,
+            label: Some(if i % 2 == 0 { Label::You } else { Label::Them }),
+            echo: false,
+            speaker_id: None,
+            text: format!("Fictional planning line {i}."),
+        })
+        .collect();
+    long.duration_ms = 6_000_000;
+    let kept = store.keep("Long planning call", long).unwrap();
+    let opened = store.open_meeting(&kept.id).unwrap();
+    assert_eq!(opened.content.transcript.len(), 1_500);
+    assert_eq!(
+        opened.content.transcript[0].text,
+        "Fictional planning line 0."
+    );
+    assert_eq!(
+        opened.content.transcript[1_499].text,
+        "Fictional planning line 1499."
+    );
+    let md = opened.markdown();
+    assert!(md.contains("Fictional planning line 0."));
+    assert!(md.contains("Fictional planning line 1499."));
+}

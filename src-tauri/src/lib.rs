@@ -89,6 +89,8 @@ mod meeting_notes_commands;
 mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
+mod microphone_macos_aec;
+#[cfg(target_os = "macos")]
 mod native_session_clock;
 #[cfg(target_os = "macos")]
 mod native_source;
@@ -1779,6 +1781,10 @@ struct Live {
 /// one this fed. Blocks; call it without holding the runtime lock, because
 /// delivering lines takes it.
 fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
+    finish_live_with(app, live, flush, false);
+}
+
+fn finish_live_with(app: &tauri::AppHandle, live: Live, flush: bool, force_save: bool) {
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -1805,11 +1811,14 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let mut ended = false;
     let finished = change(app, &state, |e| {
         ended = e.finish_live_stop(live.session);
+        if ended {
+            e.return_to_ready_if_empty();
+        }
         Ok(())
     })
     .is_ok();
     if finished && ended {
-        meeting_history_commands::on_live_session_ended(app, live.session);
+        meeting_history_commands::on_live_session_ended_with(app, live.session, force_save);
     }
     #[cfg(all(
         debug_assertions,
@@ -2280,6 +2289,24 @@ async fn stop_live_session(
         .map_err(|_| "Could not finish the live session.".into())
 }
 
+/// Stops a live session from the "Call ended" dock prompt and saves a
+/// non-empty meeting to local history (except in lab runs).
+pub(crate) async fn stop_and_save_live_session(app: tauri::AppHandle) -> Result<(), String> {
+    let live = {
+        let state = app.state::<AppState>();
+        let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+        let live = runtime.take_live_for_stop();
+        publish(&app, &mut runtime);
+        live
+    };
+    let Some(live) = live else {
+        return Ok(());
+    };
+    tauri::async_runtime::spawn_blocking(move || finish_live_with(&app, live, true, true))
+        .await
+        .map_err(|_| "Could not finish the live session.".into())
+}
+
 /// The menu bar's Stop: ends a running session as the notebook's Stop does.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn stop_live_from_menu(app: &tauri::AppHandle) {
@@ -2350,6 +2377,7 @@ pub fn run() {
             call_prompt_commands::set_call_prompt,
             call_prompt_commands::clear_call_prompt_apps,
             call_prompt_commands::respond_to_call_prompt,
+            call_prompt_commands::respond_to_call_end_prompt,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
             processing_commands::cancel_processing_review,

@@ -77,8 +77,13 @@ export function MeetingHistory({
   // Export review modal for the opened meeting.
   const [exportPreview, setExportPreview] = useState<string | null>(null);
   const [exportError, setExportError] = useState('');
+  const [showEchoes, setShowEchoes] = useState(false);
   const exportDialog = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setShowEchoes(false);
+  }, [selected?.id]);
 
   const listRequest = useRef(0);
   const openRequestRef = useRef(0);
@@ -509,66 +514,91 @@ export function MeetingHistory({
           )}
         </section>
 
-        <section
-          className="history-section"
-          aria-labelledby={`${id}-transcript-heading`}
-        >
-          <h2 id={`${id}-transcript-heading`}>
-            Transcript ({selected.transcript.length})
-          </h2>
-          {selected.transcript.length === 0 ? (
-            <p className="history-help">No transcript lines.</p>
-          ) : (
-            <div className="transcript">
-              {selected.transcript.map((line, index) => {
-                const lineKey = `${line.atMs}-${index}`;
-                return (
-                  <article
-                    key={lineKey}
-                    className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
+        {(() => {
+          const spokenTranscript = selected.transcript.filter(
+            (line) => !line.echo,
+          );
+          const echoCount =
+            selected.transcript.length - spokenTranscript.length;
+          const visibleTranscript = showEchoes
+            ? selected.transcript
+            : spokenTranscript;
+          return (
+            <section
+              className="history-section"
+              aria-labelledby={`${id}-transcript-heading`}
+            >
+              <div className="history-section-head">
+                <h2 id={`${id}-transcript-heading`}>
+                  Transcript ({spokenTranscript.length})
+                </h2>
+                {echoCount > 0 && (
+                  <button
+                    type="button"
+                    className="transcript-echo-toggle"
+                    aria-expanded={showEchoes}
+                    onClick={() => setShowEchoes((open) => !open)}
                   >
-                    <div className="transcript-segment-head">
-                      {line.speakerId !== undefined ? (
-                        <SpeakerChip
-                          speakerId={line.speakerId}
-                          label={
-                            selected.speakerNames?.[line.speakerId] ??
-                            `Speaker ${line.speakerId + 1}`
-                          }
-                          disabled={busy}
-                          isEditing={
-                            editingSpeaker?.key === lineKey &&
-                            editingSpeaker.speakerId === line.speakerId
-                          }
-                          onStartEdit={() => {
-                            setError('');
-                            setEditingSpeaker({
-                              key: lineKey,
-                              speakerId: line.speakerId!,
-                            });
-                          }}
-                          onCancelEdit={() => setEditingSpeaker(null)}
-                          onRename={submitSpeakerRename}
-                        />
-                      ) : (
-                        both && (
-                          <span>{line.label === 'them' ? 'Them' : 'You'}</span>
-                        )
-                      )}
-                      {line.echo && (
-                        <span className="transcript-echo-label">
-                          Likely echo
-                        </span>
-                      )}
-                      <time>{clockTime(line.atMs)}</time>
-                    </div>
-                    <p>{line.text}</p>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                    {showEchoes
+                      ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                      : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
+                  </button>
+                )}
+              </div>
+              {selected.transcript.length === 0 ? (
+                <p className="history-help">No transcript lines.</p>
+              ) : visibleTranscript.length === 0 ? null : (
+                <div className="transcript">
+                  {visibleTranscript.map((line, index) => (
+                    <article
+                      key={`${line.atMs}-${index}`}
+                      className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
+                    >
+                      <div className="transcript-segment-head">
+                        {line.speakerId !== undefined ? (
+                          <SpeakerChip
+                            speakerId={line.speakerId}
+                            label={
+                              selected.speakerNames?.[line.speakerId] ??
+                              `Speaker ${line.speakerId + 1}`
+                            }
+                            disabled={busy}
+                            isEditing={
+                              editingSpeaker?.key === `${line.atMs}-${index}` &&
+                              editingSpeaker.speakerId === line.speakerId
+                            }
+                            onStartEdit={() => {
+                              setError('');
+                              setEditingSpeaker({
+                                key: `${line.atMs}-${index}`,
+                                speakerId: line.speakerId!,
+                              });
+                            }}
+                            onCancelEdit={() => setEditingSpeaker(null)}
+                            onRename={submitSpeakerRename}
+                          />
+                        ) : (
+                          both && (
+                            <span>
+                              {line.label === 'them' ? 'Them' : 'You'}
+                            </span>
+                          )
+                        )}
+                        {line.echo && (
+                          <span className="transcript-echo-label">
+                            Likely echo
+                          </span>
+                        )}
+                        <time>{clockTime(line.atMs)}</time>
+                      </div>
+                      <p>{line.text}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })()}
 
         <dialog
           ref={exportDialog}

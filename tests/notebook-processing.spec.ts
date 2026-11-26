@@ -76,6 +76,7 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
   await stop(page).click();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
   await expect(stop(page)).toHaveCount(0);
+  await expect(panel(page)).toBeHidden();
 });
 
 test('hosted review names exact selected sources, stays optional, and preserves review across Settings', async ({
@@ -167,10 +168,7 @@ test('pause and turn off keep capture on; Stop stays independent of a pending pe
   await page.evaluate(() =>
     window.permissionTest.release('set_processing_paused'),
   );
-  await expect(panel(page).getByRole('status')).toHaveText('Session ended');
-  await expect(
-    panel(page).getByRole('button', { name: 'Resume cues' }),
-  ).toHaveCount(0);
+  await expect(panel(page)).toBeHidden();
   expect(
     await page.evaluate(() =>
       window.microphoneTest.calls.includes('set_live_cues_paused'),
@@ -280,7 +278,7 @@ test('Stop during pending approval cannot enable processing after capture ends',
   await page.evaluate(() =>
     window.permissionTest.release('approve_processing_scope'),
   );
-  await expect(panel(page).getByRole('status')).toHaveText('Session ended');
+  await expect(panel(page)).toBeHidden();
   await expect(
     panel(page).getByText('Approved sources for this session'),
   ).toHaveCount(0);
@@ -514,4 +512,50 @@ test('one-click Start live session discloses active sources and immediately enab
   await expect(
     panel(page).getByRole('button', { name: 'Turn off processing' }),
   ).toBeEnabled();
+});
+
+test('Cue processing hides when a session ends cleanly, stays visible for issues, and avoids repeating API key', async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() =>
+    window.captureTest.send({
+      processor: {
+        id: 'anthropic-api',
+        revision: 1,
+        name: 'Claude (your Anthropic API key)',
+        model: 'claude-haiku-5-5',
+        location: 'hosted',
+        destination: 'the Anthropic API, with your own API key',
+        dataPolicy: 'Fictional own-key policy.',
+      },
+    }),
+  );
+  await expect(panel(page)).toContainText(
+    'Claude (your Anthropic API key) · Hosted by the Anthropic API',
+  );
+  await expect(panel(page)).not.toContainText(
+    'Hosted by the Anthropic API, with your own API key',
+  );
+
+  // An issue stays visible even after the session ends.
+  await page.evaluate(() =>
+    window.captureTest.send({
+      phase: 'ended',
+      capture: 'off',
+      approved: null,
+      issue: 'keyRejected',
+    }),
+  );
+  await page.evaluate(() =>
+    window.liveTest.publish({ status: 'ended', cue: null }),
+  );
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page)).toContainText(
+    'Anthropic did not accept your API key',
+  );
+
+  // Clearing the issue hides the ended Cue processing card.
+  await page.evaluate(() => window.captureTest.send({ issue: null }));
+  await expect(panel(page)).toBeHidden();
 });

@@ -17,6 +17,7 @@ fn main() {
             "set_call_prompt",
             "clear_call_prompt_apps",
             "respond_to_call_prompt",
+            "respond_to_call_end_prompt",
             "stop_capture",
             "review_processing_scope",
             "approve_processing_scope",

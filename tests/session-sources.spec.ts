@@ -207,7 +207,7 @@ test('a microphone-only session keeps its plain wording', async ({ page }) => {
   await expect(page.locator('#transcript-panel')).not.toContainText('Them');
 });
 
-test('a line suppressed as a likely echo stays visible, marked, with Keep and Remove', async ({
+test('a line suppressed as a likely echo is hidden by default behind a toggle, with Keep and Remove', async ({
   page,
 }) => {
   await notebook(page);
@@ -246,6 +246,20 @@ test('a line suppressed as a likely echo stays visible, marked, with Keep and Re
   await page.getByRole('tab', { name: /Transcript/ }).click();
   const transcript = page.locator('#transcript-panel');
   const lines = transcript.locator('.transcript-segment');
+  // By default, flagged echoes are collapsed so speaker-mode calls do not double lines.
+  await expect(lines).toHaveCount(2);
+  await expect(
+    transcript.getByText('Likely an echo of Them · not used for cues'),
+  ).toHaveCount(0);
+  const toggle = transcript.getByRole('button', {
+    name: 'Show 1 likely echo line',
+  });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  const hideToggle = transcript.getByRole('button', {
+    name: 'Hide 1 likely echo line',
+  });
+  await expect(hideToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(lines).toHaveCount(3);
   // In time order, the echo between the two ordinary lines.
   await expect(lines.nth(1)).toContainText(
@@ -257,6 +271,29 @@ test('a line suppressed as a likely echo stays visible, marked, with Keep and Re
     { id: 'c1-0-2', keep: true },
     { id: 'c1-0-2', keep: false },
   ]);
+  await hideToggle.click();
+  await expect(lines).toHaveCount(2);
+});
+
+test('a long meeting transcript past 400 lines renders all lines in the live notebook', async ({
+  page,
+}) => {
+  await notebook(page);
+  const longTranscript = Array.from({ length: 450 }, (_, index) => ({
+    id: `c1-0-${index + 1}`,
+    atMs: (index + 1) * 1_000,
+    speaker: index % 2 === 0 ? 'Them' : 'You',
+    text: `Fictional long meeting line ${index + 1}.`,
+  }));
+  await page.evaluate(
+    ([sources, transcript]) => window.liveTest.publish({ sources, transcript }),
+    [both, longTranscript] as const,
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  await expect(transcript.locator('.transcript-segment')).toHaveCount(450);
+  await expect(transcript).toContainText('Fictional long meeting line 1.');
+  await expect(transcript).toContainText('Fictional long meeting line 450.');
 });
 
 test('diarized remote speakers surface as Speaker 1, Speaker 2, fall back to Them, and rename inline', async ({

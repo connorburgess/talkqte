@@ -110,7 +110,7 @@
     "additionalProperties": false
   },
   "limits": {
-    "transcriptLines": 4000,
+    "transcriptLines": 10000,
     "transcriptBytes": 240000,
     "summaryItems": 5,
     "sectionItems": 20,

@@ -25,14 +25,15 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-/// English: Nova-3 with `language=en`, the request since #344.
-pub const QUERY_EN: &str = "model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=300&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
+/// English: Nova-3 with `language=en`, `smart_format=true`, and 600 ms endpointing
+/// so natural conversational pauses do not chop sentences into tiny fragments.
+pub const QUERY_EN: &str = "model=nova-3&language=en&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=600&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
 /// Multilingual: Nova-3 with `language=multi`, which transcribes several
 /// languages and follows switches between them within one stream. Deepgram
 /// recommends 100 ms endpointing for code-switching; everything else is the
 /// English request. Deepgram cannot detect a language on a live stream, so
 /// the choice is made before a session starts.
-pub const QUERY_MULTI: &str = "model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
+pub const QUERY_MULTI: &str = "model=nova-3&language=multi&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&diarize=true&endpointing=100&utterance_end_ms=1000&vad_events=true&mip_opt_out=true";
 #[cfg(test)]
 const QUERY: &str = QUERY_EN;
 const HOST: &str = "api.deepgram.com";
@@ -947,7 +948,7 @@ mod tests {
             QUERY_MULTI,
             QUERY_EN
                 .replace("language=en", "language=multi")
-                .replace("endpointing=300", "endpointing=100")
+                .replace("endpointing=600", "endpointing=100")
         );
     }
 
@@ -984,8 +985,10 @@ mod tests {
             "encoding=linear16",
             "sample_rate=16000",
             "channels=1",
+            "punctuate=true",
+            "smart_format=true",
             "diarize=true",
-            "endpointing=300",
+            "endpointing=600",
             "mip_opt_out=true",
         ] {
             assert!(request.query().split('&').any(|p| p == part), "{part}");

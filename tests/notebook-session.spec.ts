@@ -142,6 +142,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .getByRole('button', { name: 'Start live session' })
     .click();
   await expect(title(page)).toHaveText('Live session in progress');
+  await expect(page.locator('.session-clock')).toHaveText('0:00');
   await expect(session(page)).toContainText(
     'Your microphone · audio not recorded',
   );
@@ -155,6 +156,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     ([text, question]) => window.liveTest.say(text, question),
     [firstLine, firstCue],
   );
+  await expect(page.locator('.session-clock')).toHaveText('0:01');
   await expect(page.getByRole('heading', { name: firstCue })).toBeVisible();
   // Notes written before the session are still there during it.
   await expect(
@@ -166,6 +168,8 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     .click();
   await page.evaluate(() => window.captureTest.finishStop());
   await expect(title(page)).toHaveText('Live session ended');
+  await expect(page.locator('.session-clock')).toHaveCount(0);
+  await expect(session(page)).not.toContainText('Length ');
   await expect(session(page)).toContainText(
     'Saved to Meetings. Notes stay here until you start another session or quit.',
   );
@@ -390,13 +394,13 @@ test('the notebook says the transcription cap is near before the session ends on
     );
   await publish(10);
   const said =
-    "About 10 minutes of transcription are left before this session's 120-minute cap; then the session ends.";
+    "About 10 minutes of transcription are left before this session's 480-minute cap; then the session ends.";
   await expect(session(page)).toContainText(said);
   const notice = page.getByRole('status').filter({ hasText: 'cap; then' });
   await expect(notice).toContainText(said);
   await publish(1);
   await expect(session(page)).toContainText(
-    "About 1 minute of transcription is left before this session's 120-minute cap",
+    "About 1 minute of transcription is left before this session's 480-minute cap",
   );
   // The countdown is shown, not read out again each minute.
   await expect(notice).toContainText('About 10 minutes');
@@ -533,4 +537,54 @@ test('ElevenLabs transcription names ElevenLabs in active, stop, and failure mes
   await expect(session(page).getByRole('alert')).toHaveText(
     'Transcription by ElevenLabs stopped: the account cannot pay for more audio. Add credit in your ElevenLabs account. The live session ended; nothing fell back to another transcription service.',
   );
+});
+
+test('a live session ending with no transcript lines and empty notes returns cleanly to Ready', async ({
+  page,
+}) => {
+  await standIn(page, '/?live&processor');
+  await session(page)
+    .getByRole('button', { name: 'Start live session' })
+    .click();
+  await page.evaluate(() => window.liveTest.publish({ elapsedMs: 33_000 }));
+  await expect(page.locator('.session-clock')).toHaveText('0:33');
+
+  // Stop with 0 transcript lines and empty notes: returns to Ready.
+  await page
+    .getByRole('button', { name: 'Stop live session', exact: true })
+    .first()
+    .click();
+  await page.evaluate(() => window.captureTest.finishStop());
+  await expect(title(page)).toHaveText('No session yet');
+  await expect(session(page)).toContainText(
+    'Nothing is captured until you start a live session.',
+  );
+  await expect(page.locator('.session-clock')).toHaveCount(0);
+  await expect(
+    page.getByRole('region', { name: 'Cue processing', exact: true }),
+  ).toBeHidden();
+  await expect(page.locator('.breadcrumb')).toHaveText('Notebook');
+
+  // Typing notes afterwards keeps the notebook in the Ready state.
+  await page
+    .getByRole('textbox', { name: 'Meeting notes' })
+    .fill('Fictional follow-up note.');
+  await expect(title(page)).toHaveText('No session yet');
+
+  // Stopping a session that has notes (even with 0 transcript lines) shows Live session ended without the timer.
+  await session(page)
+    .getByRole('button', { name: 'Start live session' })
+    .click();
+  await page.evaluate(() => window.liveTest.publish({ elapsedMs: 14_000 }));
+  await expect(page.locator('.session-clock')).toHaveText('0:14');
+  await page
+    .getByRole('button', { name: 'Stop live session', exact: true })
+    .first()
+    .click();
+  await page.evaluate(() => window.captureTest.finishStop());
+  await expect(title(page)).toHaveText('Live session ended');
+  await expect(page.locator('.session-clock')).toHaveCount(0);
+  await expect(
+    page.getByRole('region', { name: 'Cue processing', exact: true }),
+  ).toBeHidden();
 });

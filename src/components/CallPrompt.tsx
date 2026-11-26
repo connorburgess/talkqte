@@ -10,7 +10,7 @@ export interface CallPromptOffer {
 export type CallPromptAnswer =
   'start' | 'dismiss' | 'notForThisApp' | 'dontAskAgain';
 
-function CalibratedCueMark() {
+export function CalibratedCueMark() {
   return (
     <svg
       className="call-prompt-mark"

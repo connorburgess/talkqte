@@ -1589,7 +1589,7 @@ test('a replaced stream is reported with its code and lost speech, still connect
   // A replacement that connected with a different query is not trusted.
   const [d] = cloudReport(
     reconnected(
-      DEEPGRAM_APP_QUERY.replace('endpointing=300', 'endpointing=10'),
+      DEEPGRAM_APP_QUERY.replace('endpointing=600', 'endpointing=10'),
     ),
   ).cloudTranscription.streams;
   assert.equal(d.query, null);

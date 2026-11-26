@@ -238,6 +238,7 @@ async function emitUpdates() {
 }
 
 const callPromptAnswers: unknown[] = [];
+const callEndPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
 let host: ApplicationAudioStatus | null = null;
 let hostRefusal: string | null = null;
@@ -303,6 +304,26 @@ if (new URLSearchParams(location.search).has('processor'))
       new URLSearchParams(location.search).has('audio'),
     ),
   };
+async function endLivePublish() {
+  const empty =
+    session.transcript.length === 0 && session.notes.trim().length === 0;
+  await publish(
+    empty
+      ? {
+          live: false,
+          status: 'ready',
+          elapsedMs: 0,
+          durationMs: 0,
+          title: '',
+          description: '',
+          autoStarted: false,
+          cuesPaused: false,
+          cue: null,
+          sources: undefined,
+        }
+      : { status: 'ended', cue: null, cuesPaused: false },
+  );
+}
 async function completeCaptureStop() {
   await send({
     status: 'off',
@@ -310,7 +331,7 @@ async function completeCaptureStop() {
     activity: 'quiet',
     message: null,
   });
-  await publish({ status: 'ended', cue: null, cuesPaused: false });
+  await endLivePublish();
   await sendProcessing({
     capture: 'off',
     phase: 'ended',
@@ -398,7 +419,7 @@ async function sendDictation(value: Partial<DictationSnapshot>) {
 // Stands in for the Rust live session: no device, stream, or transcription.
 /** Counts sessions, as Rust's session number does, for kept meetings. */
 let historySession = 0;
-async function publish(value: Partial<Snapshot>) {
+async function publish(value: Partial<Snapshot>, forceSave = false) {
   const wasRunning = session?.status === 'running';
   if (value.status === 'running' && session?.status !== 'running') {
     historySession += 1;
@@ -418,7 +439,12 @@ async function publish(value: Partial<Snapshot>) {
     next.status === 'ended' &&
     !('endPrompt' in value)
   ) {
-    const ended = historyFixture.onSessionEnded(next, historySession);
+    delete next.callEndPrompt;
+    const ended = historyFixture.onSessionEnded(
+      next,
+      historySession,
+      forceSave,
+    );
     if (ended.endPrompt) next.endPrompt = ended.endPrompt;
     else delete next.endPrompt;
     historyChanged = ended.changed;
@@ -1084,13 +1110,36 @@ mockIPC(
       case 'respond_to_call_prompt':
         callPromptAnswers.push(structuredClone(args));
         return;
+      case 'respond_to_call_end_prompt': {
+        const { id, answer } = args as Commands['respond_to_call_end_prompt'];
+        callEndPromptAnswers.push(structuredClone(args));
+        if (session.callEndPrompt?.id !== id) return;
+        await publish({ callEndPrompt: undefined });
+        if (answer === 'stopAndSave') {
+          await send({
+            status: 'stopping',
+            canStart: false,
+            activity: 'quiet',
+          });
+          await send({
+            status: 'off',
+            canStart: true,
+            activity: 'quiet',
+          });
+          await publish(
+            { status: 'ended', cue: null, cuesPaused: false },
+            true,
+          );
+        }
+        return;
+      }
       case 'start_live_session':
         liveStarts.push(structuredClone(args ?? null));
         await beginStart();
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
-        await publish({ status: 'ended', cue: null, cuesPaused: false });
+        await endLivePublish();
         return;
       case 'set_live_cues_paused':
         if (rejectCuePause) {
@@ -1169,6 +1218,7 @@ mockIPC(
           });
         }
         return;
+      case 'update_notes':
       case 'save_notes':
         if (session && session.revision >= 1_000) {
           session = { ...session, notes: (args as { notes: string }).notes };
@@ -1229,6 +1279,7 @@ declare global {
       applicationAudio: unknown[];
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
+      callEndPromptAnswers: unknown[];
       callPrompt: () => {
         enabled: boolean;
         autoStart: boolean;
@@ -1334,6 +1385,7 @@ window.captureTest = {
   applicationAudio,
   liveStarts,
   callPromptAnswers,
+  callEndPromptAnswers,
   callPrompt: () => structuredClone(callPrompt),
   callPromptStart: (application) => emit('call-prompt:start', application),
   host: (value) => {
