@@ -302,9 +302,45 @@ function previewChanged() {
   return status;
 }
 
+// Share only concurrent metadata requests, never completed results or secrets.
+let statusGeneration = 0;
+let pendingStatus: Promise<KeysStatus> | undefined;
+
+function invalidateStatus() {
+  statusGeneration++;
+  pendingStatus = undefined;
+}
+
 export async function keysStatus(): Promise<KeysStatus> {
   if (!desktop) return previewStatus();
-  return invoke<KeysStatus>('provider_keys_status');
+  if (pendingStatus) return pendingStatus;
+  const generation = statusGeneration;
+  const request = invoke<KeysStatus>('provider_keys_status').then(
+    (status) => (generation === statusGeneration ? status : keysStatus()),
+    (error: unknown) => {
+      if (generation !== statusGeneration) return keysStatus();
+      throw error;
+    },
+  );
+  pendingStatus = request;
+  try {
+    return await request;
+  } finally {
+    if (pendingStatus === request) pendingStatus = undefined;
+  }
+}
+
+async function changeKeyStatus(
+  command: string,
+  args: Record<string, unknown>,
+): Promise<KeysStatus> {
+  invalidateStatus();
+  try {
+    return await invoke<KeysStatus>(command, args);
+  } finally {
+    // A read begun during the mutation must not satisfy a later refresh.
+    invalidateStatus();
+  }
 }
 
 /** Stores or replaces a key. Nothing is sent to the provider. */
@@ -318,7 +354,7 @@ export async function setKey(
     previewKeys[provider] = { state: 'set', verified: false };
     return previewChanged();
   }
-  return invoke<KeysStatus>('set_provider_key', { provider, key });
+  return changeKeyStatus('set_provider_key', { provider, key });
 }
 
 /** One read-only request to the provider with the stored key. */
@@ -327,7 +363,7 @@ export async function testKey(provider: KeyProvider): Promise<KeysStatus> {
     throw new Error(
       'The browser preview cannot check a key. Nothing was changed.',
     );
-  return invoke<KeysStatus>('test_provider_key', { provider });
+  return changeKeyStatus('test_provider_key', { provider });
 }
 
 export async function removeKey(provider: KeyProvider): Promise<KeysStatus> {
@@ -335,7 +371,7 @@ export async function removeKey(provider: KeyProvider): Promise<KeysStatus> {
     previewKeys[provider] = null;
     return previewChanged();
   }
-  return invoke<KeysStatus>('remove_provider_key', { provider });
+  return changeKeyStatus('remove_provider_key', { provider });
 }
 
 export async function cueUsage(): Promise<CueUsage | null> {
@@ -399,9 +435,10 @@ export async function watchKeys(receive: (status: KeysStatus) => void) {
       previewListeners.delete(receive);
     };
   }
-  return listen<KeysStatus>('provider-keys:changed', ({ payload }) =>
-    receive(payload),
-  );
+  return listen<KeysStatus>('provider-keys:changed', ({ payload }) => {
+    invalidateStatus();
+    receive(payload);
+  });
 }
 
 /** Which cloud provider transcribes the next live session. */

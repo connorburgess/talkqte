@@ -121,8 +121,7 @@ status payload). The first-run screen reads `provider_keys_status` at launch.
 only in tests); `store.available` is false only where that store does not
 exist on the system. `state` is `notSet`, `set`, `rejected` or `unreadable`
 (the store could not be read, so whether a key is stored is unknown; nothing is attempted with
-it, and it does not count as missing). Each status call reads the Keychain
-again, so a key deleted or added outside TalkQTE is seen. `verified` is true only after a
+it, and it does not count as missing). Each new status operation checks stored-key metadata again, so a key deleted or added outside TalkQTE is seen. On macOS, this requests attributes, not password data. One live-readiness operation shares that snapshot; concurrent notebook status consumers share only an in-flight request. Completed results are not cached. Save, remove, test, and key-change events invalidate pending status requests so an older reply cannot restore outdated state. `verified` is true only after a
 passing check in this app run, and is cleared when the key is replaced or
 rejected. `anyMissing` is true while neither `deepgram` nor `elevenlabs` is
 set, or none of `anthropic`, `openai`, or `gemini` is set: the "no keys set"
@@ -153,3 +152,23 @@ real Keychain or network. Not yet checked: the real Keychain on a signed
 build, Credential Manager and GNOME Keyring in a person's desktop session
 (including the keyring's unlock prompt), KWallet, and either provider's real
 response to the check.
+
+## Repeated macOS access prompts
+
+A prompt naming a Keychain item is different from microphone, system-audio or
+Calendar permission. Record the dialog wording and whether it follows an app
+rebuild or an unchanged relaunch before diagnosing it; metadata deduplication
+is not evidence that access prompts are fixed.
+
+Local ad-hoc builds have a designated requirement tied to that exact binary.
+A rebuilt app can therefore be treated as different code and asked for access
+again. Stable certificate signing and verification across upgrades remain a
+separate [distribution requirement](release-path.md#7-upgrade).
+See Apple's [code identity explanation](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/).
+
+Cue adapters still retrieve the selected key for each active request; no secret
+cache is added. Cancelled or expired work is checked again before key retrieval,
+and cancellation while a Keychain read is pending prevents the provider request
+after that read returns. An OS authorization dialog already in progress cannot
+be cancelled by these checks. Transcription still retrieves its key per stream
+attempt, and external removal is still detected by subsequent status/use checks.
