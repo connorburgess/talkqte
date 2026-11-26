@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
+  ArrowDown,
+  ArrowUp,
+  GripVertical,
   ArrowLeft,
   ArrowUpRight,
   ChevronRight,
@@ -23,6 +26,7 @@ import {
   meetingDate,
   minutes,
   openKeptMeeting,
+  positionKeptMeeting,
   renameKeptMeeting,
   renameKeptMeetingSpeaker,
   renameMeetingFolder,
@@ -48,7 +52,7 @@ function sourceDescription(meeting: KeptMeeting) {
   return sourceNames[meeting.sources];
 }
 
-/** Meetings page: list kept meetings newest first, search by title or text,
+/** Meetings page: saved organization order, search by title or text,
  * open read-only with notes/meeting notes/cues/transcript, rename, export,
  * and delete. */
 export function MeetingHistory({
@@ -61,6 +65,12 @@ export function MeetingHistory({
   const id = useId();
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [notesOnly, setNotesOnly] = useState(false);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const dragHandles = useRef(new Map<string, HTMLButtonElement>());
   const [listing, setListing] = useState<KeptListing | null>(null);
   const [afterKeep, setAfterKeep] = useState<AfterSessionKeep>('auto');
   const [selected, setSelected] = useState<KeptMeeting | null>(null);
@@ -288,6 +298,58 @@ export function MeetingHistory({
     } finally {
       setBusy(false);
     }
+  };
+
+  const positionMeeting = async (
+    meetingId: string,
+    folder: string | null,
+    anchorId: string | null,
+    placement: 'before' | 'after',
+  ) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setDragging(null);
+    setDropTarget(null);
+    try {
+      await positionKeptMeeting(meetingId, folder, anchorId, placement);
+      await loadList(query);
+      setNotice(
+        `Meeting moved ${anchorId ? placement + ' the selected meeting' : 'to the end of ' + (folder ?? 'Unfiled')}.`,
+      );
+      requestAnimationFrame(() =>
+        (
+          dragHandles.current.get(meetingId) ??
+          folderHeaders.current.get(folder ?? '') ??
+          newFolderButton.current
+        )?.focus(),
+      );
+    } catch (problem) {
+      setError(failure(problem, 'The meeting could not be moved. Try again.'));
+      requestAnimationFrame(() => dragHandles.current.get(meetingId)?.focus());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dropMeeting = (
+    event: React.DragEvent,
+    folder: string | null,
+    anchorId: string | null = null,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (
+      !busy &&
+      dragging &&
+      dragging !== anchorId &&
+      event.dataTransfer.getData('application/x-talkqte-meeting-id') ===
+        dragging
+    ) {
+      void positionMeeting(dragging, folder, anchorId, 'before');
+    }
+    setDragging(null);
+    setDropTarget(null);
   };
 
   const confirmDeleteMeeting = async () => {
@@ -826,9 +888,19 @@ export function MeetingHistory({
   const archivedCount = (listing?.meetings ?? []).filter(
     (item) => item.archived,
   ).length;
-  const visibleMeetings = (listing?.meetings ?? []).filter(
-    (item) => showArchived || !item.archived,
-  );
+  const filtered = notesOnly || !!fromDate || !!toDate;
+  const invalidDates = !!fromDate && !!toDate && fromDate > toDate;
+  const visibleMeetings = (listing?.meetings ?? []).filter((item) => {
+    const when = new Date(item.startedAtMs);
+    const localDate = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
+    return (
+      !invalidDates &&
+      (showArchived || !item.archived) &&
+      (!notesOnly || item.hasNotes) &&
+      (!fromDate || localDate >= fromDate) &&
+      (!toDate || localDate <= toDate)
+    );
+  });
   const searching = query.trim().length > 0;
   const canonicalFolder = new Map(folders.map((f) => [f.toLowerCase(), f]));
   const unfiledMeetings: KeptSummary[] = [];
@@ -845,13 +917,19 @@ export function MeetingHistory({
       unfiledMeetings.push(item);
     }
   }
-  const visibleFolders = searching
-    ? folders.filter(
-        (folder) => (meetingsByFolder.get(folder)?.length ?? 0) > 0,
-      )
-    : folders;
+  const visibleFolders =
+    searching || filtered
+      ? folders.filter(
+          (folder) => (meetingsByFolder.get(folder)?.length ?? 0) > 0,
+        )
+      : folders;
 
   const renderMeetingRow = (item: KeptSummary) => {
+    const folder = item.folder
+      ? (canonicalFolder.get(item.folder.toLowerCase()) ?? null)
+      : null;
+    const siblings = folder ? meetingsByFolder.get(folder)! : unfiledMeetings;
+    const index = siblings.findIndex((sibling) => sibling.id === item.id);
     const button = (
       <button
         type="button"
@@ -874,8 +952,83 @@ export function MeetingHistory({
     return (
       <li
         key={item.id}
-        className={`history-row${item.archived ? ' is-archived' : ''}`}
+        className={`history-row${item.archived ? ' is-archived' : ''}${dropTarget === item.id ? ' is-drop-target' : ''}`}
+        onDragOver={(event) => {
+          if (!busy && dragging && dragging !== item.id) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = 'move';
+            setDropTarget(item.id);
+          }
+        }}
+        onDrop={(event) => dropMeeting(event, folder, item.id)}
       >
+        <div
+          className="history-order-controls"
+          role="group"
+          aria-label={`Organize ${item.title}`}
+        >
+          <button
+            type="button"
+            className="icon-button history-drag-handle"
+            aria-label={`Drag ${item.title}`}
+            title="Drag to a folder or before another meeting. Or use Move up, Move down and Folder."
+            ref={(node) => {
+              if (node) dragHandles.current.set(item.id, node);
+              else dragHandles.current.delete(item.id);
+            }}
+            draggable={!busy}
+            disabled={busy}
+            onDragStart={(event) => {
+              event.dataTransfer.setData(
+                'application/x-talkqte-meeting-id',
+                item.id,
+              );
+              event.dataTransfer.effectAllowed = 'move';
+              setDragging(item.id);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setDropTarget(null);
+            }}
+          >
+            <GripVertical size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={`Move ${item.title} up`}
+            title="Move up"
+            disabled={busy || index === 0}
+            onClick={() =>
+              void positionMeeting(
+                item.id,
+                folder,
+                siblings[index - 1].id,
+                'before',
+              )
+            }
+          >
+            <ArrowUp size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={`Move ${item.title} down`}
+            title="Move down"
+            disabled={busy || index === siblings.length - 1}
+            onClick={() =>
+              void positionMeeting(
+                item.id,
+                folder,
+                siblings[index + 1].id,
+                'after',
+              )
+            }
+          >
+            <ArrowDown size={16} aria-hidden="true" />
+          </button>
+        </div>
         {button}
         <button
           type="button"
@@ -915,7 +1068,10 @@ export function MeetingHistory({
   return (
     <div className="history">
       <h1>Meetings</h1>
-      <p className="page-description">Saved on this Mac, newest first.</p>
+      <p className="page-description">
+        Saved on this Mac. Drag to organize, or use Move up, Move down and
+        Folder.
+      </p>
 
       <p className="visually-hidden" role="status">
         {notice}
@@ -1044,6 +1200,52 @@ export function MeetingHistory({
               </div>
             </form>
           )}
+          <div
+            className="history-filter-row"
+            role="group"
+            aria-label="Filter meetings"
+          >
+            <label className="history-field">
+              From date
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(event) => setFromDate(event.target.value)}
+              />
+            </label>
+            <label className="history-field">
+              To date
+              <input
+                type="date"
+                value={toDate}
+                onChange={(event) => setToDate(event.target.value)}
+              />
+            </label>
+            <label className="history-check">
+              <input
+                type="checkbox"
+                checked={notesOnly}
+                onChange={(event) => setNotesOnly(event.target.checked)}
+              />
+              Has notes
+            </label>
+            {filtered && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setFromDate('');
+                  setToDate('');
+                  setNotesOnly(false);
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+          {invalidDates && (
+            <p role="alert">From date must be on or before To date.</p>
+          )}
           {(archivedCount > 0 || showArchived) && (
             <div className="history-filter-row">
               <label className="history-check">
@@ -1067,9 +1269,27 @@ export function MeetingHistory({
 
           {listing &&
           visibleMeetings.length === 0 &&
-          (searching || folders.length === 0) ? (
+          (searching || filtered || folders.length === 0) ? (
             <div className="history-empty">
-              {searching ? (
+              {filtered ? (
+                <>
+                  <p>
+                    No meetings match these filters
+                    {searching ? ' and search' : ''}.
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setFromDate('');
+                      setToDate('');
+                      setNotesOnly(false);
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </>
+              ) : searching ? (
                 <>
                   <p>No meetings match “{query.trim()}”.</p>
                   <button
@@ -1107,11 +1327,29 @@ export function MeetingHistory({
             </div>
           ) : (
             <>
-              {unfiledMeetings.length > 0 && (
-                <ul className="history-list" aria-label="Meetings">
-                  {unfiledMeetings.map(renderMeetingRow)}
-                </ul>
-              )}
+              <section
+                className={`history-unfiled${dropTarget === 'unfiled' ? ' is-drop-target' : ''}`}
+                aria-label="Unfiled meetings"
+                onDragOver={(event) => {
+                  if (!busy && dragging) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    setDropTarget('unfiled');
+                  }
+                }}
+                onDrop={(event) => dropMeeting(event, null)}
+              >
+                <h2 className="history-group-title">Unfiled</h2>
+                {unfiledMeetings.length > 0 ? (
+                  <ul className="history-list" aria-label="Meetings">
+                    {unfiledMeetings.map(renderMeetingRow)}
+                  </ul>
+                ) : (
+                  <p className="history-help">
+                    Drop a meeting here to move it out of a folder.
+                  </p>
+                )}
+              </section>
 
               {visibleFolders.map((folder) => {
                 const folderMeetings = meetingsByFolder.get(folder) ?? [];
@@ -1119,7 +1357,7 @@ export function MeetingHistory({
                   renamingFolder === folder || confirmDeleteFolder === folder;
                 const isOpen = isEditingFolder
                   ? true
-                  : searching
+                  : searching || filtered
                     ? !(
                         Object.hasOwn(searchCollapsed, folder) &&
                         searchCollapsed[folder]
@@ -1131,7 +1369,18 @@ export function MeetingHistory({
                 const countWord =
                   folderMeetings.length === 1 ? 'meeting' : 'meetings';
                 return (
-                  <div key={folder} className="history-folder-group">
+                  <div
+                    key={folder}
+                    className={`history-folder-group${dropTarget === `folder:${folder}` ? ' is-drop-target' : ''}`}
+                    onDragOver={(event) => {
+                      if (!busy && dragging) {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDropTarget(`folder:${folder}`);
+                      }
+                    }}
+                    onDrop={(event) => dropMeeting(event, folder)}
+                  >
                     <details className="history-folder" open={isOpen}>
                       <summary
                         ref={(node) => {
@@ -1142,7 +1391,7 @@ export function MeetingHistory({
                         onClick={(event) => {
                           event.preventDefault();
                           if (isEditingFolder) return;
-                          if (searching) {
+                          if (searching || filtered) {
                             setSearchCollapsed((prev) => ({
                               ...prev,
                               [folder]: isOpen,

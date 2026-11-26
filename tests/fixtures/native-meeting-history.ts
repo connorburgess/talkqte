@@ -438,7 +438,7 @@ function saveSessionMeeting(
     revision: 1,
     ...fromSession(current, includeApplication),
   };
-  meetings.push(meeting);
+  meetings.unshift(meeting);
   sessionKept = {
     id: meeting.id,
     notes: current.notes,

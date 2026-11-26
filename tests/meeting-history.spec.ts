@@ -740,15 +740,13 @@ test('Meetings supports optional collapsible folders: create, move, collapse/exp
     page.getByRole('button', { name: 'New folder', exact: true }),
   ).toBeFocused();
   await expect(unfiledList.locator('.history-item')).toHaveCount(3);
-  await expect(unfiledList.locator('.history-item').nth(0)).toContainText(
-    'Orchard supplier sync',
-  );
-  await expect(unfiledList.locator('.history-item').nth(1)).toContainText(
-    'Greenhouse roof check',
-  );
-  await expect(unfiledList.locator('.history-item').nth(2)).toContainText(
+  // Folder moves now append in the saved organization order. Deleting the
+  // folder preserves that order instead of re-sorting by date.
+  await expect(unfiledList.locator('.history-item-title')).toHaveText([
     'Potluck seating plan',
-  );
+    'Orchard supplier sync',
+    'Greenhouse roof check',
+  ]);
 });
 
 test('Meetings folders remain accessible and overflow-free at narrow width', async ({
