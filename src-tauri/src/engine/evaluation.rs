@@ -5,6 +5,7 @@ use crate::cue_evaluator::{Action, Decision, Failure, Provenance, Request, Sourc
 
 mod permission;
 mod projection;
+mod question_repeat;
 pub(super) use permission::context_fingerprint;
 use permission::Permission;
 pub use permission::{
@@ -1062,6 +1063,8 @@ impl Engine {
                     *key == repeat_key && now.saturating_sub(*shown) < REPEAT_MS
                 }) {
                     Some("repeat")
+                } else if question_repeat::without_new_evidence(request, &cited, &question) {
+                    Some("spoken_question")
                 } else {
                     None
                 };
@@ -1181,6 +1184,7 @@ impl Engine {
 
     /// A model's `show` that is not displayed, with a fixed reason and no
     /// cue text: `slot`, `asked` (it cites a line that raised "Asked you"),
+    /// `spoken_question` (a copied question without new cited speech),
     /// `expired_source`, `cooldown`, `focus`, `repeat`, `stale` when no
     /// cited line was fresh speech, or `stale_request` when the context
     /// changed while the model answered (new speech, the cue on screen,
@@ -1413,6 +1417,7 @@ mod lab_tests;
 #[cfg(test)]
 mod tests {
     mod history_tests;
+    mod usefulness_tests;
     use super::*;
     use crate::cue_evaluator::{Cancellation, Evaluator, Failure};
     use std::{

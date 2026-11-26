@@ -1,0 +1,116 @@
+{
+  "note": "Fictional authored policy expectations and scripted replies only. Offline request/lifecycle tests do not measure a live model or prove semantic quality.",
+  "cases": [
+    {
+      "id": "question-already-asked",
+      "speech": [
+        "When does the garden open?",
+        "We are still checking the beds."
+      ],
+      "decision": {
+        "action": "quiet",
+        "cue": null,
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "Repeating an unanswered question adds no help."
+    },
+    {
+      "id": "answered-naturally",
+      "speech": ["Who will unlock the shed?", "I will unlock it at eight."],
+      "decision": {
+        "action": "quiet",
+        "cue": null,
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "The conversation supplies an answer without another prompt."
+    },
+    {
+      "id": "brainstorming",
+      "speech": [
+        "We could try a seed swap, or perhaps a tool library.",
+        "Just collecting possibilities; we will choose next month."
+      ],
+      "decision": {
+        "action": "quiet",
+        "cue": null,
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "Options are not agreed tasks needing owners."
+    },
+    {
+      "id": "tentative-plan-without-risk",
+      "speech": [
+        "We may finish painting by Thursday.",
+        "That is our tentative plan; no deadline is agreed."
+      ],
+      "decision": {
+        "action": "quiet",
+        "cue": null,
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "Tentativeness alone does not justify skepticism."
+    },
+    {
+      "id": "consequential-owner-gap",
+      "speech": [
+        "We agreed to deliver the seedlings today.",
+        "The truck leaves in ten minutes, but no driver is assigned."
+      ],
+      "decision": {
+        "action": "show",
+        "cue": "Who can drive the truck before dispatch?",
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "An actual agreed next step is blocked now."
+    },
+    {
+      "id": "source-backed-reminder",
+      "speech": [
+        "The safety review takes two full days.",
+        "The leaflet draft arrives Thursday; printing is planned Friday."
+      ],
+      "decision": {
+        "action": "show",
+        "cue": "The safety review needs two full days.",
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "Useful stated constraint instead of another request for it."
+    },
+    {
+      "id": "concrete-contradiction",
+      "speech": [
+        "The hall booking ends at four.",
+        "Let us schedule the final workshop there at five."
+      ],
+      "decision": {
+        "action": "show",
+        "cue": "The hall booking ends before that workshop.",
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "Both sides of the conflict are supplied, with no invented risk."
+    },
+    {
+      "id": "response-help",
+      "speech": [
+        "We can use the greenhouse if the hall is occupied.",
+        "The hall is occupied for the whole afternoon."
+      ],
+      "decision": {
+        "action": "show",
+        "cue": "The greenhouse was offered as the alternative.",
+        "sourceIds": ["transcript:line-1", "transcript:line-2"]
+      },
+      "rationale": "A stated option can help respond without speaking for the listener."
+    },
+    {
+      "id": "unsupported-fact",
+      "speech": ["We might offer an evening seed swap."],
+      "decision": {
+        "action": "quiet",
+        "cue": null,
+        "sourceIds": ["transcript:line-1"]
+      },
+      "rationale": "No source supports a claim that evening access is prohibited."
+    }
+  ]
+}

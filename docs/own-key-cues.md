@@ -77,6 +77,48 @@ The lab's Node test and the app's Rust test both build them and must match
 the fixture exactly: model, system text, user message string, schema,
 thinking setting and the spend estimate.
 
+## Usefulness policy and limits
+
+The shared live prompt asks for information that helps now: a relevant sourced
+constraint, concrete contradiction or response option, or an unresolved gap
+blocking an actual decision or committed next step. An already-spoken question
+does not become useful just because nobody answered it yet. Naturally answered
+questions, brainstorming and hypothetical options should stay quiet. A tentative
+timeline alone is no evidence for a skeptical challenge. Ownership prompts need
+an actual task being committed to, not merely a possible idea. Later speech can
+give a consequential reason to revisit an older question; the reminder must cite
+that new evidence. The existing Asked you priority and resolution rules remain.
+
+The default request still labels all speech `Speaker`. It does not tell the
+model which line came from the microphone or who spoke it. The optional session
+name identifies the listener for explicit direct address, not a line's author.
+No new speaker identity, context lookup, prior-note selection or sharing grant
+is added. A reminder may use only the supplied speech, or exact selected notes
+through the separately approved selected-context path. A historical note is not
+a verified current fact.
+
+Rust also drops a model `show` that copies a supplied question, ignoring case,
+punctuation and a few conversational lead-ins, when it cites no substantive
+speech later than that question. It does not disable processing, record a shown
+cue or affect the engine's own Asked you cue. This is a narrow English question
+check, not lexical-overlap scoring or semantic deduplication: negations, dates,
+quantities and changed words remain distinct. A later cited line can preserve a
+reminder; this structural allowance does not establish that the new line
+actually justifies it. Paraphrases, answers, brainstorming and risk still depend
+on model judgment and can be wrong. Only the bounded approved request is checked;
+speech outside it is not searched.
+
+The fictional `scripts/fixtures/cue-usefulness.json` cases document expected
+quiet behavior for already-asked/answered questions, brainstorming, unsupported
+facts and unsupported skepticism, plus opportunities for a consequential gap,
+source-backed reminder, concrete contradiction and response help. Scripted Rust
+replies exercise display, source and permission boundaries; Node checks the
+actual request contract. Neither calls a provider or measures model quality.
+Next acceptance: a separately authorized comparison on held-out fictional
+conversations, across chosen models, checking false interruptions, missed useful
+context, timing and listening. Offline tests do not establish that participation
+improves.
+
 ## Replies and settlement
 
 The lab adapter's and broker's rules, without a broker:

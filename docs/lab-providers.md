@@ -198,10 +198,14 @@ matched throughout, with no occupied-slot `show` or raw asked `withdraw`.
 These are unblinded, near-rule authored diagnostics, not held-out validation,
 real-meeting accuracy or general effectiveness evidence. No native dispatch,
 Asked priority/lifetime, visible-card timing, staleness, blocked opportunities or
-participation benefit was measured. The assembled API system prompt fingerprint
+participation benefit was measured. That trial's assembled API system prompt fingerprint
 is `ad98cdf73eb7c2047510bb0b1b3a3e42b0c73db6cb36539c0077ff95432eb677`;
 the offline test verifies request assembly and preservation of asked state, not
-model correctness. Other prompt components, schemas and transport stay unchanged.
+model correctness. The current live policy has since changed for
+[cue usefulness](own-key-cues.md#usefulness-policy-and-limits); those historical
+trial results do not validate the new prompt. The offline shared request fixture
+and selected-context fingerprint track the current policy, with schemas and
+transport unchanged.
 
 This is code preparation for review, not activation or promotion of an existing
 app or launcher. The next acceptance check is a separately reviewed and

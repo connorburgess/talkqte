@@ -902,6 +902,35 @@ mod tests {
     }
 
     #[test]
+    fn live_input_does_not_identify_the_listener_from_source_speaker_labels() {
+        let sources = ["You", "Speaker 1", "Fictional Mira"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, speaker)| Source {
+                id: format!("transcript:line-{i}"),
+                revision: 0,
+                provenance: Provenance::Transcript {
+                    at_ms: i as u64,
+                    speaker: speaker.into(),
+                },
+                text: "When does the garden open?".into(),
+            })
+            .collect();
+        let request = Request::new(1, 1, sources, None)
+            .unwrap()
+            .with_listener(Some("Mira".into()), vec![])
+            .unwrap();
+        let input: serde_json::Value =
+            serde_json::from_str(&request.prompt_input().unwrap()).unwrap();
+        assert_eq!(input["userName"], "Mira");
+        for event in input["events"].as_array().unwrap() {
+            assert_eq!(event["speaker"], "Speaker");
+            assert_eq!(event.as_object().unwrap().len(), 3);
+        }
+        assert!(input.get("priorNotes").is_none());
+    }
+
+    #[test]
     fn all_decisions_are_compact_proposals_with_explicit_evidence() {
         for (action, existing, expected) in [
             ("show", false, Action::Show),

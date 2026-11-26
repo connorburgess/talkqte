@@ -217,10 +217,10 @@ test('the system prompt is byte-stable and carries no user name or earlier cues'
   assert.match(a, /With an existing cue, answer quiet to keep it on screen/);
 });
 
-// Pins the assembled request contract that was previously exercised on
-// authored owner-resolution controls. This checks bytes/transport, not whether
-// a model understands acceptance or produces the right semantic decision.
-test('owner-resolution prompt fingerprint survives cue-state selection and user serialization', () => {
+// Pins the current assembled contract while preserving owner-resolution and
+// Asked state. Historical model trials do not validate this changed prompt;
+// these checks establish bytes/transport, not semantic quality.
+test('live quality policy fingerprint preserves cue-state selection and anonymous serialization', () => {
   for (const existingCue of [
     null,
     { text: 'Who can take the rota?', sourceIds: ['s1'] },
@@ -230,7 +230,7 @@ test('owner-resolution prompt fingerprint survives cue-state selection and user 
     const params = buildAnthropicParams('claude-opus-5-5', request);
     assert.equal(
       createHash('sha256').update(params.system[0].text).digest('hex'),
-      'ad98cdf73eb7c2047510bb0b1b3a3e42b0c73db6cb36539c0077ff95432eb677',
+      '559ae463a0bd5b9b8dcdd932cf08116bff4473e0705bccbe4c434c4777ccd635',
     );
     // Preserve asked identity in the real wire input, so the prompt's generic
     // ownership distinction cannot accidentally apply to an asked question.
@@ -241,6 +241,59 @@ test('owner-resolution prompt fingerprint survives cue-state selection and user 
         ['quiet', 'resolved'],
       );
     }
+  }
+});
+
+test('fictional usefulness cases use the real live policy without adding identity or context fields', () => {
+  // These authored decisions are offline expectations, not model responses.
+  // Rust drives the same corpus through the real lifecycle with scripted replies.
+  const corpus = JSON.parse(
+    readFileSync(
+      new URL('./fixtures/cue-usefulness.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  for (const c of corpus.cases) {
+    const input = {
+      events: c.speech.map((text, i) => ({
+        id: `transcript:line-${i + 1}`,
+        speaker: 'Speaker',
+        text,
+      })),
+      existingCue: null,
+    };
+    const params = buildAnthropicParams('claude-haiku-5-5', input);
+    assert.deepEqual(JSON.parse(params.messages[0].content), input);
+    const policy = params.system[0].text;
+    assert.match(policy, /speaker field is always "Speaker"/);
+    assert.match(policy, /not evidence of who said it/);
+    assert.match(
+      policy,
+      /question already asked by anyone, including a paraphrase/,
+    );
+    assert.match(
+      policy,
+      /Brainstorming, hypothetical options and tentative plans are not commitments/,
+    );
+    assert.match(policy, /Do not manufacture skepticism from uncertainty/);
+    assert.match(
+      policy,
+      /new consequential reason to revisit an older unresolved issue/,
+    );
+    assert.match(
+      policy,
+      /prefer a concise reminder of it over asking for that fact again/,
+    );
+    assert.match(policy, /existingCue.kind "asked"/);
+    const ids = new Set(input.events.map((event) => event.id));
+    assert.ok(
+      c.decision.sourceIds.every((id) => ids.has(id)),
+      c.id,
+    );
+    assert.ok(
+      c.decision.cue === null || c.decision.cue.split(/\s+/).length <= 10,
+      c.id,
+    );
   }
 });
 
