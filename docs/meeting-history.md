@@ -101,7 +101,7 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
 | `respond_to_end_prompt`          | Companion dock action for an ended non-empty live session (`keep`, `writeNotes`, `open`, `delete`, `dismiss`)                              |
 | `keep_meeting_in_history`        | Keeps the ended session under a title, optionally with the application's name                                                              |
 | `update_kept_session_meeting`    | Writes the same session's later changes to its kept meeting                                                                                |
-| `kept_meetings`                  | The list in saved organization order, optionally filtered by a search                                                                                    |
+| `kept_meetings`                  | The list in saved organization order, optionally filtered by a search                                                                      |
 | `open_kept_meeting`              | One meeting in full                                                                                                                        |
 | `rename_kept_meeting`            | A new title                                                                                                                                |
 | `rename_kept_meeting_speaker`    | Renames a diarized remote speaker (`Speaker 1`, etc.) in a kept meeting                                                                    |
