@@ -352,7 +352,7 @@ pub(crate) async fn rename_kept_meeting_speaker(
                 runtime.export = None;
                 crate::publish(&app, &mut runtime);
             }
-        }
+        };
     }
     Ok(meeting)
 }
