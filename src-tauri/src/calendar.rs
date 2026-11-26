@@ -420,6 +420,18 @@ impl Watcher {
     }
 }
 
+/// EventKit's predicate matches overlapping events, including old or ended
+/// entries. Filter timestamps before reading any title or link-bearing field.
+#[cfg(any(target_os = "macos", test))]
+fn query_candidate(start: f64, end: f64, window_start: i64, window_end: i64, now: i64) -> bool {
+    start.is_finite()
+        && end.is_finite()
+        && start >= window_start as f64
+        && start <= window_end as f64
+        && end > start
+        && end > now as f64
+}
+
 /// Returns the calendar source for the running app: EventKit on macOS outside
 /// lab runs, and `UnavailableSource` in lab runs or on other platforms.
 pub fn for_app() -> Box<dyn CalendarSource> {
@@ -622,15 +634,13 @@ mod macos {
                     };
                     let start_secs: f64 = unsafe { msg_send![&*start_obj, timeIntervalSince1970] };
                     let end_secs: f64 = unsafe { msg_send![&*end_obj, timeIntervalSince1970] };
-                    if !start_secs.is_finite() || !end_secs.is_finite() {
-                        continue;
-                    }
-                    // EventKit returns overlapping events too. Reject old starts before
-                    // accessing any title, identifier, or link-bearing fields.
-                    if start_secs < window_start_epoch_s as f64
-                        || start_secs > window_end_epoch_s as f64
-                        || end_secs <= start_secs
-                    {
+                    if !super::query_candidate(
+                        start_secs,
+                        end_secs,
+                        window_start_epoch_s,
+                        window_end_epoch_s,
+                        super::now_epoch_secs(),
+                    ) {
                         continue;
                     }
                     let id = nsstring_to_string(unsafe { msg_send![event, eventIdentifier] });
@@ -959,6 +969,29 @@ mod tests {
         assert!(watcher.observe(&[meeting], false, now));
         assert!(watcher.prompt().is_none());
         assert_eq!(watcher.answer(id, Answer::Start), None);
+    }
+
+    #[test]
+    fn query_scope_excludes_completed_events_and_old_overlaps_before_extracting_fields() {
+        let now = 1_700_000_000;
+        let lower = now - IN_PROGRESS_WINDOW_SECS;
+        let upper = now + UPCOMING_WINDOW_SECS;
+        let eligible =
+            |start: i64, end: i64| query_candidate(start as f64, end as f64, lower, upper, now);
+        assert!(eligible(now + 120, now + 1800));
+        assert!(eligible(now - 120, now + 600));
+        // EventKit can return both of these overlaps; neither may expose fields.
+        assert!(!eligible(now - 120, now - 1));
+        assert!(!eligible(now - 120, now));
+        assert!(!eligible(lower - 1, now + 600));
+        assert!(!eligible(upper + 1, now + 1800));
+        assert!(!query_candidate(
+            f64::NAN,
+            now as f64 + 600.0,
+            lower,
+            upper,
+            now
+        ));
     }
 
     #[test]

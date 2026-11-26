@@ -9,8 +9,8 @@ Privacy & Security → Calendars**. Other platforms show an unavailable explanat
 
 While enabled and idle, a Rust worker polls every 15 seconds for events starting
 within the next five minutes or the previous ten minutes. EventKit may return
-other overlapping events; their start times are filtered before reading titles
-or link fields. All-day events are skipped. For eligible events, URL, location,
+other overlapping events; old starts and completed events are filtered by
+timestamp before reading titles or link fields. All-day events are skipped. For eligible events, URL, location,
 and notes text are inspected transiently for known meeting domains or the huddle
 marker, then discarded. Attendees and organizers are never accessed. The adapter
 retains only an occurrence identifier, sanitized title, timestamps, and a meeting
