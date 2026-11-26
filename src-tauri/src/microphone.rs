@@ -705,7 +705,7 @@ pub(crate) fn allocations_during(work: impl FnOnce()) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         alloc::{GlobalAlloc, Layout, System},
@@ -740,7 +740,7 @@ mod tests {
     static ALLOCATOR: CountingAllocator = CountingAllocator;
 
     /// Allocations `work` makes on this thread.
-    pub(super) fn allocations_during(work: impl FnOnce()) -> usize {
+    pub(crate) fn allocations_during(work: impl FnOnce()) -> usize {
         ALLOCATIONS.set(0);
         COUNTING.set(true);
         work();

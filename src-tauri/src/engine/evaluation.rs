@@ -603,6 +603,15 @@ impl Engine {
         Ok(Some(request))
     }
 
+    /// Returns true when `text` is only a trivial 1-2 word backchannel / filler
+    /// acknowledgement and no question or listener name-mention rule applies.
+    pub(super) fn should_skip_filler_evaluation(&self, text: &str, asked_matched: bool) -> bool {
+        if asked_matched || text.contains('?') {
+            return false;
+        }
+        is_trivial_filler_line(text, self.state.user_name.as_deref())
+    }
+
     /// Only newly accepted eligible speech requests work. Multiple notifications
     /// coalesce while a cancelled adapter returns; controls discard the marker.
     pub(super) fn submit_evaluation(&mut self) {
@@ -1302,6 +1311,62 @@ fn evidence(sources: &[Source]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn normalize_turn_token(word: &str) -> String {
+    word.replace(['’', '‘'], "'")
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase()
+}
+
+fn is_trivial_filler_line(text: &str, user_name: Option<&str>) -> bool {
+    const SINGLE_FILLER_WORDS: &[&str] = &[
+        "yeah", "yea", "yep", "yup", "yes", "no", "nope", "nah", "ok", "okay", "so", "right",
+        "sure", "alright", "uh", "um", "umm", "er", "erm", "ah", "oh", "hmm", "hm", "mm", "mmm",
+        "huh", "uh-huh", "uhuh", "mm-hmm", "mmhmm", "mhm", "uh-uh", "nuh-uh", "well", "gotcha",
+        "thanks",
+    ];
+    const TWO_WORD_FILLERS: &[(&str, &str)] = &[
+        ("all", "right"),
+        ("got", "it"),
+        ("i", "see"),
+        ("thank", "you"),
+        ("sounds", "good"),
+        ("makes", "sense"),
+        ("fair", "enough"),
+        ("no", "problem"),
+        ("no", "worries"),
+    ];
+
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(normalize_turn_token)
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() || tokens.len() > 2 {
+        return false;
+    }
+    if let Some(name) = user_name {
+        let mentions_name = name
+            .split_whitespace()
+            .map(normalize_turn_token)
+            .filter(|word| !word.is_empty())
+            .any(|word| tokens.iter().any(|token| token == &word));
+        if mentions_name {
+            return false;
+        }
+    }
+    match tokens.as_slice() {
+        [one] => SINGLE_FILLER_WORDS.contains(&one.as_str()),
+        [first, second] => {
+            (SINGLE_FILLER_WORDS.contains(&first.as_str())
+                && SINGLE_FILLER_WORDS.contains(&second.as_str()))
+                || TWO_WORD_FILLERS
+                    .iter()
+                    .any(|(a, b)| first == *a && second == *b)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -3551,5 +3616,86 @@ mod tests {
             h.engine.advance(1_000);
             assert!(h.requests.try_recv().is_err(), "no timer retry");
         }
+    }
+
+    #[test]
+    fn trivial_filler_lines_skip_llm_calls_unless_question_or_name_applies() {
+        let mut h = Harness::named("Jordan");
+        // Trivial 1-2 word acknowledgements do not fire an LLM call on arrival.
+        for filler in [
+            "Yeah.",
+            "Okay.",
+            "No.",
+            "So",
+            "Uh-huh.",
+            "Right.",
+            "Mm-hmm.",
+            "Sure.",
+            "Yeah, okay.",
+            "Mm hmm.",
+            "All right.",
+            "Got it.",
+            "Sounds good.",
+        ] {
+            h.line(filler);
+            assert!(
+                h.requests.try_recv().is_err(),
+                "filler line should not fire cue request: {filler}"
+            );
+            assert_eq!(h.engine.evaluation_status(), Some(EvaluationStatus::Idle));
+        }
+        // Filler lines are still kept in the transcript so a subsequent
+        // substantive turn sees full context and triggers normally.
+        h.line("Who owns the fictional Atlas checklist?");
+        let req = h.request();
+        let texts: Vec<&str> = req.sources().iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts.last().copied(),
+            Some("Who owns the fictional Atlas checklist?")
+        );
+        assert!(texts.contains(&"Sounds good."));
+        h.reply("quiet", None, &[&req.sources().last().unwrap().id]);
+
+        // Question mark overrides filler gating even for 1-2 word lines.
+        for question in ["Yeah?", "Right?", "Okay?", "No?", "So?"] {
+            h.line(question);
+            let q_req = h.request();
+            assert_eq!(q_req.sources().last().unwrap().text, question);
+            h.reply("quiet", None, &[&q_req.sources().last().unwrap().id]);
+        }
+
+        // Listener name mention overrides filler gating even on 1-2 word lines.
+        for named in ["Jordan.", "Yeah, Jordan.", "Okay Jordan."] {
+            h.line(named);
+            let n_req = h.request();
+            assert_eq!(n_req.sources().last().unwrap().text, named);
+            h.reply("quiet", None, &[&n_req.sources().last().unwrap().id]);
+        }
+
+        // Substantive 1-2 word lines and 3+ word lines continue to trigger normally.
+        for substantive in ["Done.", "Friday.", "I will.", "Yeah, I will send it."] {
+            h.line(substantive);
+            let s_req = h.request();
+            assert_eq!(s_req.sources().last().unwrap().text, substantive);
+            h.reply("quiet", None, &[&s_req.sources().last().unwrap().id]);
+        }
+    }
+
+    #[test]
+    fn split_name_question_ending_on_short_line_still_triggers_evaluation() {
+        let mut h = Harness::named("Maya");
+        h.line("Could you, Maya,");
+        let first = h.request();
+        h.reply("quiet", None, &[&first.sources().last().unwrap().id]);
+        // Even if the second line had only a filler word with '?' or completed
+        // an Asked-you split question, ask_of_user + '?' ensures evaluation fires.
+        h.line("check?");
+        assert_eq!(
+            h.engine.state.cue.as_ref().unwrap().kind,
+            super::super::ASKED
+        );
+        let second = h.request();
+        assert_eq!(second.sources().last().unwrap().text, "check?");
+        h.reply("quiet", None, &[&second.sources().last().unwrap().id]);
     }
 }

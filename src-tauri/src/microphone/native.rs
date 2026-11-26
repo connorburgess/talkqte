@@ -121,6 +121,21 @@ pub(crate) fn build_stream(
     meter: Arc<Meter>,
     tap_chunk_ms: Option<u64>,
 ) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::microphone_macos_aec::build_stream(meter, tap_chunk_ms, build_cpal_stream)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        build_cpal_stream(meter, tap_chunk_ms)
+    }
+}
+
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn build_cpal_stream(
+    meter: Arc<Meter>,
+    tap_chunk_ms: Option<u64>,
+) -> Result<(Box<dyn CaptureStream>, Option<crate::audio_tap::Chunker>), Failure> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let device = cpal::default_host()
         .default_input_device()
