@@ -71,9 +71,11 @@ import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
+import { CalendarPrompt } from './components/CalendarPrompt';
 import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
+import { CalendarSettings } from './components/CalendarSettings';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
 import { UpdateSettings } from './components/UpdateSettings';
@@ -539,6 +541,20 @@ function FloatingQuestion() {
               )
             }
           />
+        ) : state?.calendarPrompt && state.overlayEnabled ? (
+          <CalendarPrompt
+            offer={state.calendarPrompt}
+            busy={busy}
+            large={state.questionSize === 'large'}
+            onAnswer={(answer) =>
+              void run(() =>
+                bridge.command('respond_to_calendar_prompt', {
+                  id: state.calendarPrompt!.id,
+                  answer,
+                }),
+              )
+            }
+          />
         ) : (
           <p className="floating-empty">
             {state?.overlayEnabled === false
@@ -685,17 +701,41 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
+  // Pre-filled meeting title from an opt-in calendar pre-call prompt.
+  const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
+      setView('notebook');
+      if (payload?.title) setMeetingTitle(payload.title);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
+    const explicitTitle = meetingTitle === null ? undefined : meetingTitle;
     void run(async () => {
       setNotice('');
       if (dictation.active) await dictation.stop();
       try {
-        await bridge.command('start_live_session');
+        await bridge.command(
+          'start_live_session',
+          explicitTitle !== undefined ? { title: explicitTitle } : undefined,
+        );
+        setMeetingTitle(null);
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -1874,6 +1914,36 @@ function Notebook() {
                         {platformName(platform)} yet.
                       </p>
                     )}
+                  {state.live && state.meetingTitle && !preparing && (
+                    <p className="small muted">Meeting: {state.meetingTitle}</p>
+                  )}
+                  {!state.live &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing &&
+                    meetingTitle !== null && (
+                      <div className="calendar-meeting-title">
+                        <label htmlFor="pre-call-title">Meeting title</label>
+                        <div className="calendar-meeting-title-row">
+                          <input
+                            id="pre-call-title"
+                            type="text"
+                            maxLength={120}
+                            value={meetingTitle}
+                            disabled={busy}
+                            onChange={(e) => setMeetingTitle(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            disabled={busy}
+                            onClick={() => setMeetingTitle('')}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   {transcriptionStopText(state.transcription) && (
                     <p role="alert">
                       {transcriptionStopText(state.transcription)}
@@ -2882,6 +2952,7 @@ function Notebook() {
               </button>
             </section>
             <CallPromptSetting key={settingsEpoch} />
+            <CalendarSettings key={`calendar-${settingsEpoch}`} />
             <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             {!liveCaptureBar && (
               <MicrophoneControl

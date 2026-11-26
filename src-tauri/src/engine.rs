@@ -524,6 +524,11 @@ pub struct Snapshot {
     /// Where this session's model-written meeting notes stand. Nothing is
     /// sent for them unless the person confirms, once, after the session.
     pub meeting_notes: crate::meeting_notes::Phase,
+    /// Optional default meeting title from an opt-in calendar pre-call match.
+    /// Notebook and kept-meeting defaults only; never sent to transcription or
+    /// the companion end-of-call prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meeting_title: Option<String>,
     /// Per-session custom names assigned by the person to diarized remote
     /// speakers (keyed by 0-based `speaker_id`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -615,6 +620,10 @@ pub struct CueSnapshot {
     /// person has turned that prompt on. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_prompt: Option<crate::call_prompt::Prompt>,
+    /// An upcoming calendar meeting pre-call prompt, when opt-in Calendar
+    /// prompts are enabled. Narrow metadata only (never raw URLs or attendees).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_prompt: Option<crate::calendar::Prompt>,
     /// A previously active call went inactive while a live session is running:
     /// asks the person whether to stop & save or keep recording. Metadata only.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -785,6 +794,7 @@ impl Engine {
                 sources: None,
                 keep_meeting: false,
                 meeting_notes: crate::meeting_notes::Phase::None,
+                meeting_title: None,
                 speaker_names: BTreeMap::new(),
             },
             script,
@@ -839,6 +849,7 @@ impl Engine {
             sensitivity: self.state.sensitivity,
             source_session: false,
             call_prompt: None,
+            calendar_prompt: None,
             call_end_prompt: None,
             end_prompt: None,
             model: match self.evaluation_status() {
@@ -2356,6 +2367,20 @@ impl Engine {
             self.state.keep_meeting = keep;
             self.changed();
         }
+    }
+
+    /// Sets the default meeting title for this live session (from an opt-in
+    /// calendar match), validated against kept-meeting title limits.
+    pub fn set_meeting_title(&mut self, title: Option<String>) {
+        let valid = title.and_then(|raw| crate::meeting_history::valid_title(&raw).ok());
+        if self.state.meeting_title != valid {
+            self.state.meeting_title = valid;
+            self.changed();
+        }
+    }
+
+    pub fn meeting_title(&self) -> Option<&str> {
+        self.state.meeting_title.as_deref()
     }
 
     /// Why no meeting notes request can be sent for this session now, if

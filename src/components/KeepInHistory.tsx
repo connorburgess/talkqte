@@ -49,7 +49,9 @@ export function KeepInHistory({
   const session = status?.session;
   useEffect(() => {
     if (session === undefined) return;
-    setTitle(defaultTitle(Date.now() - snapshot.elapsedMs));
+    setTitle(
+      snapshot.meetingTitle || defaultTitle(Date.now() - snapshot.elapsedMs),
+    );
     setIncludeApplication(false);
     setError('');
   }, [session]);

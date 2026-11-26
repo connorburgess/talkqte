@@ -26,6 +26,7 @@ impl Mode {
         if !state.overlay_enabled {
             Self::Hidden
         } else if state.cue.is_some()
+            || state.calendar_prompt.is_some()
             || state.end_prompt.is_some()
             || state.call_end_prompt.is_some()
         {
@@ -749,6 +750,28 @@ mod tests {
         engine.set_overlay(false);
         let mut hidden = engine.cue_snapshot();
         hidden.call_prompt = snapshot.call_prompt.clone();
+        assert_eq!(
+            Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
+            Mode::Hidden
+        );
+    }
+
+    #[test]
+    fn a_calendar_prompt_shows_the_companion_with_no_session_unless_it_is_hidden() {
+        let mut engine = Engine::default();
+        let mut snapshot = engine.cue_snapshot();
+        snapshot.calendar_prompt = Some(crate::calendar::Prompt {
+            id: 1,
+            title: "Weekly Design Sync".into(),
+            minutes_until_start: 2,
+        });
+        assert_eq!(
+            Mode::for_snapshot(&snapshot, MicrophoneStatus::Off),
+            Mode::Question
+        );
+        engine.set_overlay(false);
+        let mut hidden = engine.cue_snapshot();
+        hidden.calendar_prompt = snapshot.calendar_prompt.clone();
         assert_eq!(
             Mode::for_snapshot(&hidden, MicrophoneStatus::Off),
             Mode::Hidden

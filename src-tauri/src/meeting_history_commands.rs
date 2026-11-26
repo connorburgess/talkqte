@@ -641,7 +641,7 @@ pub(crate) fn on_live_session_ended_with(app: &tauri::AppHandle, session: u64, f
     let Some(keeping_state) = app.try_state::<Keeping>() else {
         return;
     };
-    let (counts, content) = {
+    let (counts, content, meeting_title) = {
         let state = app.state::<AppState>();
         let Ok(mut runtime) = state.0.lock() else {
             return;
@@ -677,10 +677,14 @@ pub(crate) fn on_live_session_ended_with(app: &tauri::AppHandle, session: u64, f
         let Some(content) = runtime.engine.keepable_meeting(false) else {
             return;
         };
-        (counts, content)
+        (
+            counts,
+            content,
+            runtime.engine.meeting_title().map(str::to_string),
+        )
     };
 
-    let title = default_title(content.started_at_ms);
+    let title = meeting_title.unwrap_or_else(|| default_title(content.started_at_ms));
     let result = store.keep(&title, content.clone());
     let state = app.state::<AppState>();
     let Ok(mut runtime) = state.0.lock() else {
@@ -814,15 +818,16 @@ pub(crate) async fn respond_to_end_prompt(
             if prompt.state != EndPromptState::Ask {
                 return Ok(());
             }
-            let content = {
+            let (content, meeting_title) = {
                 let runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
                 if runtime.engine.history_session() != session {
                     return Ok(());
                 }
-                runtime
+                let content = runtime
                     .engine
                     .keepable_meeting(false)
-                    .ok_or("Only an ended session with transcript or notes can be kept.")?
+                    .ok_or("Only an ended session with transcript or notes can be kept.")?;
+                (content, runtime.engine.meeting_title().map(str::to_string))
             };
             let already_kept =
                 app.state::<Keeping>().0.lock().is_ok_and(|keeping| {
@@ -831,7 +836,7 @@ pub(crate) async fn respond_to_end_prompt(
             if already_kept {
                 return Ok(());
             }
-            let title = default_title(content.started_at_ms);
+            let title = meeting_title.unwrap_or_else(|| default_title(content.started_at_ms));
             let stored = content.clone();
             let result = blocking(&app, move |store| store.keep(&title, stored)).await?;
             match result {

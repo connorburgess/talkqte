@@ -108,6 +108,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-call-prompt-settings",
         "allow-set-call-prompt",
         "allow-clear-call-prompt-apps",
+        // Opt-in Calendar settings are the notebook's alone.
+        "allow-calendar-settings",
+        "allow-set-calendar-prompts",
+        "allow-open-calendar-settings",
         // The settings file: whether it is saved, panel sizes, and Reset.
         "allow-settings-status",
         "allow-panel-sizes",
@@ -188,6 +192,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-stop-microphone",
         "allow-stop-live-session",
         "allow-respond-to-call-prompt",
+        "allow-respond-to-calendar-prompt",
         "allow-respond-to-call-end-prompt",
         "allow-respond-to-end-prompt",
     ]);
@@ -583,6 +588,75 @@ fn granola_requests_name_the_app_and_carry_the_token_only_as_a_bearer_header() {
     // Debug output is what a panic message or a stray log line would print.
     let debug = format!("{tokens:?} {connection:?}");
     assert!(!debug.contains("fictional-access-token"), "{debug}");
+}
+
+#[test]
+fn the_companion_calendar_prompt_is_narrow_and_never_exposes_raw_events_or_titles_after_start() {
+    use talkqte_lib::calendar::{event_has_meeting_link, CalendarEvent, Watcher};
+
+    let mut watcher = Watcher::default();
+    watcher.set_enabled(true);
+    let now = 1_700_000_000;
+    let has_link = event_has_meeting_link(
+        Some("https://meet.google.com/fictional-secret-room"),
+        Some("Private Conference Room 9"),
+        Some("Attendees: alex@example.com; agenda: secret budget"),
+    );
+    assert!(has_link);
+    let events = [
+        CalendarEvent {
+            id: "ek-secret-event-id-42".into(),
+            title: "Fictional Quarterly Planning".into(),
+            start_epoch_s: now + 120,
+            end_epoch_s: now + 1920,
+            has_meeting_link: has_link,
+            is_all_day: false,
+        },
+        CalendarEvent {
+            id: "ek-unrelated-99".into(),
+            title: "Dentist Appointment".into(),
+            start_epoch_s: now + 3600,
+            end_epoch_s: now + 5400,
+            has_meeting_link: false,
+            is_all_day: false,
+        },
+    ];
+    assert!(watcher.observe(&events, false, now));
+
+    let mut engine = Engine::live();
+    engine.set_meeting_title(Some("Fictional Quarterly Planning".into()));
+
+    let mut snapshot = engine.cue_snapshot();
+    snapshot.calendar_prompt = watcher.prompt().cloned();
+    let payload = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(
+        keys(&payload["calendarPrompt"]),
+        set(&["id", "title", "minutesUntilStart"])
+    );
+    let serialized = payload.to_string();
+    for secret in [
+        "meet.google.com",
+        "fictional-secret-room",
+        "Conference Room 9",
+        "alex@example.com",
+        "secret budget",
+        "ek-secret-event-id-42",
+        "ek-unrelated-99",
+        "Dentist Appointment",
+        "meetingTitle",
+    ] {
+        assert!(
+            !serialized.contains(secret),
+            "companion received raw calendar data: {secret}"
+        );
+    }
+
+    // Once the prompt is gone and the live session runs, the companion never
+    // receives meetingTitle either.
+    snapshot.calendar_prompt = None;
+    let live_payload = serde_json::to_value(&snapshot).unwrap().to_string();
+    assert!(!live_payload.contains("Fictional Quarterly Planning"));
+    assert!(!live_payload.contains("meetingTitle"));
 }
 
 #[test]

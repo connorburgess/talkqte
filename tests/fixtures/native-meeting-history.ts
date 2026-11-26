@@ -481,7 +481,7 @@ export function onSessionEnded(
       const meeting = saveSessionMeeting(
         current,
         session,
-        defaultTitle(Date.now() - current.elapsedMs),
+        current.meetingTitle || defaultTitle(Date.now() - current.elapsedMs),
         false,
       );
       endPrompt = {

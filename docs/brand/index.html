@@ -5942,6 +5942,47 @@
               <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
               runs and <code>off</code> attach no prompt.
             </div>
+            <div class="dock-prompt-spec" id="dock-calendar-prompt">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >7 · Pre-Call Calendar Prompt (Opt-in EventKit)</span
+                >
+                <code>CalendarPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">
+                    Weekly Design Sync starts in 2 min
+                  </div>
+                  <p class="dock-prompt-copy">
+                    Open the notebook with this meeting’s title, or dismiss.
+                  </p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary">Prepare session</span>
+                    <span class="dock-prompt-btn">Dismiss</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CalendarPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> when opt-in macOS Calendar
+              prompts match an upcoming event with a meeting link (~2 min before
+              start, once per occurrence). Carries only prompt ID, sanitized
+              title, and rounded minutes until start; never raw calendar URLs,
+              notes, or attendees. Settings live in
+              <code>src/components/CalendarSettings.tsx</code> (Panel 15).
+              Standard and large text share the dock's existing card rules. The
+              label changes to <code>starting now</code> at start and
+              <code>started 1 min ago</code> afterwards. Both actions disable
+              while submitting. No card is present while off or in a session. In
+              the notebook, Prepare session reveals an editable
+              <code>Meeting title</code> field and <code>Clear</code> control;
+              Start live session applies the title locally and removes the
+              field.
+            </div>
             <div class="dock-prompt-spec">
               <div class="dock-prompt-meta">
                 <span class="mono-label"
@@ -7909,6 +7950,51 @@ Cue processing stopped: -</pre>
                   >
                     The change was not confirmed. Try again.
                   </div>
+
+                  <div class="sk-row-head" style="margin-top: 16px">
+                    <strong class="panel-h3"
+                      >Settings · Calendar &amp; call prompts</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >CalendarSettings.tsx</span
+                    >
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Reads upcoming meeting titles and links locally from Apple
+                    Calendar (which syncs Google Calendar, iCloud, and Outlook)
+                    within a few minutes of start, and never uploads your
+                    calendar or reads attendees.
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="panel-box is-checked">✓</span>
+                    <span>Use macOS Calendar for upcoming meetings</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 6px; font-size: 12px"
+                  >
+                    Connected · Off · Permission denied — enable in System
+                    Settings → Privacy &amp; Security → Calendars · Not
+                    available on this platform yet
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="sk-btn">Open Calendar privacy settings</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Off is unchecked; Connected and Denied keep the opt-in
+                    checked. Denied shows the privacy-settings button.
+                    Unavailable platforms show an explanation without a toggle.
+                    Loading omits the toggle; saving disables it. Errors appear
+                    inline, with the existing setting retained: Calendar
+                    settings are unavailable. / The calendar setting could not
+                    be updated. Try again. / Could not open System Settings.
+                  </p>
                 </div>
               </div>
             </article>

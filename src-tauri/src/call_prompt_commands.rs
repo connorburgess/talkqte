@@ -101,7 +101,7 @@ pub(crate) fn respond_to_call_prompt(
         } else {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = crate::start_live_session_now(app, None, false).await;
+                let _ = crate::start_live_session_now(app, None, false, None).await;
             });
         }
     }
@@ -184,7 +184,7 @@ pub(crate) fn install(app: &tauri::AppHandle) {
             if auto_start.is_some() {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = crate::start_live_session_now(app, None, true).await;
+                    let _ = crate::start_live_session_now(app, None, true, None).await;
                 });
             }
         });
