@@ -389,6 +389,11 @@ fn run(
                     return;
                 }
                 last_send = timing.now();
+                // An idle socket owes no transcript reply. Start its response
+                // deadline with the first newly sent audio after that idle spell.
+                if !sent_since_heard {
+                    last_heard = last_send;
+                }
                 sent_since_heard = true;
                 sent_frames += 1;
             }
@@ -1403,12 +1408,16 @@ mod tests {
 
     // A synchronous socket script owns audio, reply delivery and logical time.
     // Caller scheduling and wall-clock pauses cannot invent a network stall.
-    fn scripted_quiet_spell(answer: bool) -> (Vec<SttEvent>, usize, usize, bool) {
+    fn scripted_quiet_spell(
+        answer: bool,
+        initial_silence: bool,
+    ) -> (Vec<SttEvent>, usize, usize, bool) {
         struct Script {
             audio: SyncSender<Vec<f32>>,
             stop: Arc<AtomicBool>,
             state: Arc<Mutex<(usize, usize, bool)>>,
             answer: bool,
+            initial_silence: bool,
         }
         impl Connector for Script {
             fn connect(&self, _: &str, _: &str) -> Result<Box<dyn Socket>, SttFailure> {
@@ -1417,6 +1426,7 @@ mod tests {
                     stop: self.stop.clone(),
                     state: self.state.clone(),
                     answer: self.answer,
+                    initial_silence: self.initial_silence,
                 }))
             }
         }
@@ -1433,6 +1443,9 @@ mod tests {
                 SCRIPT_TIME.with(|t| t.set(t.get() + Duration::from_millis(75)));
                 let mut state = self.state.lock().unwrap();
                 state.0 += 1;
+                if self.initial_silence && state.0 == 1 {
+                    SCRIPT_TIME.with(|t| t.set(t.get() + Duration::from_secs(30)));
+                }
                 // Each quiet spell crosses the100ms probe but stays below250ms.
                 if state.0 == 12 {
                     self.stop.store(true, Ordering::Release);
@@ -1447,7 +1460,9 @@ mod tests {
         }
         SCRIPT_TIME.with(|t| t.set(Instant::now()));
         let (audio, queue) = mpsc::sync_channel(QUEUE);
-        audio.send(vec![0.1; FRAME]).unwrap();
+        audio
+            .send(vec![if initial_silence { 0.0 } else { 0.1 }; FRAME])
+            .unwrap();
         let (tx, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new((0, 0, false)));
@@ -1457,6 +1472,7 @@ mod tests {
                 stop: stop.clone(),
                 state: state.clone(),
                 answer,
+                initial_silence,
             },
             ListenRequest::lab(),
             Token::from("t".repeat(24)),
@@ -1474,8 +1490,16 @@ mod tests {
     }
 
     #[test]
+    fn speech_after_long_gated_silence_gets_a_fresh_response_deadline() {
+        let (events, reads, _, closed) = scripted_quiet_spell(true, true);
+        assert_eq!(reads, 12);
+        assert!(closed);
+        assert!(!events.iter().any(|e| matches!(e, SttEvent::Failed(_))));
+    }
+
+    #[test]
     fn a_reply_keeps_the_stream_alive_through_a_quiet_spell() {
-        let (events, reads, probes, closed) = scripted_quiet_spell(true);
+        let (events, reads, probes, closed) = scripted_quiet_spell(true, false);
         assert_eq!(
             events,
             vec![SttEvent::Connected {
@@ -1487,7 +1511,7 @@ mod tests {
 
     #[test]
     fn the_same_quiet_spell_without_replies_is_probed_then_stalled() {
-        let (events, reads, probes, closed) = scripted_quiet_spell(false);
+        let (events, reads, probes, closed) = scripted_quiet_spell(false, false);
         assert_eq!(
             events,
             vec![

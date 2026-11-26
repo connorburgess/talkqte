@@ -9,7 +9,6 @@
 //! final, and sends a final commit on Stop or at the minute cap.
 
 use super::cloud::{Budget, Full, Language, StreamingTranscriber, SttEvent, SttFailure};
-use super::vad::{StreamTimeline, VadGate};
 use super::SAMPLE_RATE;
 use std::{
     sync::{
@@ -95,8 +94,6 @@ fn checked(url: &str) -> Result<&str, SttFailure> {
 /// reaches the network.
 pub trait Socket: Send {
     fn send_text(&mut self, text: &str) -> Result<(), SttFailure>;
-    /// Lightweight WebSocket Ping keepalive during VAD-gated silence.
-    fn send_ping(&mut self) -> Result<(), SttFailure>;
     /// A text message if one arrives within a short wait, else None.
     fn recv(&mut self) -> Result<Option<String>, SttFailure>;
     fn close(&mut self);
@@ -206,7 +203,6 @@ impl Drop for ElevenLabsStream {
 
 #[derive(Clone, Copy)]
 struct Timing {
-    keep_alive: Duration,
     finalize_after: Duration,
     quiet_probe: Duration,
     stall_after: Duration,
@@ -221,7 +217,6 @@ struct Timing {
 impl Default for Timing {
     fn default() -> Self {
         Self {
-            keep_alive: KEEP_ALIVE,
             finalize_after: FINALIZE_AFTER,
             quiet_probe: QUIET_PROBE,
             stall_after: STALL_AFTER,
@@ -252,7 +247,6 @@ impl Timing {
     }
 }
 
-const KEEP_ALIVE: Duration = Duration::from_secs(5);
 const QUIET_PROBE: Duration = Duration::from_secs(5);
 const STALL_AFTER: Duration = Duration::from_secs(10);
 const SLOW_WRITE: Duration = Duration::from_secs(3);
@@ -336,13 +330,10 @@ fn run(
         query: query.to_string(),
     });
 
-    let mut vad = VadGate::new();
-    let mut timeline = StreamTimeline::default();
     let mut pending: Vec<i16> = Vec::with_capacity(FRAME * 2);
     let mut sent_samples: u64 = 0;
     let mut sent_any_audio = false;
     let mut awaiting_commit = false;
-    let mut last_send = timing.now();
     let mut last_heard = timing.now();
     let mut sent_since_heard = false;
     let mut probed = false;
@@ -359,17 +350,14 @@ fn run(
         if closing.is_none() {
             while pending.len() < MAX_PENDING_SAMPLES {
                 match queue.try_recv() {
-                    Ok(block) => vad.push_samples(&block, |start_sample, pcm| {
-                        timeline.record(start_sample, pcm.len() as u64);
-                        pending.extend_from_slice(pcm);
-                    }),
+                    Ok(block) => pending.extend(
+                        block
+                            .iter()
+                            .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
+                    ),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         closing = Some(timing.now());
-                        vad.flush_end(|start_sample, pcm| {
-                            timeline.record(start_sample, pcm.len() as u64);
-                            pending.extend_from_slice(pcm);
-                        });
                         break;
                     }
                 }
@@ -400,7 +388,6 @@ fn run(
                     socket.close();
                     return;
                 }
-                last_send = timing.now();
                 sent_samples += take as u64;
                 sent_any_audio = true;
                 awaiting_commit = true;
@@ -419,7 +406,6 @@ fn run(
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
                     return;
                 }
-                last_send = timing.now();
             }
             if cap_reached || closing.is_some() {
                 let closed_at = *closing.get_or_insert_with(|| timing.now());
@@ -435,25 +421,16 @@ fn run(
                     let _ = events.send(SttEvent::Failed(SttFailure::Network));
                     return;
                 }
-                last_send = timing.now();
                 let _ = closed_at;
-            } else {
-                if unfinalized.is_some_and(|since| timing.elapsed(since) >= timing.finalize_after) {
-                    let commit = audio_chunk_message(&[], true);
-                    if socket.send_text(&commit).is_err() {
-                        let _ = events.send(SttEvent::Failed(SttFailure::Network));
-                        return;
-                    }
-                    last_send = timing.now();
-                    unfinalized = None;
+            } else if unfinalized
+                .is_some_and(|since| timing.elapsed(since) >= timing.finalize_after)
+            {
+                let commit = audio_chunk_message(&[], true);
+                if socket.send_text(&commit).is_err() {
+                    let _ = events.send(SttEvent::Failed(SttFailure::Network));
+                    return;
                 }
-                if timing.elapsed(last_send) >= timing.keep_alive {
-                    if socket.send_ping().is_err() {
-                        let _ = events.send(SttEvent::Failed(SttFailure::Network));
-                        return;
-                    }
-                    last_send = timing.now();
-                }
+                unfinalized = None;
             }
         } else if closing.is_some_and(|at| {
             timing.elapsed(at) > timing.close_wait
@@ -476,7 +453,6 @@ fn run(
         match reply {
             Ok(Some(text)) => match parse(&text, &mut seq, fallback_ms) {
                 Ok(Some(event)) => {
-                    let event = timeline.remap_event(event);
                     let is_final = matches!(event, SttEvent::Final { .. });
                     match &event {
                         SttEvent::Final { .. } => {
@@ -497,7 +473,7 @@ fn run(
                         // Drain any remaining immediate messages and close.
                         while let Ok(Some(extra)) = socket.recv() {
                             if let Ok(Some(ev)) = parse(&extra, &mut seq, fallback_ms) {
-                                let _ = events.send(timeline.remap_event(ev));
+                                let _ = events.send(ev);
                             }
                         }
                         socket.close();
@@ -802,12 +778,6 @@ impl Socket for NetworkSocket {
             .map_err(|_| SttFailure::Network)
     }
 
-    fn send_ping(&mut self) -> Result<(), SttFailure> {
-        self.0
-            .send(tungstenite::Message::Ping(Vec::new().into()))
-            .map_err(|_| SttFailure::Network)
-    }
-
     fn recv(&mut self) -> Result<Option<String>, SttFailure> {
         match self.0.read() {
             Ok(tungstenite::Message::Text(text)) => Ok(Some(text.to_string())),
@@ -835,7 +805,6 @@ mod tests {
         url: Option<String>,
         key: Option<String>,
         text: Vec<String>,
-        pings: usize,
         replies: std::collections::VecDeque<Result<Option<String>, SttFailure>>,
         closed: bool,
         send_delay: Duration,
@@ -872,10 +841,6 @@ mod tests {
                     wire.replies.push_back(Err(SttFailure::Closed));
                 }
             }
-            Ok(())
-        }
-        fn send_ping(&mut self) -> Result<(), SttFailure> {
-            self.0.lock().unwrap().pings += 1;
             Ok(())
         }
         fn recv(&mut self) -> Result<Option<String>, SttFailure> {
@@ -1240,134 +1205,5 @@ mod tests {
         let wire = fake.0.lock().unwrap();
         assert!(wire.text.iter().any(|t| t.contains(r#""commit":true"#)));
         assert!(wire.closed);
-    }
-
-    #[test]
-    fn vad_gates_pure_silence_and_keeps_socket_alive_with_pings() {
-        let fake = Fake::default();
-        let mut stream = ElevenLabsStream::start_with(
-            fake.clone(),
-            RealtimeRequest::for_language(Language::English),
-            FICTIONAL_KEY.to_string(),
-            Duration::from_secs(60),
-            Timing {
-                keep_alive: Duration::from_millis(40),
-                ..Timing::default()
-            },
-        );
-        for i in 0..20 {
-            let val = if i % 2 == 0 { 0.0 } else { 0.002 };
-            stream.push(&[val; FRAME]).unwrap();
-        }
-        let until = Instant::now() + Duration::from_secs(5);
-        loop {
-            let wire = fake.0.lock().unwrap();
-            if wire.pings >= 2 {
-                assert!(
-                    wire.text.is_empty(),
-                    "silence should send zero audio chunks"
-                );
-                assert!(!wire.closed, "socket stays open through pings");
-                break;
-            }
-            drop(wire);
-            assert!(Instant::now() < until, "expected WebSocket Ping keepalives");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let events = stream.finish(Duration::from_secs(2));
-        assert!(!events.iter().any(|e| matches!(e, SttEvent::Failed(_))));
-        let wire = fake.0.lock().unwrap();
-        assert!(wire.text.is_empty());
-        assert!(wire.closed);
-    }
-
-    #[test]
-    fn vad_flushes_pre_roll_sends_hangover_and_maps_timestamps_across_silence() {
-        use std::f32::consts::PI;
-        let fake = Fake::default();
-        let mut stream = ElevenLabsStream::start_with(
-            fake.clone(),
-            RealtimeRequest::for_language(Language::English),
-            FICTIONAL_KEY.to_string(),
-            Duration::from_secs(60),
-            Timing {
-                keep_alive: Duration::from_millis(60),
-                ..Timing::default()
-            },
-        );
-        for _ in 0..7 {
-            stream.push(&[0.0; FRAME]).unwrap();
-        }
-        for _ in 0..3 {
-            stream.push(&[0.002; FRAME]).unwrap();
-        }
-        for f in 0..5 {
-            let chunk: Vec<f32> = (0..FRAME)
-                .map(|n| {
-                    0.2 * (2.0 * PI * 440.0 * (f * FRAME + n) as f32 / SAMPLE_RATE as f32).sin()
-                })
-                .collect();
-            stream.push(&chunk).unwrap();
-        }
-        for _ in 0..25 {
-            stream.push(&[0.0; FRAME]).unwrap();
-        }
-        let until = Instant::now() + Duration::from_secs(5);
-        loop {
-            let wire = fake.0.lock().unwrap();
-            if wire.text.len() == 22 && wire.pings >= 1 {
-                break;
-            }
-            drop(wire);
-            assert!(
-                Instant::now() < until,
-                "expected 22 chunks and Ping keepalive"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        {
-            let mut wire = fake.0.lock().unwrap();
-            wire.close_on_commit = true;
-            wire.replies.push_back(Ok(Some(
-                serde_json::json!({
-                    "message_type": "committed_transcript_with_timestamps",
-                    "text": "Fictional ElevenLabs line.",
-                    "words": [
-                        {"text": "Fictional", "start": 0.30, "end": 0.50, "type": "word"},
-                        {"text": " ", "start": 0.50, "end": 0.52, "type": "spacing"},
-                        {"text": "line.", "start": 0.52, "end": 0.80, "type": "word"}
-                    ]
-                })
-                .to_string(),
-            )));
-        }
-        let events = wait_for(&mut stream, |e| {
-            e.iter().any(|ev| matches!(ev, SttEvent::Final { .. }))
-        });
-        let _ = stream.finish(Duration::from_secs(2));
-
-        let wire = fake.0.lock().unwrap();
-        let audio_chunks = wire
-            .text
-            .iter()
-            .filter(|t| t.contains(r#""commit":false"#))
-            .count();
-        assert_eq!(audio_chunks, 22);
-        // First chunk carries the tagged 0.002 pre-roll, not digital zero.
-        let first_json: serde_json::Value = serde_json::from_str(&wire.text[0]).unwrap();
-        let expected_tag = encode_base64(
-            &((0.002 * i16::MAX as f32) as i16)
-                .to_le_bytes()
-                .repeat(FRAME),
-        );
-        assert_eq!(first_json["audio_base_64"], expected_tag);
-        assert!(wire.pings >= 1);
-        assert!(events.contains(&SttEvent::Final {
-            seq: 1,
-            text: "Fictional ElevenLabs line.".into(),
-            start_ms: 1_000,
-            end_ms: 1_500,
-            untrusted_speaker: None,
-        }));
     }
 }

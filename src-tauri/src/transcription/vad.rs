@@ -6,7 +6,7 @@
 //! short pre-roll ring (`300 ms`) so speech onsets are not clipped, holds a
 //! trailing hangover tail (`1400 ms`) after speech drops below threshold so
 //! provider endpointing finalizes utterances cleanly, and suppresses PCM frames
-//! beyond the hangover tail so dead air is not streamed or billed.
+//! beyond the hangover tail to reduce audio streamed to Deepgram.
 
 use super::SAMPLE_RATE;
 use std::collections::VecDeque;
@@ -381,13 +381,22 @@ impl StreamTimeline {
     /// Converts a provider stream timestamp (ms) back into the input stream
     /// timestamp (ms) before VAD suppression.
     pub(crate) fn to_input_ms(&self, sent_ms: u64) -> u64 {
+        self.map_ms(sent_ms, false)
+    }
+
+    fn map_ms(&self, sent_ms: u64, is_end: bool) -> u64 {
         if self.spans.is_empty() {
             return sent_ms;
         }
         let sent_sample = sent_ms.saturating_mul(SAMPLES_PER_MS);
-        let index = self
-            .spans
-            .partition_point(|span| span.sent_start + span.len <= sent_sample);
+        let index = self.spans.partition_point(|span| {
+            let end = span.sent_start + span.len;
+            if is_end {
+                end < sent_sample
+            } else {
+                end <= sent_sample
+            }
+        });
         let Some(span) = self.spans.get(index) else {
             let last = self.spans.back().expect("non-empty spans");
             let end_sample = last.input_start + last.len.saturating_sub(1);
@@ -407,7 +416,9 @@ impl StreamTimeline {
                 untrusted_speaker,
             } => {
                 let mapped_start = self.to_input_ms(start_ms);
-                let mapped_end = self.to_input_ms(end_ms).max(mapped_start);
+                // An exclusive word end at a join belongs to the earlier span;
+                // its next word's start belongs after the suppressed gap.
+                let mapped_end = self.map_ms(end_ms, true).max(mapped_start);
                 super::cloud::SttEvent::Final {
                     seq,
                     text,
@@ -612,6 +623,26 @@ mod tests {
         assert_eq!(timeline.to_input_ms(4_200), 44_200);
         // Clamped safely at the very end so StreamClock never rejects boundary rounding.
         assert_eq!(timeline.to_input_ms(5_700), 45_699);
+    }
+
+    #[test]
+    fn word_end_at_join_does_not_include_the_suppressed_pause() {
+        use super::super::cloud::SttEvent;
+        let mut timeline = StreamTimeline::default();
+        timeline.record(0, 16_000);
+        timeline.record(160_000, 16_000);
+        let event = |start_ms, end_ms| SttEvent::Final {
+            seq: 1,
+            text: "Fictional sentence.".into(),
+            start_ms,
+            end_ms,
+            untrusted_speaker: None,
+        };
+        assert_eq!(timeline.remap_event(event(0, 1_000)), event(0, 1_000));
+        assert_eq!(
+            timeline.remap_event(event(1_000, 1_500)),
+            event(10_000, 10_500)
+        );
     }
 
     #[test]
