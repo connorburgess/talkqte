@@ -202,8 +202,13 @@ automatic language detection)"`.
   lines, meeting titles and the transcript are never sent to either provider.
 
 Only final results become transcript lines. Partial/interim results are dropped.
-Any provider speaker label is untrusted: it is never shown or sent to a cue
-model, and only the timing log records it.
+Any provider speaker label is untrusted: the cue model still receives the
+fixed label "Speaker", while remote (`Them`) lines in a two-source or
+application session surface distinct diarized speaker IDs as `Speaker 1`,
+`Speaker 2`, etc. (falling back to `Them` when no speaker ID is present)
+and allow inline renaming on the device. After a reconnect, new remote lines
+use `Them` without a speaker ID for the rest of the session, preventing a
+replacement connection from inheriting earlier custom names.
 
 **What the review says.** The review's audio sentence names the chosen provider
 and model plus the session's capture sources, fixed when the session starts:
@@ -219,11 +224,13 @@ approval therefore never covers a source it did not name. With the person's
 key a joining application must spend the session's budget; without it the
 application is refused rather than given a fresh cap.
 
-**Both sides of a call.** In a session with both sources, lines are labelled
-by where they were heard: **You** for the microphone, **Them** for the
-application. The labels are not speaker identity (several people can be on
-either side) and they stay on the Mac: the cue model still receives the
-fixed label "Speaker". A kept meeting writes them, with a sentence saying so.
+**Both sides of a call.** In a session with both sources, microphone lines are
+labelled **You**. Remote lines from the application or system audio are
+labelled **Speaker 1**, **Speaker 2**, etc. when Deepgram returns diarized
+speaker IDs (and **Them** when no speaker ID is present), and can be renamed
+inline in the transcript. These labels stay on the Mac for the live cue
+model, which still receives the fixed label "Speaker". A kept meeting writes
+the source and speaker labels, with any custom names the person assigned.
 When the microphone also hears the application through the speakers, the same
 words arrive twice. A microphone line is treated as a likely echo when it
 is a close copy of an application line timed within 4 seconds (at least six

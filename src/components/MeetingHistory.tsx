@@ -24,6 +24,7 @@ import {
   minutes,
   openKeptMeeting,
   renameKeptMeeting,
+  renameKeptMeetingSpeaker,
   renameMeetingFolder,
   setKeptMeetingFolder,
   setKeptMeetingArchived,
@@ -34,6 +35,7 @@ import {
   type KeptSummary,
 } from '../lib/meetingHistory';
 import { clockTime } from '../lib/types';
+import { SpeakerChip } from './SpeakerChip';
 import './meeting-history.css';
 
 function sourceDescription(meeting: KeptMeeting) {
@@ -71,6 +73,10 @@ export function MeetingHistory({
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const renameInput = useRef<HTMLInputElement>(null);
+  const [editingSpeaker, setEditingSpeaker] = useState<{
+    key: string;
+    speakerId: number;
+  } | null>(null);
 
   // Delete confirmation for the opened meeting.
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -183,6 +189,7 @@ export function MeetingHistory({
     setError('');
     setNotice('');
     setRenaming(false);
+    setEditingSpeaker(null);
     setConfirmDelete(false);
     try {
       const meeting = await openKeptMeeting(meetingId);
@@ -221,6 +228,29 @@ export function MeetingHistory({
       await loadList(query);
     } catch (problem) {
       setError(failure(problem, 'The meeting could not be renamed.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitSpeakerRename = async (speakerId: number, name: string) => {
+    if (!selected) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await renameKeptMeetingSpeaker(
+        selected.id,
+        speakerId,
+        name,
+      );
+      setSelected(updated);
+      setEditingSpeaker(null);
+      const resolved =
+        updated.speakerNames?.[speakerId] ?? `Speaker ${speakerId + 1}`;
+      setNotice(`Speaker updated to “${resolved}”.`);
+      await loadList(query);
+    } catch (problem) {
+      throw new Error(failure(problem, 'The speaker could not be renamed.'));
     } finally {
       setBusy(false);
     }
@@ -429,6 +459,7 @@ export function MeetingHistory({
             onClick={() => {
               setSelected(null);
               setRenaming(false);
+              setEditingSpeaker(null);
               setConfirmDelete(false);
               setError('');
             }}
@@ -697,8 +728,34 @@ export function MeetingHistory({
                       className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
                     >
                       <div className="transcript-segment-head">
-                        {both && (
-                          <span>{line.label === 'them' ? 'Them' : 'You'}</span>
+                        {line.speakerId !== undefined ? (
+                          <SpeakerChip
+                            speakerId={line.speakerId}
+                            label={
+                              selected.speakerNames?.[line.speakerId] ??
+                              `Speaker ${line.speakerId + 1}`
+                            }
+                            disabled={busy}
+                            isEditing={
+                              editingSpeaker?.key === `${line.atMs}-${index}` &&
+                              editingSpeaker.speakerId === line.speakerId
+                            }
+                            onStartEdit={() => {
+                              setError('');
+                              setEditingSpeaker({
+                                key: `${line.atMs}-${index}`,
+                                speakerId: line.speakerId!,
+                              });
+                            }}
+                            onCancelEdit={() => setEditingSpeaker(null)}
+                            onRename={submitSpeakerRename}
+                          />
+                        ) : (
+                          both && (
+                            <span>
+                              {line.label === 'them' ? 'Them' : 'You'}
+                            </span>
+                          )
                         )}
                         {line.echo && (
                           <span className="transcript-echo-label">

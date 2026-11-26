@@ -91,16 +91,21 @@ impl Engine {
         let transcript = lines
             .into_iter()
             .map(|(line, echo)| {
-                let (label, echo) = match (both, echo) {
-                    (true, Some(false)) => (Some(Label::You), true),
-                    (true, _) if line.speaker == YOU => (Some(Label::You), false),
-                    (true, _) if line.speaker == THEM => (Some(Label::Them), false),
-                    _ => (None, false),
+                let (label, echo, speaker_id) = match (both, echo) {
+                    (true, Some(false)) => (Some(Label::You), true, None),
+                    (true, _) if line.speaker_id.is_some() => {
+                        (Some(Label::Them), false, line.speaker_id)
+                    }
+                    (true, _) if line.speaker == YOU => (Some(Label::You), false, None),
+                    (true, _) if line.speaker == THEM => (Some(Label::Them), false, None),
+                    (false, _) if line.speaker_id.is_some() => (None, false, line.speaker_id),
+                    _ => (None, false, None),
                 };
                 Line {
                     at_ms: line.at_ms,
                     label,
                     echo,
+                    speaker_id,
                     text: line.text.clone(),
                 }
             })
@@ -116,6 +121,7 @@ impl Engine {
                 .as_ref()
                 .map(|transcription| transcription.provider.clone()),
             transcript,
+            speaker_names: self.state.speaker_names.clone(),
             notes: self.state.notes.clone(),
             cues: self
                 .shown_cues
@@ -166,6 +172,7 @@ mod tests {
                 id: format!("t-{index}"),
                 at_ms: 1_000 * (index as u64 + 1),
                 speaker: (*speaker).into(),
+                speaker_id: None,
                 text: (*text).into(),
             });
         }
@@ -183,6 +190,7 @@ mod tests {
             id: "t".into(),
             at_ms: 1,
             speaker: "Speaker".into(),
+            speaker_id: None,
             text: "The blue tin.".into(),
         });
         assert!(e.keepable_meeting(false).is_none(), "still running");
@@ -234,6 +242,7 @@ mod tests {
                 id: "echo".into(),
                 at_ms: 1_500,
                 speaker: YOU.into(),
+                speaker_id: None,
                 text: "Thanks, Friday works.".into(),
             },
             kept: false,

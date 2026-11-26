@@ -1229,6 +1229,44 @@ impl Engine {
         }
         false
     }
+
+    pub(super) fn refresh_cue_speakers(&mut self, speaker_id: u32, resolved: &str) {
+        let renamed_ids: std::collections::HashSet<String> = self
+            .state
+            .transcript
+            .iter()
+            .filter(|line| line.speaker_id == Some(speaker_id))
+            .map(|line| format!("transcript:{}", line.id))
+            .collect();
+        if renamed_ids.is_empty() {
+            return;
+        }
+        let update_sources = |sources: &mut [Source]| -> bool {
+            let mut changed = false;
+            for source in sources {
+                if renamed_ids.contains(&source.id) {
+                    if let Provenance::Transcript { speaker, .. } = &mut source.provenance {
+                        *speaker = resolved.to_string();
+                        changed = true;
+                    }
+                }
+            }
+            changed
+        };
+        if let Some((_, sources)) = &mut self.evaluated_cue {
+            update_sources(sources);
+        }
+        if let Some(cue) = &mut self.state.cue {
+            if !cue.sources.is_empty() && update_sources(&mut cue.sources) {
+                cue.evidence = evidence(&cue.sources);
+            }
+            if let Some(resolved_by) = &mut cue.resolved_by {
+                if !resolved_by.sources.is_empty() && update_sources(&mut resolved_by.sources) {
+                    resolved_by.evidence = evidence(&resolved_by.sources);
+                }
+            }
+        }
+    }
 }
 
 pub(super) fn transcript_source(line: &Segment) -> Source {
@@ -1484,6 +1522,7 @@ mod tests {
                         id: format!("line-{}", self.next_line),
                         at_ms: self.engine.state.elapsed_ms,
                         speaker: "Maya".into(),
+                        speaker_id: None,
                         text: text.into(),
                     },
                 )
@@ -1501,6 +1540,7 @@ mod tests {
                         id: format!("line-{}", self.next_line),
                         at_ms,
                         speaker: "Speaker".into(),
+                        speaker_id: None,
                         text: text.into(),
                     },
                 )

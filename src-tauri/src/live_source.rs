@@ -703,6 +703,7 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
+            speaker_id: None,
             // Different words for each origin, so none reads as an echo.
             text: if id.starts_with('m') {
                 format!("Microphone words for {id}.")
@@ -776,6 +777,7 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
+            speaker_id: None,
             // Different words for each origin, so none reads as an echo.
             text: if id.starts_with('m') {
                 format!("Microphone words for {id}.")
@@ -836,6 +838,7 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker".into(),
+            speaker_id: None,
             text: text.into(),
         };
         let mut runtime = live();
@@ -1045,6 +1048,7 @@ mod tests {
                     id: "x1".into(),
                     at_ms: 0,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "Words from another application entirely.".into(),
                 },
             )

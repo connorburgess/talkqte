@@ -1612,6 +1612,24 @@
         margin-top: 8px;
       }
 
+      .speaker-spec-input {
+        min-height: 44px;
+        width: 160px;
+        max-width: 100%;
+        padding: 2px 8px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: var(--g-paper);
+        color: var(--g-ink);
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .speaker-spec-chip {
+        background: var(--g-band);
+        padding: 2px 8px;
+      }
+
       .sk-password {
         flex: 1 1 220px;
         min-height: 44px;
@@ -1681,6 +1699,24 @@
 
       .panel-card {
         min-width: 0;
+      }
+
+      .speaker-spec-input {
+        min-height: 44px;
+        width: 160px;
+        max-width: 100%;
+        padding: 2px 8px;
+        border: 1px solid var(--g-border);
+        border-radius: 2px;
+        background: var(--g-paper);
+        color: var(--g-ink);
+        font: inherit;
+        font-size: 13px;
+      }
+
+      .speaker-spec-chip {
+        background: var(--g-band);
+        padding: 2px 8px;
       }
 
       .sk-password {
@@ -9718,6 +9754,86 @@ Date: 2026-11-23 · Length: 06:42
                 TalkQTE Pro)</span
               >
             </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="speaker-names-spec" class="sheet" data-dir="c">
+        <div class="wrap">
+          <div class="sheet-head">
+            <div>
+              <div class="sheet-kicker">Built · Transcript</div>
+              <h2>Remote speaker names</h2>
+            </div>
+          </div>
+          <p>
+            Live Notebook and kept Meetings use the same inline editor.
+            Fictional content; speaker numbers are provider guesses and names
+            apply to this meeting only.
+          </p>
+          <div class="km-split">
+            <div class="km-pane">
+              <h3>Default, hover, focus and renamed</h3>
+              <p>
+                <button class="sk-btn speaker-spec-chip">Speaker 1 ✎</button>
+                <button class="sk-btn speaker-spec-chip">Speaker 2 ✎</button>
+                Them · You
+              </p>
+              <p>
+                <button
+                  class="sk-btn speaker-spec-chip"
+                  style="
+                    outline: 3px solid var(--g-amber-ink);
+                    outline-offset: 2px;
+                  "
+                >
+                  Priya Patel ✎
+                </button>
+                00:01
+              </p>
+              <p>I will check the fictional garden gate.</p>
+              <h3>Editing and reset</h3>
+              <label
+                >Speaker 1 name
+                <input
+                  class="speaker-spec-input"
+                  value="Priya Patel"
+                  maxlength="80"
+              /></label>
+              <button class="sk-btn">Save</button>
+              <button class="sk-btn">Cancel</button>
+              <p>
+                Enter or Save commits; leaving saves; Escape or Cancel discards.
+                Clear the name to restore Speaker 1.
+              </p>
+            </div>
+            <div class="km-pane">
+              <h3>Saving, disabled and error recovery</h3>
+              <label
+                >Speaker 1 name
+                <input class="speaker-spec-input" value="Priya Patel" disabled
+              /></label>
+              <button class="sk-btn" disabled>Save</button>
+              <button class="sk-btn" disabled>Cancel</button>
+              <p>Controls are disabled during the request.</p>
+              <label
+                >Speaker 1 name
+                <input
+                  class="speaker-spec-input"
+                  value="Priya Patel"
+                  aria-invalid="true"
+              /></label>
+              <button class="sk-btn">Save</button>
+              <button class="sk-btn">Cancel</button>
+              <p class="panel-error-box">
+                The speaker could not be renamed. Try again.
+              </p>
+              <p>
+                A failed request keeps the draft editable. Success updates every
+                matching line. Numbered and custom names remain keyboard
+                buttons; plain Them and You are not rename controls.
+              </p>
+            </div>
           </div>
         </div>
       </section>

@@ -50,6 +50,7 @@ fn line(id: &str, at_ms: u64, text: &str) -> Segment {
         id: id.into(),
         at_ms,
         speaker: "Speaker".into(),
+        speaker_id: None,
         text: text.into(),
     }
 }
@@ -122,9 +123,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-set-check-for-updates-at-launch",
         "allow-check-for-updates",
         "allow-download-and-install-update",
-        // Keeping or removing a line suppressed as an echo edits the
-        // transcript: the notebook's alone.
+        // Keeping or removing a line suppressed as an echo or renaming a
+        // speaker edits the transcript: the notebook's alone.
         "allow-resolve-echo-line",
+        "allow-rename-speaker",
         // Kept meetings: keeping, listing, opening, renaming and deleting
         // them is the notebook's alone.
         "allow-meeting-history-status",
@@ -134,6 +136,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-kept-meetings",
         "allow-open-kept-meeting",
         "allow-rename-kept-meeting",
+        "allow-rename-kept-meeting-speaker",
         "allow-set-kept-meeting-archived",
         "allow-set-auto-prior-context",
         "allow-delete-kept-meeting",
@@ -424,6 +427,7 @@ fn an_export_holds_notes_and_no_transcript_name_focus_or_imported_note() {
                 id: "l1".into(),
                 at_ms: 1_000,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: "The greenhouse keys are in the blue tin.".into(),
             },
         )

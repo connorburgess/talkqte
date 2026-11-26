@@ -974,6 +974,115 @@ test('auto-selects relevant recent meetings on launch and Focus match, respects 
   await expect(context).not.toContainText('Tool shed review');
 });
 
+test('Meetings detail renders diarized remote speaker chips and renames all lines inline', async ({
+  page,
+}) => {
+  await openNative(page);
+  await page.evaluate(() => {
+    window.historyTest.add({
+      title: 'Diarized orchard sync',
+      startedAtMs: Date.UTC(2026, 10, 6, 11),
+      durationMs: 900_000,
+      sources: 'both',
+      application: 'Fictional Call',
+      transcribedBy: 'Deepgram',
+      transcript: [
+        {
+          atMs: 1_000,
+          label: 'them',
+          speakerId: 0,
+          text: 'I will check the south latch.',
+        },
+        {
+          atMs: 2_000,
+          label: 'them',
+          speakerId: 1,
+          text: 'I can bring the spare key.',
+        },
+        {
+          atMs: 3_000,
+          label: 'them',
+          speakerId: 0,
+          text: 'Let us meet at nine.',
+        },
+        {
+          atMs: 4_000,
+          label: 'you',
+          text: 'Works for me.',
+        },
+      ],
+      notes: 'Confirm gate key.',
+      cues: [],
+    });
+  });
+
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Folder name' }).fill('Orchard');
+  await page
+    .getByRole('button', { name: 'Create folder', exact: true })
+    .click();
+  await page.getByRole('button', { name: /^Diarized orchard sync/ }).click();
+
+  const transcript = page
+    .getByRole('region', { name: /Transcript \(4\)/ })
+    .locator('.transcript');
+  await expect(transcript.locator('.transcript-speaker-chip')).toHaveText([
+    'Speaker 1',
+    'Speaker 2',
+    'Speaker 1',
+  ]);
+
+  await transcript
+    .getByRole('button', { name: 'Rename Speaker 1' })
+    .first()
+    .click();
+  const input = transcript.getByRole('textbox', { name: 'Speaker 1 name' });
+  await expect(input).toBeFocused();
+  await input.fill('Priya');
+  await input.press('Enter');
+
+  await expect(transcript.locator('.transcript-speaker-chip')).toHaveText([
+    'Priya',
+    'Speaker 2',
+    'Priya',
+  ]);
+
+  // Moving and reopening the meeting keeps both its folder and speaker names.
+  await page
+    .getByRole('combobox', { name: 'Folder', exact: true })
+    .selectOption('Orchard');
+  await expect(
+    page.getByRole('combobox', { name: 'Folder', exact: true }),
+  ).toHaveValue('Orchard');
+  await page.getByRole('button', { name: 'Back to meetings' }).click();
+  await page.getByRole('button', { name: /^Diarized orchard sync/ }).click();
+  await expect(transcript.locator('.transcript-speaker-chip')).toHaveText([
+    'Priya',
+    'Speaker 2',
+    'Priya',
+  ]);
+  await expect(
+    page.getByRole('combobox', { name: 'Folder', exact: true }),
+  ).toHaveValue('Orchard');
+
+  // Accessibility check while viewing diarized chips.
+  const a11y = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .disableRules(['color-contrast'])
+    .analyze();
+  expect(a11y.violations).toEqual([]);
+
+  // Export preview reflects renamed speaker label.
+  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Review your export' });
+  const preview = (await dialog.locator('pre').textContent()) ?? '';
+  expect(preview).toContain('- 0:01 Priya: I will check the south latch.');
+  expect(preview).toContain('- 0:02 Speaker 2: I can bring the spare key.');
+  expect(preview).toContain('- 0:03 Priya: Let us meet at nine.');
+  expect(preview).toContain('- 0:04 You: Works for me.');
+});
+
 test('folder keyboard controls and archive filtering preserve meetings when a folder is deleted', async ({
   page,
 }) => {

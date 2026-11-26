@@ -3,12 +3,12 @@
 //!
 //! Nothing is kept unless the person keeps that meeting. A kept meeting
 //! holds its title, date, duration, the sources used, the transcript (with
-//! You/Them labels and echo marks where the session had both sources), the
-//! person's notes, the cues shown and, if the person kept them, the meeting
-//! notes. It never holds audio, a provider key, the person's name setting,
-//! focus lines, imported notes, note reminders, the Still open list or a
-//! speaker label from the transcription provider; the application's name only
-//! when the person chose to include it.
+//! You/Them or diarized remote speaker labels, any per-meeting speaker renames,
+//! and echo marks where the session had both sources), the person's notes, the
+//! cues shown and, if the person kept them, the meeting notes. It never holds
+//! audio, a provider key, the person's name setting, focus lines, imported
+//! notes, note reminders, or the Still open list; the application's name is
+//! held only when the person chose to include it.
 //!
 //! On disk, under the app's Application Support directory:
 //!
@@ -33,6 +33,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -139,6 +140,8 @@ const MAX_CUES: usize = 1_000;
 const MAX_CUE_FIELD_CHARS: usize = 2_000;
 const MAX_APPLICATION_CHARS: usize = 60;
 const MAX_PROVIDER_CHARS: usize = 40;
+const MAX_SPEAKER_CHARS: usize = 80;
+const MAX_SPEAKER_NAMES: usize = 200;
 const MAX_QUERY_CHARS: usize = 200;
 
 /// Which capture a meeting used.
@@ -159,6 +162,38 @@ pub enum Label {
     Them,
 }
 
+mod speaker_names_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S>(map: &BTreeMap<u32, String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        map.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<u32, String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Flattened `Meeting.content` buffers JSON object keys as strings.
+        let raw = BTreeMap::<String, String>::deserialize(deserializer)?;
+        let mut parsed = BTreeMap::new();
+        for (key, value) in raw {
+            let id = key
+                .parse::<u32>()
+                .ok()
+                .filter(|id| id.to_string() == key)
+                .ok_or_else(|| serde::de::Error::custom("invalid speaker id key"))?;
+            if parsed.insert(id, value).is_some() {
+                return Err(serde::de::Error::custom("duplicate speaker id key"));
+            }
+        }
+        Ok(parsed)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Line {
@@ -169,6 +204,10 @@ pub struct Line {
     /// sound, and neither removed nor kept as the person's own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub echo: bool,
+    /// 0-based diarized remote speaker ID when the transcription provider
+    /// identified distinct speakers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<u32>,
     pub text: String,
 }
 
@@ -199,6 +238,14 @@ pub struct Content {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcribed_by: Option<String>,
     pub transcript: Vec<Line>,
+    /// Custom names assigned by the person to diarized remote speakers
+    /// (keyed by 0-based `speaker_id`).
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "speaker_names_serde"
+    )]
+    pub speaker_names: BTreeMap<u32, String>,
     pub notes: String,
     pub cues: Vec<Cue>,
     /// Model-written meeting notes, as the person kept and edited them.
@@ -266,6 +313,7 @@ impl Meeting {
             .chain(self.folder.as_deref())
             .chain(std::iter::once(self.content.notes.as_str()))
             .chain(self.content.meeting_notes.as_deref())
+            .chain(self.content.speaker_names.values().map(String::as_str))
             .chain(
                 self.content
                     .transcript
@@ -346,12 +394,21 @@ impl Meeting {
             }
             out.push('\n');
         }
+        let has_diarized = self
+            .content
+            .transcript
+            .iter()
+            .any(|line| line.speaker_id.is_some());
         out.push_str("\n## Transcript\n\n");
         if let Some(provider) = self.content.transcribed_by.as_deref() {
-            out.push_str(&format!(
-                "Transcribed by {}. Speakers are not identified.\n\n",
-                flat(provider)
-            ));
+            if has_diarized {
+                out.push_str(&format!("Transcribed by {}.\n\n", flat(provider)));
+            } else {
+                out.push_str(&format!(
+                    "Transcribed by {}. Speakers are not identified.\n\n",
+                    flat(provider)
+                ));
+            }
         }
         if self.content.sources == Sources::Both {
             let from = self
@@ -360,18 +417,32 @@ impl Meeting {
                 .as_deref()
                 .map(flat)
                 .unwrap_or_else(|| "the application".to_string());
-            out.push_str(&format!(
-                "You marks a line heard by this Mac's microphone and Them a line from {from}'s audio. They say where a line was heard, not who said it.\n\n"
-            ));
+            if has_diarized {
+                out.push_str(&format!(
+                    "You marks a line heard by this Mac's microphone; remote speakers come from {from}'s audio.\n\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "You marks a line heard by this Mac's microphone and Them a line from {from}'s audio. They say where a line was heard, not who said it.\n\n"
+                ));
+            }
         }
         if self.content.transcript.is_empty() {
             out.push_str("None.\n");
         }
         for line in &self.content.transcript {
-            let label = match (self.content.sources, line.echo, line.label) {
-                (Sources::Both, true, _) => " You (likely an echo of Them):".to_string(),
-                (Sources::Both, false, Some(Label::You)) => " You:".to_string(),
-                (Sources::Both, false, Some(Label::Them)) => " Them:".to_string(),
+            let speaker_label = line.speaker_id.map(|id| {
+                self.content
+                    .speaker_names
+                    .get(&id)
+                    .map(|name| flat(name))
+                    .unwrap_or_else(|| crate::engine::default_speaker_label(id))
+            });
+            let label = match (self.content.sources, line.echo, line.label, speaker_label) {
+                (Sources::Both, true, _, _) => " You (likely an echo of Them):".to_string(),
+                (Sources::Both, false, Some(Label::You), _) => " You:".to_string(),
+                (_, false, _, Some(name)) => format!(" {name}:"),
+                (Sources::Both, false, Some(Label::Them), None) => " Them:".to_string(),
                 _ => String::new(),
             };
             out.push_str(&format!(
@@ -614,11 +685,23 @@ impl Content {
             .transcribed_by
             .as_deref()
             .is_none_or(|name| chars(name) <= MAX_PROVIDER_CHARS && !has_controls(name));
-        let labels_ok = self.sources == Sources::Both
-            || self
+        let labels_ok = match self.sources {
+            Sources::Both => self.transcript.iter().all(|line| {
+                line.speaker_id.is_none() || (line.label == Some(Label::Them) && !line.echo)
+            }),
+            Sources::Application => self
                 .transcript
                 .iter()
-                .all(|line| line.label.is_none() && !line.echo);
+                .all(|line| line.label.is_none() && !line.echo),
+            Sources::Microphone => self
+                .transcript
+                .iter()
+                .all(|line| line.label.is_none() && !line.echo && line.speaker_id.is_none()),
+        };
+        let speakers_ok = self.speaker_names.len() <= MAX_SPEAKER_NAMES
+            && self.speaker_names.values().all(|name| {
+                !name.trim().is_empty() && chars(name) <= MAX_SPEAKER_CHARS && !has_controls(name)
+            });
         self.transcript.len() <= MAX_LINES
             && self.transcript.iter().all(line_ok)
             && self.cues.len() <= MAX_CUES
@@ -631,6 +714,7 @@ impl Content {
             && application_ok
             && provider_ok
             && labels_ok
+            && speakers_ok
     }
 }
 
@@ -643,6 +727,7 @@ pub enum Error {
     Newer,
     Full,
     Title,
+    SpeakerName,
     Folder,
     FolderExists,
     FolderMissing,
@@ -660,6 +745,7 @@ impl Error {
             Error::Newer => "Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.",
             Error::Full => "You have kept 1,000 meetings. Delete one to keep another.",
             Error::Title => "Give the meeting a title of up to 200 characters.",
+            Error::SpeakerName => "Give the speaker a name of up to 80 characters.",
             Error::Folder => "Give the folder a name of up to 80 characters.",
             Error::FolderExists => "A folder with that name already exists.",
             Error::FolderMissing => "That folder no longer exists.",
@@ -1084,11 +1170,11 @@ impl Store {
         Ok(meeting.summary())
     }
 
-    fn change(
+    fn change_meeting(
         &self,
         id: &str,
         apply: impl FnOnce(&mut Meeting, &[String]) -> Result<(), Error>,
-    ) -> Result<Summary, Error> {
+    ) -> Result<Meeting, Error> {
         if !valid_id(id) {
             return Err(Error::Missing);
         }
@@ -1111,13 +1197,51 @@ impl Store {
         Self::write_meeting(&root, &meeting)?;
         entries[position] = meeting.summary();
         Self::write_index(&root, &entries, &folders)?;
-        Ok(meeting.summary())
+        Ok(meeting)
+    }
+
+    fn change(
+        &self,
+        id: &str,
+        apply: impl FnOnce(&mut Meeting, &[String]) -> Result<(), Error>,
+    ) -> Result<Summary, Error> {
+        self.change_meeting(id, apply)
+            .map(|meeting| meeting.summary())
     }
 
     pub fn rename(&self, id: &str, title: &str) -> Result<Summary, Error> {
         let title = valid_title(title)?;
         self.change(id, |meeting, _| {
             meeting.title = title;
+            Ok(())
+        })
+    }
+
+    /// Renames a diarized remote speaker in a kept meeting. Blank input or the
+    /// default `"Speaker N"` label clears the custom name back to `"Speaker N"`.
+    pub fn rename_speaker(&self, id: &str, speaker_id: u32, name: &str) -> Result<Meeting, Error> {
+        if name.chars().any(char::is_control) {
+            return Err(Error::SpeakerName);
+        }
+        let normalized = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if chars(&normalized) > MAX_SPEAKER_CHARS {
+            return Err(Error::SpeakerName);
+        }
+        let default = crate::engine::default_speaker_label(speaker_id);
+        self.change_meeting(id, |meeting, _| {
+            if !meeting
+                .content
+                .transcript
+                .iter()
+                .any(|line| line.speaker_id == Some(speaker_id))
+            {
+                return Err(Error::SpeakerName);
+            }
+            if normalized.is_empty() || normalized == default {
+                meeting.content.speaker_names.remove(&speaker_id);
+            } else {
+                meeting.content.speaker_names.insert(speaker_id, normalized);
+            }
             Ok(())
         })
     }

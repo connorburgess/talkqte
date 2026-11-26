@@ -1,5 +1,6 @@
 use crate::context::ContextItem;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 mod evaluation;
 mod history;
@@ -41,7 +42,14 @@ pub struct Segment {
     pub id: String,
     pub at_ms: u64,
     pub speaker: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<u32>,
     pub text: String,
+}
+
+/// Default display label for a 0-based diarized remote speaker ID (`0` -> `"Speaker 1"`).
+pub fn default_speaker_label(speaker_id: u32) -> String {
+    format!("Speaker {}", u64::from(speaker_id) + 1)
 }
 
 /// Which capture a live line came from. Each has its own recognizer stream,
@@ -469,6 +477,8 @@ struct NoteTerms {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub revision: u64,
+    /// Main-window session token for commands that edit meeting identity.
+    pub session: String,
     pub title: String,
     pub description: String,
     pub status: Status,
@@ -514,6 +524,10 @@ pub struct Snapshot {
     /// Where this session's model-written meeting notes stand. Nothing is
     /// sent for them unless the person confirms, once, after the session.
     pub meeting_notes: crate::meeting_notes::Phase,
+    /// Per-session custom names assigned by the person to diarized remote
+    /// speakers (keyed by 0-based `speaker_id`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub speaker_names: BTreeMap<u32, String>,
 }
 
 /// A cue that appeared in this session, for the export when the person
@@ -749,6 +763,7 @@ impl Engine {
             identity: std::sync::Arc::new(()),
             state: Snapshot {
                 revision: 0,
+                session: "0".into(),
                 title: script.title.clone(),
                 description: script.description.clone(),
                 status: Status::Ready,
@@ -770,6 +785,7 @@ impl Engine {
                 sources: None,
                 keep_meeting: false,
                 meeting_notes: crate::meeting_notes::Phase::None,
+                speaker_names: BTreeMap::new(),
             },
             script,
             generation: 0,
@@ -846,6 +862,7 @@ impl Engine {
     }
 
     fn changed(&mut self) {
+        self.state.session = self.generation.to_string();
         // Publishing the state shows any cue created since the last change.
         self.unshown = None;
         self.state.revision += 1;
@@ -929,6 +946,7 @@ impl Engine {
         self.dismissed_sources.clear();
         self.state.elapsed_ms = 0;
         self.state.transcript.clear();
+        self.state.speaker_names.clear();
         self.state.cue = None;
         self.state.transcription = (self.state.live && crate::transcription::cloud::selected())
             .then(|| CloudTranscription {
@@ -1294,6 +1312,74 @@ impl Engine {
         Ok(())
     }
 
+    /// Display name for a 0-based diarized remote speaker ID: the person's
+    /// custom name if set, otherwise `"Speaker 1"`, `"Speaker 2"`, etc.
+    pub fn resolved_remote_speaker(&self, speaker_id: u32) -> String {
+        self.state
+            .speaker_names
+            .get(&speaker_id)
+            .cloned()
+            .unwrap_or_else(|| default_speaker_label(speaker_id))
+    }
+
+    /// Reject a delayed rename from a previous meeting before changing names.
+    pub fn rename_session_speaker(
+        &mut self,
+        session: &str,
+        speaker_id: u32,
+        name: &str,
+    ) -> Result<(), String> {
+        if session != self.state.session {
+            return Err("This meeting has changed. Open its transcript and try again.".into());
+        }
+        self.rename_speaker(speaker_id, name)
+    }
+
+    /// Renames a diarized remote speaker across this session's transcript and
+    /// meeting record. Blank input or the default `"Speaker N"` label clears
+    /// the custom name back to `"Speaker N"`.
+    pub fn rename_speaker(&mut self, speaker_id: u32, name: &str) -> Result<(), String> {
+        if !self
+            .meeting
+            .iter()
+            .any(|line| line.speaker_id == Some(speaker_id))
+        {
+            return Err("That speaker is no longer in this meeting.".into());
+        }
+        if name.chars().any(char::is_control) {
+            return Err("Give the speaker a name of up to 80 characters.".into());
+        }
+        let normalized = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.chars().count() > MAX_SPEAKER_CHARS {
+            return Err("Give the speaker a name of up to 80 characters.".into());
+        }
+        let default = default_speaker_label(speaker_id);
+        if normalized.is_empty() || normalized == default {
+            self.state.speaker_names.remove(&speaker_id);
+        } else {
+            if !self.state.speaker_names.contains_key(&speaker_id)
+                && self.state.speaker_names.len() >= 200
+            {
+                return Err("This meeting has reached its limit of 200 speaker names.".into());
+            }
+            self.state.speaker_names.insert(speaker_id, normalized);
+        }
+        let resolved = self.resolved_remote_speaker(speaker_id);
+        for segment in &mut self.state.transcript {
+            if segment.speaker_id == Some(speaker_id) {
+                segment.speaker = resolved.clone();
+            }
+        }
+        for segment in &mut self.meeting {
+            if segment.speaker_id == Some(speaker_id) {
+                segment.speaker = resolved.clone();
+            }
+        }
+        self.refresh_cue_speakers(speaker_id, &resolved);
+        self.changed();
+        Ok(())
+    }
+
     /// `ingest_from` for a line from the microphone.
     pub fn ingest(&mut self, session: u64, segment: Segment) -> Result<(), String> {
         self.ingest_from(session, LineOrigin::Microphone, segment)
@@ -1361,6 +1447,7 @@ impl Engine {
             let line = Segment {
                 text: text.into(),
                 speaker: YOU.into(),
+                speaker_id: None,
                 ..segment
             };
             if let Some(status) = self.state.sources.as_mut() {
@@ -1374,10 +1461,23 @@ impl Engine {
             self.echo.heard_application(segment.at_ms, text);
             self.retroactively_mark_echoes(segment.at_ms, text);
         }
-        let speaker = sources::label(self.sources(), origin).unwrap_or(speaker);
+        let has_app = self
+            .sources()
+            .is_some_and(|sources| sources.application.is_some());
+        let (speaker, speaker_id) = match (origin, both, has_app, segment.speaker_id) {
+            (LineOrigin::Microphone, true, _, _) => (YOU.to_string(), None),
+            (LineOrigin::Microphone, false, _, _) => (speaker.to_string(), None),
+            (LineOrigin::Application, _, true, Some(id)) => {
+                (self.resolved_remote_speaker(id), Some(id))
+            }
+            (LineOrigin::Application, true, _, _) => (THEM.to_string(), None),
+            (LineOrigin::Application, false, true, _) => (THEM.to_string(), None),
+            (LineOrigin::Application, false, false, _) => (speaker.to_string(), None),
+        };
         let segment = Segment {
             text: text.into(),
-            speaker: speaker.into(),
+            speaker,
+            speaker_id,
             ..segment
         };
         self.consume(segment, now);
@@ -1688,6 +1788,7 @@ impl Engine {
                 id: line_id.clone(),
                 at_ms: spoken_at,
                 speaker: String::new(),
+                speaker_id: None,
                 text: suggestible.clone(),
             };
             self.maybe_said(&line, now, false);
@@ -2281,10 +2382,11 @@ impl Engine {
         if self.meeting_cut {
             return Err(crate::meeting_notes::Refusal::TooLong);
         }
-        let prepared = crate::meeting_notes::prepare_for(
+        let prepared = crate::meeting_notes::prepare_for_with_speakers(
             crate::meeting_notes::active_target(),
             &self.meeting,
             include_notes.then_some(self.state.notes.as_str()),
+            &self.state.speaker_names,
         )?;
         prepared.check_cap()?;
         Ok(prepared)
@@ -2434,37 +2536,11 @@ impl Engine {
             }
             out.push('\n');
         }
-        out.push_str("\n## Transcript\n\n");
-        if let Some(transcription) = &self.state.transcription {
-            out.push_str(&format!(
-                "Transcribed by {}. Speakers are not identified.\n\n",
-                transcription.provider
-            ));
-        }
-        let two = self
-            .sources()
-            .filter(|sources| sources.both_sources())
-            .and_then(|sources| sources.application.as_deref());
-        if let Some(application) = two {
-            out.push_str(&format!(
-                "{YOU} marks a line heard by this Mac's microphone and {THEM} a line from {}'s audio. They say where a line was heard, not who said it.\n\n",
-                flat(application)
-            ));
-        }
-        // Lines suppressed as a likely echo stay in the meeting, marked, unless
-        // the person removed them; one they kept as theirs is ordinary.
-        // Only the last `MAX_ECHO_LINES` suppressed echoes are retained; lines
-        // past `MAX_MEETING_LINES` trim the start of the meeting.
         let echoes = self
             .state
             .sources
             .as_ref()
             .map_or(&[][..], |status| status.echoes.as_slice());
-        if self.meeting_cut {
-            out.push_str(&format!(
-                "The start of this meeting is not included: a meeting keeps its last {MAX_MEETING_LINES} lines.\n\n"
-            ));
-        }
         let mut lines: Vec<(&Segment, Option<bool>)> = self
             .meeting
             .iter()
@@ -2472,15 +2548,54 @@ impl Engine {
             .chain(echoes.iter().map(|echo| (&echo.line, Some(echo.kept))))
             .collect();
         lines.sort_by_key(|(line, _)| line.at_ms);
+        let has_diarized = lines.iter().any(|(line, _)| line.speaker_id.is_some());
+        out.push_str("\n## Transcript\n\n");
+        if let Some(transcription) = &self.state.transcription {
+            if has_diarized {
+                out.push_str(&format!("Transcribed by {}.\n\n", transcription.provider));
+            } else {
+                out.push_str(&format!(
+                    "Transcribed by {}. Speakers are not identified.\n\n",
+                    transcription.provider
+                ));
+            }
+        }
+        let two = self
+            .sources()
+            .filter(|sources| sources.both_sources())
+            .and_then(|sources| sources.application.as_deref());
+        if let Some(application) = two {
+            if has_diarized {
+                out.push_str(&format!(
+                    "{YOU} marks a line heard by this Mac's microphone; remote speakers come from {}'s audio.\n\n",
+                    flat(application)
+                ));
+            } else {
+                out.push_str(&format!(
+                    "{YOU} marks a line heard by this Mac's microphone and {THEM} a line from {}'s audio. They say where a line was heard, not who said it.\n\n",
+                    flat(application)
+                ));
+            }
+        }
+        // Lines suppressed as a likely echo stay in the meeting, marked, unless
+        // the person removed them; one they kept as theirs is ordinary.
+        if self.meeting_cut {
+            out.push_str(&format!(
+                "The start of this meeting is not included: a meeting keeps its last {MAX_MEETING_LINES} lines.\n\n"
+            ));
+        }
         if lines.is_empty() {
             out.push_str("None.\n");
         }
         for (line, echo) in lines {
             let label = match (two, echo) {
                 (Some(_), Some(false)) => format!(" {YOU} (likely an echo of {THEM}):"),
-                (Some(_), _) if line.speaker == YOU || line.speaker == THEM => {
-                    format!(" {}:", line.speaker)
+                (Some(_), _)
+                    if line.speaker == YOU || line.speaker == THEM || line.speaker_id.is_some() =>
+                {
+                    format!(" {}:", flat(&line.speaker))
                 }
+                (None, _) if line.speaker_id.is_some() => format!(" {}:", flat(&line.speaker)),
                 _ => String::new(),
             };
             out.push_str(&format!(
@@ -3723,6 +3838,7 @@ mod tests {
             id: "example".into(),
             at_ms: 1_000,
             speaker: "Robin".into(),
+            speaker_id: None,
             text: text.into(),
         }];
         engine.start().unwrap();
@@ -3741,6 +3857,7 @@ mod tests {
                 id: format!("t{}", index + 1),
                 at_ms: *at_ms,
                 speaker: if index % 2 == 0 { "Robin" } else { "Alex" }.into(),
+                speaker_id: None,
                 text: (*text).into(),
             })
             .collect();
@@ -3753,6 +3870,7 @@ mod tests {
             id: id.into(),
             at_ms,
             speaker: "Speaker 1".into(),
+            speaker_id: None,
             text: text.into(),
         }
     }
@@ -5334,6 +5452,7 @@ mod tests {
             id: "t1".into(),
             at_ms: 1_000,
             speaker: "Robin".into(),
+            speaker_id: None,
             text: "The volunteer schedule and the budget are either Monday or Tuesday.".into(),
         }];
         next.start().unwrap();
@@ -7402,6 +7521,165 @@ mod tests {
             Some(CONTEXT),
             "a new session starts with no note shown yet"
         );
+    }
+
+    #[test]
+    fn diarized_remote_speakers_surface_as_numbered_speakers_and_rename_immediately() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.set_sources(SessionSources::both(("Fictional Call", "sel-1")));
+        let session = e.session();
+        e.advance(5_000);
+
+        // Remote lines with 0-based speaker_ids become Speaker 1 and Speaker 2.
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            Segment {
+                id: "r1".into(),
+                at_ms: 1_000,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "Can we confirm the fictional garden budget?".into(),
+            },
+        )
+        .unwrap();
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            Segment {
+                id: "r2".into(),
+                at_ms: 2_000,
+                speaker: "Speaker".into(),
+                speaker_id: Some(1),
+                text: "I can send the draft tomorrow.".into(),
+            },
+        )
+        .unwrap();
+        // Remote line without speaker_id falls back to Them.
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            Segment {
+                id: "r3".into(),
+                at_ms: 3_000,
+                speaker: "Speaker".into(),
+                speaker_id: None,
+                text: "Sounds good.".into(),
+            },
+        )
+        .unwrap();
+        // Microphone lines are always You with no remote speaker_id.
+        e.ingest_from(
+            session,
+            LineOrigin::Microphone,
+            Segment {
+                id: "m1".into(),
+                at_ms: 4_000,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "Thanks, let's review on Friday.".into(),
+            },
+        )
+        .unwrap();
+
+        let summary: Vec<_> = e
+            .state
+            .transcript
+            .iter()
+            .map(|s| (s.speaker.as_str(), s.speaker_id))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("Speaker 1", Some(0)),
+                ("Speaker 2", Some(1)),
+                (THEM, None),
+                (YOU, None),
+            ]
+        );
+
+        // Rename Speaker 1 -> Priya: existing lines, future lines, and kept content update.
+        e.rename_speaker(0, "  Priya   Patel ").unwrap();
+        assert_eq!(
+            e.state.speaker_names.get(&0).map(String::as_str),
+            Some("Priya Patel")
+        );
+        assert_eq!(e.state.transcript[0].speaker, "Priya Patel");
+        assert_eq!(e.state.transcript[1].speaker, "Speaker 2");
+
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            Segment {
+                id: "r4".into(),
+                at_ms: 4_500,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "I will share the spreadsheet.".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(e.state.transcript[4].speaker, "Priya Patel");
+
+        // Invalid names are rejected without changing state.
+        assert!(e.rename_speaker(0, &"a".repeat(81)).is_err());
+        assert!(e.rename_speaker(0, "Priya\n").is_err());
+        assert_eq!(e.state.transcript[0].speaker, "Priya Patel");
+
+        assert!(e.rename_speaker(99, "Invented").is_err());
+        assert_eq!(e.state.speaker_names.len(), 1);
+        assert_eq!(default_speaker_label(u32::MAX), "Speaker 4294967296");
+
+        // Blank or default resets back to Speaker 1 and removes the map entry.
+        e.rename_speaker(0, "   ").unwrap();
+        assert!(e.state.speaker_names.is_empty());
+        assert_eq!(e.state.transcript[0].speaker, "Speaker 1");
+        assert_eq!(e.state.transcript[4].speaker, "Speaker 1");
+
+        // Rename again, end session, verify kept content and markdown.
+        e.rename_speaker(0, "Priya").unwrap();
+        e.set_keep_meeting(true);
+        e.end();
+        let kept = e.keepable_meeting(false).unwrap();
+        assert_eq!(
+            kept.speaker_names.get(&0).map(String::as_str),
+            Some("Priya")
+        );
+        assert_eq!(kept.transcript[0].speaker_id, Some(0));
+        assert_eq!(kept.transcript[1].speaker_id, Some(1));
+        assert_eq!(kept.transcript[2].speaker_id, None);
+        assert_eq!(kept.transcript[3].speaker_id, None);
+
+        let md = e.markdown();
+        assert!(md.contains("- 00:01 Priya: Can we confirm the fictional garden budget?"));
+        assert!(md.contains("- 00:02 Speaker 2: I can send the draft tomorrow."));
+        assert!(md.contains("- 00:03 Them: Sounds good."));
+        assert!(md.contains("- 00:04 You: Thanks, let's review on Friday."));
+
+        // Delayed commands from the ended meeting cannot name a new meeting's speaker 0.
+        let old_session = e.state.session.clone();
+        e.start().unwrap();
+        e.set_sources(SessionSources::system_audio());
+        e.advance(1_000);
+        e.ingest_from(
+            e.session(),
+            LineOrigin::Application,
+            Segment {
+                id: "new-remote".into(),
+                at_ms: 0,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "A different fictional person.".into(),
+            },
+        )
+        .unwrap();
+        assert!(e.rename_session_speaker(&old_session, 0, "Priya").is_err());
+        assert_eq!(e.state.transcript[0].speaker, "Speaker 1");
+        assert!(e.state.speaker_names.is_empty());
+        let current = e.state.session.clone();
+        e.rename_session_speaker(&current, 0, "Alex").unwrap();
+        assert_eq!(e.state.transcript[0].speaker, "Alex");
     }
 
     #[test]

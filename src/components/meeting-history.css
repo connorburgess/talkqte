@@ -150,6 +150,7 @@
 }
 .history-row-folder,
 .history-folder-select {
+  height: 44px;
   min-height: 44px;
   padding: 6px 10px;
   border: 1px solid var(--border);

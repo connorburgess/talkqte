@@ -3,6 +3,7 @@ export interface Segment {
   id: string;
   atMs: number;
   speaker: string;
+  speakerId?: number;
   text: string;
 }
 /** Only the cited sources, not the evaluator's entire selected context. */
@@ -88,6 +89,7 @@ export interface CueSnapshot {
   sources?: import('./transcription').SessionSources;
 }
 export interface Snapshot extends CueSnapshot {
+  session: string;
   title: string;
   description: string;
   elapsedMs: number;
@@ -102,6 +104,8 @@ export interface Snapshot extends CueSnapshot {
   keepMeeting?: boolean;
   /** Session-only: where this session's model-written notes stand. */
   meetingNotes?: import('./meetingNotes').MeetingNotesPhase;
+  /** Session-only: custom names for diarized remote speakers (0-based ID -> name). */
+  speakerNames?: Record<number, string>;
 }
 export type EndPromptState = 'ask' | 'saved' | 'kept';
 export type EndPromptAction =
@@ -129,6 +133,8 @@ export type Commands = {
   set_keep_meeting: { keep: boolean };
   /** Keep a line marked as a likely echo as the person's own, or remove it. */
   resolve_echo_line: { id: string; keep: boolean };
+  /** Rename a diarized remote speaker across this session's transcript. */
+  rename_speaker: { session: string; speakerId: number; name: string };
   /** `application`: the review of an application to hear beside the
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string } | undefined;
