@@ -108,10 +108,23 @@ stalled connection, an application-audio session whose token arrives late in
 the wait can end as `stalled` rather than wait it out.
 
 After approval, each capture source opens one WebSocket stream to the chosen
-provider:
+provider. Deepgram uses a local RMS energy gate on the stream's worker thread
+(`src-tauri/src/transcription/vad.rs`): 20 ms frames, a 300 ms pre-roll buffer,
+and a 1,400 ms trailing tail. Quiet frames beyond that tail are suppressed.
+This reduces audio sent, but an energy threshold is not a speech classifier:
+quiet speech can be missed and background noise can keep the gate open.
+Actual savings and speech accuracy remain unmeasured. `StreamTimeline` maps
+provider timestamps back across suppressed gaps.
+
+Deepgram documents [KeepAlive during silence](https://developers.deepgram.com/docs/audio-keep-alive).
+ElevenLabs continues streaming audio, including silence: its
+[keepalive guidance](https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies)
+requires continued audio and does not establish WebSocket Ping as an audio-free
+replacement. Local gating for ElevenLabs remains deferred pending provider validation.
 
 - **Deepgram** (`wss://api.deepgram.com/v1/listen`): sends 16 kHz mono 16-bit
-  binary PCM in 100 ms frames, `KeepAlive` messages during gaps, `Finalize` when
+  binary PCM in 100 ms frames while VAD is active/hangover, `KeepAlive`
+  messages every 5 s during suppressed silence or gaps, `Finalize` when
   a result has stayed unfinished for 6 seconds, and `CloseStream` at the end.
   Requests `model=nova-3`, the session's language (below), interim results,
   punctuation, speaker labels, endpointing, utterance-end events, and
@@ -317,8 +330,15 @@ this code has not been measured.
 
 Offline tests with a fake socket and scripted streams only:
 
+- `transcription::vad` tests: RMS energy threshold (including non-finite
+  sanitization), zero-allocation silence suppression, 300 ms pre-roll flush on
+  speech onset without clipping, 1,400 ms trailing hangover and brief-pause
+  continuity, sub-frame boundary flushing, `StreamTimeline` timestamp mapping
+  across suppressed silence gaps, and process-isolated zero-leak/zero-log
+  verification.
 - `transcription::deepgram` tests: the opt-out parameter on the request sent,
-  framing, finals only, refusals, the cap, `Finalize` and `KeepAlive`, and a
+  framing, finals only, refusals, the cap, `Finalize` and `KeepAlive`, VAD
+  silence gating + pre-roll/hangover + timestamp mapping, and a
   lost connection.
 - `transcription::cloud` tests: nothing sent before approval, audio captured
   before the approval never sent however late it arrives, finals on the
@@ -344,8 +364,8 @@ Offline tests with a fake socket and scripted streams only:
   `committed_transcript` against `committed_transcript_with_timestamps`,
   error mapping (`auth_error`, `quota_exceeded`, `rate_limited`,
   `transcriber_error`, `session_time_limit_exceeded`), periodic 6-second
-  commits, Stop drain wait vs close, and minute-cap enforcement with fake
-  sockets.
+  commits, Stop drain wait vs close, and minute-cap enforcement with
+  fake sockets.
 - Browser tests: the companion and notebook wording, and the stop and failure
   messages naming Deepgram or ElevenLabs.
 
@@ -361,3 +381,9 @@ Still unverified: a session against the real Deepgram or ElevenLabs service,
 actual ElevenLabs `scribe_v2_realtime` WebSocket latency/commit timing on real
 hardware, behaviour with an expired token or a real refused key, and native
 microphone and application-audio acceptance.
+
+Next acceptance check: run an explicitly approved fictional Deepgram call with
+long silent intervals followed by quiet and normal speech; verify connection
+continuity, complete word onsets, transcript timestamps and billed audio duration.
+Offline fake sockets establish framing and control behavior, not provider billing
+or microphone accuracy.

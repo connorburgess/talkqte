@@ -700,6 +700,11 @@ pub fn refresh(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
+pub(crate) fn allocations_during(work: impl FnOnce()) -> usize {
+    tests::allocations_during(work)
+}
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use std::{
