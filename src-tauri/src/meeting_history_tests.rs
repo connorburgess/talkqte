@@ -612,7 +612,10 @@ fn folders_can_be_created_assigned_renamed_searched_and_deleted_without_losing_m
     assert_eq!(listing.meetings.len(), 2);
     assert_eq!(store.list(Some("Client A")).meetings.len(), 1);
     assert_eq!(store.list(Some("Client A")).meetings[0].id, first.id);
-    assert_eq!(store.list(Some("ladder")).meetings.len(), 2);
+    let ladder_matches = store.list(Some("ladder")).meetings;
+    assert_eq!(ladder_matches.len(), 1);
+    assert_eq!(ladder_matches[0].id, second.id);
+    assert_eq!(store.list(Some("Updated notes")).meetings[0].id, first.id);
 
     // Renaming a folder updates all meetings inside it and prevents collisions.
     assert_eq!(
