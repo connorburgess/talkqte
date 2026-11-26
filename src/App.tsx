@@ -42,6 +42,7 @@ import { isKeysStatus, ProviderKeys } from './components/ProviderKeys';
 import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
 import { MeetingHistory } from './components/MeetingHistory';
+import { SpeakerChip } from './components/SpeakerChip';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
 import type { HistoryStatus } from './lib/meetingHistory';
@@ -668,6 +669,10 @@ function Notebook() {
   const sourceApp = sourceOnlyApplication(capture.state, microphone.state);
   const [startPending, setStartPending] = useState(false);
   const [startInstalled, setStartInstalled] = useState(false);
+  const [editingSpeaker, setEditingSpeaker] = useState<{
+    key: string;
+    speakerId: number;
+  } | null>(null);
   useEffect(() => {
     if (startPending && state?.live && state.status === 'running')
       setStartInstalled(true);
@@ -2218,6 +2223,9 @@ function Notebook() {
                           ? (sourcesHeading(
                               state.sources,
                               state.transcription,
+                              state.transcript.some(
+                                (segment) => segment.speakerId !== undefined,
+                              ),
                             ) ??
                             (sourceApp
                               ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
@@ -2256,7 +2264,41 @@ function Notebook() {
                                 key={segment.id}
                               >
                                 <div className="transcript-segment-head">
-                                  <strong>{segment.speaker}</strong>
+                                  {segment.speakerId !== undefined ? (
+                                    <SpeakerChip
+                                      speakerId={segment.speakerId}
+                                      label={
+                                        state.speakerNames?.[
+                                          segment.speakerId
+                                        ] ?? segment.speaker
+                                      }
+                                      disabled={busy}
+                                      isEditing={
+                                        editingSpeaker?.key === segment.id &&
+                                        editingSpeaker.speakerId ===
+                                          segment.speakerId
+                                      }
+                                      onStartEdit={() =>
+                                        setEditingSpeaker({
+                                          key: segment.id,
+                                          speakerId: segment.speakerId!,
+                                        })
+                                      }
+                                      onCancelEdit={() =>
+                                        setEditingSpeaker(null)
+                                      }
+                                      onRename={async (speakerId, name) => {
+                                        await bridge.command('rename_speaker', {
+                                          session: state.session,
+                                          speakerId,
+                                          name,
+                                        });
+                                        setEditingSpeaker(null);
+                                      }}
+                                    />
+                                  ) : (
+                                    <strong>{segment.speaker}</strong>
+                                  )}
                                   <time>{clockTime(segment.atMs)}</time>
                                   {echo && !echo.kept && (
                                     <span className="transcript-echo-label">

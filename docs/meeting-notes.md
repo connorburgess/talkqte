@@ -43,7 +43,7 @@ Browser renders at 1320 × 880 from the test stand-in with one fictional line; n
 
 ## What is sent
 
-- The session's transcript lines, numbered `L1`, `L2`, … with their time from the start of the session (`L3 [00:47] …`). Blank lines are skipped; line breaks inside a line become spaces. No speaker label is sent: the live transcript does not identify speakers.
+- The session's transcript lines, numbered `L1`, `L2`, … with their time from the start of the session (`L3 [00:47] …`), plus speaker labels when diarized speakers or person-renamed speaker names are present (`L3 [00:47] Priya: …`). Blank lines are skipped; line breaks inside a line become spaces.
 - Only when ticked, the person's notes, each non-blank line numbered by its line in the editor (`N3 …`).
 - The fixed system prompt and reply schema. Nothing else: no session name, focus lines, imported or Granola notes, cues, audio or device names.
 
@@ -53,7 +53,7 @@ The request goes to your chosen provider's fixed HTTPS endpoint with your key fr
 
 1. Use only what the lines say; never add a fact, name, number, date, owner, decision or outcome; do not guess.
 2. Every item cites one to eight line ids it came from, and only ids that were given.
-3. An owner is someone the cited lines name as taking the task on; copy the name as written; otherwise the owner is null. Speakers are not identified, so never work out an owner from who seems to be speaking.
+3. An owner is someone the cited lines name (in the line text or by a named speaker label when provided) as taking the task on; copy the name as written; otherwise the owner is null. Numbered speakers (`Speaker 1`) and unlabelled lines do not identify an owner.
 4. A due date is one a cited line states, copied as written; otherwise null; never work one out.
 5. A decision is something the lines show was settled; an unsettled proposal is an open question.
 6. Open questions are questions not answered and matters left open.

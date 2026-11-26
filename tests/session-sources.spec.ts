@@ -6,7 +6,7 @@ import type {} from './fixtures/native-microphone';
 // session says when the application is no longer heard. The fixture stands
 // in for the native side; no device, stream or permission is involved.
 
-async function notebook(page: Page) {
+async function notebook(page: Page, query = '') {
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
     const response = await route.fetch();
@@ -18,7 +18,7 @@ async function notebook(page: Page) {
       ),
     });
   });
-  await page.goto('/?keys=set');
+  await page.goto(`/?keys=set${query}`);
   await page.evaluate(() => window.liveTest.start());
 }
 
@@ -294,4 +294,179 @@ test('a long meeting transcript past 400 lines renders all lines in the live not
   await expect(transcript.locator('.transcript-segment')).toHaveCount(450);
   await expect(transcript).toContainText('Fictional long meeting line 1.');
   await expect(transcript).toContainText('Fictional long meeting line 450.');
+});
+
+test('diarized remote speakers surface as Speaker 1, Speaker 2, fall back to Them, and rename inline', async ({
+  page,
+}) => {
+  await notebook(page);
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources,
+        transcript: [
+          {
+            id: 'c1-1-1',
+            atMs: 1_000,
+            speaker: 'Speaker 1',
+            speakerId: 0,
+            text: 'Can we finalize the fictional budget?',
+          },
+          {
+            id: 'c1-1-2',
+            atMs: 2_000,
+            speaker: 'Speaker 2',
+            speakerId: 1,
+            text: 'Yes, let us review Friday.',
+          },
+          {
+            id: 'c1-1-3',
+            atMs: 3_000,
+            speaker: 'Speaker 1',
+            speakerId: 0,
+            text: 'I will send the updated sheet.',
+          },
+          {
+            id: 'c1-1-4',
+            atMs: 4_000,
+            speaker: 'Them',
+            text: 'Sounds good.',
+          },
+          {
+            id: 'c1-0-1',
+            atMs: 5_000,
+            speaker: 'You',
+            text: 'Thanks both.',
+          },
+        ],
+      }),
+    both,
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  await expect(transcript).toContainText(
+    'You: your microphone · Remote speakers: audio from Fictional Call (click a speaker name to rename)',
+  );
+  await expect(transcript.locator('.transcript-segment strong')).toHaveText([
+    'Speaker 1',
+    'Speaker 2',
+    'Speaker 1',
+    'Them',
+    'You',
+  ]);
+
+  // Escape cancels without renaming.
+  await transcript
+    .locator('.transcript-segment')
+    .nth(0)
+    .getByRole('button', { name: 'Rename Speaker 1' })
+    .click();
+  const escapeInput = transcript.getByRole('textbox', {
+    name: 'Speaker 1 name',
+  });
+  await expect(escapeInput).toBeFocused();
+  await escapeInput.fill('Should not save');
+  await escapeInput.press('Escape');
+  await expect(transcript.locator('.transcript-segment strong')).toHaveText([
+    'Speaker 1',
+    'Speaker 2',
+    'Speaker 1',
+    'Them',
+    'You',
+  ]);
+
+  // Clicking Speaker 1 and submitting updates all lines from Speaker 1 immediately.
+  await transcript
+    .locator('.transcript-segment')
+    .nth(0)
+    .getByRole('button', { name: 'Rename Speaker 1' })
+    .click();
+  const renameInput = transcript.getByRole('textbox', {
+    name: 'Speaker 1 name',
+  });
+  await renameInput.fill('Priya Patel');
+  await renameInput.press('Enter');
+  await expect(transcript.locator('.transcript-segment strong')).toHaveText([
+    'Priya Patel',
+    'Speaker 2',
+    'Priya Patel',
+    'Them',
+    'You',
+  ]);
+});
+
+test('speaker rename preserves failed drafts, retries, resets, and keeps keyboard focus at narrow width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await notebook(page, '&reject-speaker-rename');
+  await page.evaluate(
+    (sources) =>
+      window.liveTest.publish({
+        sources,
+        transcript: [
+          {
+            id: 'r1',
+            atMs: 1000,
+            speaker: 'Speaker 1',
+            speakerId: 0,
+            text: 'I will check the fictional garden gate.',
+          },
+          {
+            id: 'r2',
+            atMs: 2000,
+            speaker: 'Speaker 1',
+            speakerId: 0,
+            text: 'I can bring a spare key.',
+          },
+        ],
+      }),
+    both,
+  );
+  await page.getByRole('tab', { name: /Transcript/ }).click();
+  const transcript = page.locator('#transcript-panel');
+  await transcript
+    .getByRole('button', { name: 'Rename Speaker 1' })
+    .first()
+    .click();
+  const input = transcript.getByRole('textbox', { name: 'Speaker 1 name' });
+  await input.fill('Priya Patel');
+  await input.press('Enter');
+  await expect(transcript.getByRole('alert')).toHaveText(
+    'The speaker could not be renamed. Try again.',
+  );
+  await expect(input).toHaveValue('Priya Patel');
+  await expect(input).toBeEnabled();
+  await transcript.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(
+    transcript.getByRole('button', { name: 'Rename Priya Patel' }),
+  ).toHaveCount(2);
+  await expect(
+    transcript.getByRole('button', { name: 'Rename Priya Patel' }).first(),
+  ).toBeFocused();
+  await transcript
+    .getByRole('button', { name: 'Rename Priya Patel' })
+    .first()
+    .click();
+  await input.fill('');
+  await input.press('Enter');
+  await expect(
+    transcript.getByRole('button', { name: 'Rename Speaker 1' }),
+  ).toHaveCount(2);
+  await transcript
+    .getByRole('button', { name: 'Rename Speaker 1' })
+    .first()
+    .click();
+  await input.fill('Not committed');
+  await input.dispatchEvent('keydown', {
+    key: 'Enter',
+    code: 'Enter',
+    isComposing: true,
+  });
+  await expect(input).toHaveValue('Not committed');
+  await input.press('Escape');
+  await expect(
+    transcript.getByRole('button', { name: 'Rename Speaker 1' }).first(),
+  ).toBeFocused();
+  await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390);
 });

@@ -161,6 +161,7 @@ fn an_hour_with_both_sources_stays_bounded_and_counts_its_caps() {
                 id: format!("a{app}"),
                 at_ms: now - 400,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: last_app_text.into(),
             };
             e.ingest_from(session, LineOrigin::Application, line)
@@ -180,6 +181,7 @@ fn an_hour_with_both_sources_stays_bounded_and_counts_its_caps() {
                 id: format!("m{mic}"),
                 at_ms: now - 300,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: text.into(),
             };
             match e.ingest_from(session, LineOrigin::Microphone, line) {
@@ -338,6 +340,7 @@ fn a_meeting_past_what_is_kept_says_its_start_is_missing_and_writes_no_partial_n
                 id: format!("m{n}"),
                 at_ms: e.state.elapsed_ms - 200,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: format!("Fictional line number {n} about the garden rota."),
             },
         )

@@ -317,6 +317,7 @@ fn shown_engine() -> Engine {
             id: "fictional-1".into(),
             at_ms: 10,
             speaker: "Maya".into(),
+            speaker_id: None,
             text: "Who owns the fictional checklist?".into(),
         },
     )
@@ -1229,6 +1230,7 @@ fn attested_real_review_link_handshake_and_worker_preserve_exact_note_before_aud
                 id: "current".into(),
                 at_ms: 10,
                 speaker: "Adrian".into(),
+                speaker_id: None,
                 text: "Should we plan setup for half eight?".into(),
             },
         )
@@ -1516,6 +1518,7 @@ fn lab_history_opaque_review_cancel_replay_and_legacy_grant_never_dispatch() {
                 id: "old".into(),
                 at_ms: 1000,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: "Earlier workshop detail.".into(),
             },
         )
@@ -1563,6 +1566,7 @@ fn lab_history_opaque_review_cancel_replay_and_legacy_grant_never_dispatch() {
                 id: "new".into(),
                 at_ms: 1010,
                 speaker: "Speaker".into(),
+                speaker_id: None,
                 text: "New workshop detail.".into(),
             },
         )
@@ -1641,6 +1645,7 @@ fn ordinary_selected_shared_lifecycle_cases_cancel_real_link_and_reject_late_rep
                     id: "current".into(),
                     at_ms: 10,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "Can we open the room at nine?".into(),
                 },
             )
@@ -1918,6 +1923,7 @@ fn ordinary_selected_pairs_with_public_js_worker_and_retires_late_delivery() {
                     id: "current".into(),
                     at_ms: 10,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "Can we open the room at nine?".into(),
                 },
             )
@@ -2062,6 +2068,7 @@ fn bounded_history_pairs_with_public_js_without_old_only_or_note_dispatch() {
                     id: "history-old".into(),
                     at_ms: 1_000,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: old_fact.into(),
                 },
             )
@@ -2105,6 +2112,7 @@ fn bounded_history_pairs_with_public_js_without_old_only_or_note_dispatch() {
                     id: "history-anchor".into(),
                     at_ms: 40_002,
                     speaker: "Maya".into(),
+                    speaker_id: None,
                     text: "We are checking the fictional venue setup now.".into(),
                 },
             )

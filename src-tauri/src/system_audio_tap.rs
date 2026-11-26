@@ -958,6 +958,7 @@ mod tests {
                     id: "mic-1".into(),
                     at_ms: 1_200,
                     speaker: "Speaker".into(),
+                    speaker_id: None,
                     text: "Yes, let's check with legal first.".into(),
                 },
             )
@@ -969,13 +970,63 @@ mod tests {
 
         let e = engine.lock().unwrap();
         assert_eq!(e.state.transcript.len(), 2);
-        assert_eq!(e.state.transcript[0].speaker, THEM);
+        assert_eq!(e.state.transcript[0].speaker, "Speaker 1");
+        assert_eq!(e.state.transcript[0].speaker_id, Some(0));
         assert_eq!(e.state.transcript[0].text, "Can we ship Friday?");
         assert_eq!(e.state.transcript[1].speaker, YOU);
+        assert_eq!(e.state.transcript[1].speaker_id, None);
         assert_eq!(
             e.state.transcript[1].text,
             "Yes, let's check with legal first."
         );
+    }
+
+    #[test]
+    fn diarized_and_fallback_remote_speakers_surface_distinct_labels() {
+        let mut e = Engine::live();
+        e.start().unwrap();
+        e.set_sources(SessionSources::system_audio());
+        let session = e.session();
+        e.advance(5_000);
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            crate::engine::Segment {
+                id: "s0".into(),
+                at_ms: 1_000,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "First remote speaker.".into(),
+            },
+        )
+        .unwrap();
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            crate::engine::Segment {
+                id: "s1".into(),
+                at_ms: 2_000,
+                speaker: "Speaker".into(),
+                speaker_id: Some(1),
+                text: "Second remote speaker.".into(),
+            },
+        )
+        .unwrap();
+        e.ingest_from(
+            session,
+            LineOrigin::Application,
+            crate::engine::Segment {
+                id: "s-none".into(),
+                at_ms: 3_000,
+                speaker: "Speaker".into(),
+                speaker_id: None,
+                text: "Undiarized remote line.".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(e.state.transcript[0].speaker, "Speaker 1");
+        assert_eq!(e.state.transcript[1].speaker, "Speaker 2");
+        assert_eq!(e.state.transcript[2].speaker, THEM);
     }
 
     #[test]
@@ -1033,6 +1084,7 @@ mod tests {
                         id: "mic-fallback".into(),
                         at_ms: 400,
                         speaker: "Speaker".into(),
+                        speaker_id: None,
                         text: "Microphone still works.".into(),
                     },
                 )

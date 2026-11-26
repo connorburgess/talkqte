@@ -310,6 +310,54 @@ pub(crate) async fn rename_kept_meeting(
 }
 
 #[tauri::command]
+pub(crate) async fn rename_kept_meeting_speaker(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    speaker_id: u32,
+    name: String,
+) -> Result<Meeting, String> {
+    main_only(&window)?;
+    let target = id.clone();
+    let meeting = blocking(&app, move |store| {
+        store.rename_speaker(&target, speaker_id, &name)
+    })
+    .await?
+    .map_err(message)?;
+    let linked_session = if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        let linked = keeping
+            .kept
+            .as_mut()
+            .filter(|kept| kept.id == meeting.id)
+            .map(|kept| {
+                kept.content.speaker_names = meeting.content.speaker_names.clone();
+                kept.session
+            });
+        keeping.export = None;
+        linked
+    } else {
+        None
+    };
+    // Never hold Keeping while acquiring Runtime (status reads use the reverse
+    // order). A new session may have started while the disk write was pending.
+    if let Some(session) = linked_session {
+        let state = app.state::<AppState>();
+        if let Ok(mut runtime) = state.0.lock() {
+            let name = meeting
+                .content
+                .speaker_names
+                .get(&speaker_id)
+                .map_or("", String::as_str);
+            if sync_ended_speaker(&mut runtime.engine, session, speaker_id, name) {
+                runtime.export = None;
+                crate::publish(&app, &mut runtime);
+            }
+        };
+    }
+    Ok(meeting)
+}
+
+#[tauri::command]
 pub(crate) async fn create_meeting_folder(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
@@ -903,5 +951,130 @@ pub(crate) async fn respond_to_end_prompt(
                 }
             }
         }
+    }
+}
+
+/// Keep the linked ended notebook consistent with an independently renamed
+/// saved meeting, so its next notes update cannot restore the old name.
+fn sync_ended_speaker(
+    engine: &mut crate::engine::Engine,
+    session: u64,
+    speaker_id: u32,
+    name: &str,
+) -> bool {
+    engine.history_session() == session
+        && engine.state.status == crate::engine::Status::Ended
+        && engine.rename_speaker(speaker_id, name).is_ok()
+}
+
+#[cfg(test)]
+mod speaker_sync_tests {
+    use super::*;
+    use crate::engine::{Engine, LineOrigin, Segment, SessionSources};
+
+    fn ended_meeting() -> Engine {
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        engine.set_sources(SessionSources::system_audio());
+        engine.advance(2_000);
+        engine
+            .ingest_from(
+                engine.session(),
+                LineOrigin::Application,
+                Segment {
+                    id: "fictional-remote".into(),
+                    at_ms: 1_000,
+                    speaker: "Speaker".into(),
+                    speaker_id: Some(0),
+                    text: "I will check the fictional garden gate.".into(),
+                },
+            )
+            .unwrap();
+        engine.end();
+        engine
+    }
+
+    #[test]
+    fn saved_speaker_rename_survives_a_later_notebook_notes_update() {
+        let mut engine = ended_meeting();
+        let session = engine.history_session();
+        let folder = std::env::temp_dir().join(format!(
+            "talkqte-fictional-speaker-sync-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = Store::open(Some(folder.clone()), false);
+        let saved = store
+            .keep(
+                "Fictional garden planning",
+                engine.keepable_meeting(false).unwrap(),
+            )
+            .unwrap();
+        store.create_folder("Fictional garden").unwrap();
+        store
+            .set_folder(&saved.id, Some("Fictional garden"))
+            .unwrap();
+        drop(store);
+        let reopened = Store::open(Some(folder.clone()), false);
+        let renamed = reopened
+            .rename_speaker(&saved.id, 0, "Priya Patel")
+            .unwrap();
+        let name = renamed.content.speaker_names.get(&0).unwrap();
+        assert!(sync_ended_speaker(&mut engine, session, 0, name));
+        engine
+            .update_notes("Bring the spare garden key.".into())
+            .unwrap();
+        reopened
+            .update(&saved.id, engine.keepable_meeting(false).unwrap())
+            .unwrap();
+        let updated = reopened.open_meeting(&saved.id).unwrap();
+        assert_eq!(
+            updated.content.speaker_names.get(&0).map(String::as_str),
+            Some("Priya Patel")
+        );
+        assert_eq!(updated.content.notes, "Bring the spare garden key.");
+        assert_eq!(updated.folder.as_deref(), Some("Fictional garden"));
+        assert_eq!(reopened.list(None).folders, ["Fictional garden"]);
+        assert_eq!(engine.state.transcript[0].speaker, "Priya Patel");
+        assert!(updated
+            .markdown()
+            .contains("Priya Patel: I will check the fictional garden gate."));
+        assert!(sync_ended_speaker(&mut engine, session, 0, ""));
+        assert!(engine
+            .keepable_meeting(false)
+            .unwrap()
+            .speaker_names
+            .is_empty());
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_delayed_saved_rename_cannot_change_a_replacement_meeting() {
+        let mut engine = ended_meeting();
+        let previous = engine.history_session();
+        engine.start().unwrap();
+        engine.set_sources(SessionSources::system_audio());
+        engine.advance(2_000);
+        engine
+            .ingest_from(
+                engine.session(),
+                LineOrigin::Application,
+                Segment {
+                    id: "replacement-remote".into(),
+                    at_ms: 1_000,
+                    speaker: "Speaker".into(),
+                    speaker_id: Some(0),
+                    text: "A different fictional conversation.".into(),
+                },
+            )
+            .unwrap();
+        assert!(!sync_ended_speaker(&mut engine, previous, 0, "Priya Patel"));
+        engine.end();
+        assert!(!sync_ended_speaker(&mut engine, previous, 0, "Priya Patel"));
+        assert_eq!(engine.state.transcript[0].speaker, "Speaker 1");
+        assert!(engine.state.speaker_names.is_empty());
     }
 }
