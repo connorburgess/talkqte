@@ -135,6 +135,7 @@ declare global {
       setScenario: (next: string, notify?: boolean) => Promise<void>;
       release: () => void;
       pending: () => number;
+      useFileNotes: () => void;
     };
   }
 }
@@ -148,4 +149,15 @@ window.priorContextTest = {
   },
   release: () => pending.splice(0).forEach((resolve) => resolve()),
   pending: () => pending.length,
+  useFileNotes: () =>
+    imported([
+      {
+        provider: 'file',
+        sourceId: 'fictional-file',
+        title: 'Fictional file notes',
+        sourceDate: '2026-11-10',
+        excerpt: 'Check the garden gate.',
+        revision: 1,
+      },
+    ]),
 };

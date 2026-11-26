@@ -48,6 +48,7 @@ export function ContextNotes({
     expanded && items.length === 0,
   );
   const historyUnavailable =
+    items.length === 0 &&
     savedNotes.state.phase === 'ready' &&
     savedNotes.state.listing.availability !== 'on';
   const emptyHistoryReason =

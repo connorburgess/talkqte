@@ -202,6 +202,26 @@ test('a history change refreshes availability and retires an older pending check
   await expect(panel(page)).not.toContainText('No saved meetings yet.');
 });
 
+test('importing file notes does not leave the history chooser disabled by a retired empty-state check', async ({
+  page,
+}) => {
+  await open(page, 'unavailable');
+  const choose = panel(page).getByRole('button', {
+    name: 'Choose kept meetings',
+  });
+  await expect(choose).toBeDisabled();
+  await page.evaluate(() => window.priorContextTest.useFileNotes());
+  await expect(panel(page).locator('summary')).toContainText('1 note selected');
+  await page.evaluate(() => window.priorContextTest.setScenario('available'));
+  await expect(choose).toBeEnabled();
+  await choose.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('checkbox')).not.toBeChecked();
+  await expect(dialog).toContainText('Fictional garden review');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(choose).toBeFocused();
+});
+
 test('narrow guidance and chooser remain readable and keyboard accessible', async ({
   page,
 }) => {
