@@ -162,11 +162,14 @@ pub fn schema(on_screen: OnScreen) -> Value {
     })
 }
 
-/// The request body for one evaluation: `input` is the lab's input JSON
-/// (`Request::prompt_input`), sent verbatim as the user message.
-pub fn body(model: Model, input: &str, on_screen: OnScreen) -> Value {
+fn build_request_body(
+    model_id: &str,
+    thinking: Option<&str>,
+    input: &str,
+    on_screen: OnScreen,
+) -> Value {
     let mut body = json!({
-        "model": model.id,
+        "model": model_id,
         "max_tokens": MAX_TOKENS,
         "system": [{
             "type": "text",
@@ -180,10 +183,21 @@ pub fn body(model: Model, input: &str, on_screen: OnScreen) -> Value {
         },
         "stream": true,
     });
-    if let Some(thinking) = model.thinking {
+    if let Some(thinking) = thinking {
         body["thinking"] = json!({"type": thinking});
     }
     body
+}
+
+/// The request body for one evaluation: `input` is the lab's input JSON
+/// (`Request::prompt_input`), sent verbatim as the user message.
+pub fn body(model: Model, input: &str, on_screen: OnScreen) -> Value {
+    build_request_body(model.id, model.thinking, input, on_screen)
+}
+
+fn worst_case_for_price(price: [f64; 4], input: &str, on_screen: OnScreen) -> u64 {
+    let bytes = system_prompt().len() + input.len() + schema(on_screen).to_string().len();
+    crate::llm_provider::worst_case_micro_usd(price, bytes, MAX_TOKENS)
 }
 
 /// The lab's preflight worst case for one call (`worstCaseMicroUsd`): about
@@ -191,10 +205,7 @@ pub fn body(model: Model, input: &str, on_screen: OnScreen) -> Value {
 /// for the structured-output prompt, at the higher of the input and
 /// cache-write price, plus the whole output bound.
 pub fn worst_case_micro_usd(model: Model, input: &str, on_screen: OnScreen) -> u64 {
-    let bytes = system_prompt().len() + input.len() + schema(on_screen).to_string().len();
-    let tokens = bytes.div_ceil(2) as f64 + 1_500.0;
-    let [input_price, write_price, _, output_price] = model.price;
-    (tokens * input_price.max(write_price) + MAX_TOKENS as f64 * output_price).ceil() as u64
+    worst_case_for_price(model.price, input, on_screen)
 }
 
 /// Reported usage, as the lab charges it (`costMicroUsd`).
@@ -494,25 +505,7 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         let model_id = self.effective_model_id().to_string();
         let thinking = self.effective_thinking();
         let price = self.effective_price();
-        let mut req_body = json!({
-            "model": model_id,
-            "max_tokens": MAX_TOKENS,
-            "system": [{
-                "type": "text",
-                "text": system_prompt(),
-                "cache_control": {"type": "ephemeral"},
-            }],
-            "messages": [{"role": "user", "content": input}],
-            "output_config": {
-                "effort": EFFORT,
-                "format": {"type": "json_schema", "schema": schema(on_screen)},
-            },
-            "stream": true,
-        });
-        if let Some(thinking) = thinking {
-            req_body["thinking"] = json!({"type": thinking});
-        }
-        let body = req_body.to_string();
+        let body = build_request_body(&model_id, thinking, &input, on_screen).to_string();
         if body.len() > MAX_REQUEST_BYTES {
             return Err(Failure::InvalidInput);
         }
@@ -520,11 +513,7 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         // session's estimate cap (for built-in models); custom models enforce
         // the 400-request cap without fabricating dollar spend.
         let worst = if let Some(p) = price {
-            let bytes = system_prompt().len() + input.len() + schema(on_screen).to_string().len();
-            let tokens = bytes.div_ceil(2) as f64 + 1_500.0;
-            let [input_price, write_price, _, output_price] = p;
-            let w = (tokens * input_price.max(write_price) + MAX_TOKENS as f64 * output_price)
-                .ceil() as u64;
+            let w = worst_case_for_price(p, &input, on_screen);
             if self.usage.spent_micro_usd.load(Ordering::Acquire) + w > self.spend_cap {
                 return Err(Failure::SpendLimit);
             }
@@ -828,10 +817,10 @@ pub(crate) fn read_bounded_stream_for_id(
             Outcome::Decision(std::mem::take(&mut text))
         }
     });
-    let complete = stopped
-        && usage.input.is_some()
-        && usage.output.is_some()
-        && outcome != Outcome::OutputLimit;
+    let has_input =
+        usage.input.is_some() || usage.cache_write.is_some() || usage.cache_read.is_some();
+    let complete =
+        stopped && has_input && usage.output.is_some() && outcome != Outcome::OutputLimit;
     (outcome, usage, complete)
 }
 

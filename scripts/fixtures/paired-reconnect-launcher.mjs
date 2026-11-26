@@ -234,10 +234,21 @@ try {
               .map((r) => r.gap_ms),
             [100, 100],
           );
+          const exhausted = await step('exhaust-to-cap');
+          assert.equal(exhausted.result, null);
+          assert.equal(exhausted.opens, 10);
+          await until(
+            () => launcher.transcription.reconnects === 10,
+            'reconnect attempts exhausted to cap',
+          );
           const capped = await step('last-failed');
           assert.equal(capped.result, 'network');
-          assert.equal(capped.opens, 2, 'native cap forbids a third opener');
-          assert.equal(launcher.transcription.reconnects, 2);
+          assert.equal(
+            capped.opens,
+            10,
+            'native cap forbids an eleventh opener',
+          );
+          assert.equal(launcher.transcription.reconnects, 10);
         }
       }
       const exit = once(child, 'exit');

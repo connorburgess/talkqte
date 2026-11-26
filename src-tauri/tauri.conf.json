@@ -54,5 +54,13 @@
         "Resources/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/connorburgess/talkqte/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
   }
 }

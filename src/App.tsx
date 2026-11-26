@@ -70,20 +70,17 @@ import { notMacos, platformName, usePlatform } from './lib/platform';
 import { Diagnostics } from './components/Diagnostics';
 import { listen } from '@tauri-apps/api/event';
 import { CallPrompt } from './components/CallPrompt';
+import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
+import { UpdateSettings } from './components/UpdateSettings';
 import { savedPanelSizes, savePanelSizes } from './lib/savedSettings';
-import {
-  SessionSources,
-  microphoneOnly,
-  ready,
-  type SourceChoice,
-} from './components/SessionSources';
 import {
   type EchoLine,
   applicationEndedText,
+  bothSources,
   echoText,
   sourcesHeading,
   transcribedWhere,
@@ -94,7 +91,6 @@ import {
 } from './lib/transcription';
 import {
   microphoneNotCapturing,
-  processingApi,
   sourceOnlyApplication,
 } from './lib/processing';
 
@@ -475,29 +471,44 @@ function FloatingQuestion() {
                 <EyeOff size={16} aria-hidden="true" />
               </button>
             </header>
-            {state && (
-              <CueCard
-                cue={state.cue}
-                size={state.questionSize}
-                announce={false}
-                compact
-                busy={busy}
-                onHold={() =>
-                  void run(() =>
-                    bridge.command('inspect_cue', { id: state.cue!.id }),
-                  )
-                }
-                onDismiss={() => {
-                  dismissed.current = true;
-                  void run(() =>
-                    bridge.command('respond_to_cue', {
-                      id: state.cue!.id,
-                      response: 'dismiss',
-                    }),
-                  );
-                }}
-              />
-            )}
+            {state &&
+              (state.callEndPrompt ? (
+                <CallEndPrompt
+                  prompt={state.callEndPrompt}
+                  busy={busy}
+                  large={state.questionSize === 'large'}
+                  onAnswer={(answer) =>
+                    void run(() =>
+                      bridge.command('respond_to_call_end_prompt', {
+                        id: state.callEndPrompt!.id,
+                        answer,
+                      }),
+                    )
+                  }
+                />
+              ) : (
+                <CueCard
+                  cue={state.cue}
+                  size={state.questionSize}
+                  announce={false}
+                  compact
+                  busy={busy}
+                  onHold={() =>
+                    void run(() =>
+                      bridge.command('inspect_cue', { id: state.cue!.id }),
+                    )
+                  }
+                  onDismiss={() => {
+                    dismissed.current = true;
+                    void run(() =>
+                      bridge.command('respond_to_cue', {
+                        id: state.cue!.id,
+                        response: 'dismiss',
+                      }),
+                    );
+                  }}
+                />
+              ))}
           </>
         ) : state?.endPrompt && state.overlayEnabled ? (
           <EndPrompt
@@ -557,22 +568,13 @@ function transcriptLines(state: Snapshot) {
 
 /** Concise disclosure shown right beside Start live session. */
 function startDisclosure(
-  sources: SourceChoice,
-  canChooseSources: boolean,
+  systemAudio: boolean,
   liveStatus: LiveStatus | null,
 ): string | null {
   if (!liveStatus?.available) return null;
-  const active = canChooseSources ? sources : microphoneOnly;
-  const sourceLabel =
-    active.mode === 'microphone'
-      ? 'your microphone'
-      : active.mode === 'both'
-        ? active.application
-          ? `your microphone and ${active.application.name}`
-          : 'your microphone and the chosen application'
-        : active.application
-          ? `${active.application.name} audio`
-          : 'the chosen application’s audio';
+  const sourceLabel = systemAudio
+    ? 'your microphone and system audio'
+    : 'your microphone';
   const stt = liveStatus.transcription;
   const cueProvider = liveStatus.cueProvider;
   if (stt && cueProvider)
@@ -654,6 +656,9 @@ function Notebook() {
     if (startPending && state?.live && state.status === 'running')
       setStartInstalled(true);
   }, [startPending, state?.live, state?.status]);
+  useEffect(() => {
+    if (!state?.sources?.echoes?.length) setShowEchoes(false);
+  }, [state?.sources?.echoes?.length]);
   const startButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement | null>(null);
   const stopButton = useRef<HTMLButtonElement | null>(null);
@@ -675,68 +680,17 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
-  const [sources, setSources] = useState<SourceChoice>(microphoneOnly);
-  // Start in the companion's call-starting offer: show the notebook with
-  // the microphone and the offered application chosen. Nothing starts here.
-  useEffect(() => {
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    void listen<{ name: string; bundleId: string } | null>(
-      'call-prompt:start',
-      ({ payload }) => {
-        setView('notebook');
-        setSources({
-          mode: payload ? 'both' : 'microphone',
-          application: null,
-          wanted: payload ?? undefined,
-        });
-      },
-    )
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stop = unlisten;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      stop?.();
-    };
-  }, []);
-  // Only a build that can hear an application reports one beside the
-  // microphone; any other build starts from the microphone as before.
-  const canChooseSources = !!capture.state?.source;
+  const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
-    const choice = canChooseSources ? sources : microphoneOnly;
     void run(async () => {
       setNotice('');
       if (dictation.active) await dictation.stop();
       try {
-        if (choice.mode === 'microphone' || !choice.application) {
-          await bridge.command('start_live_session');
-          return;
-        }
-        // Review exactly the chosen application, then start with it: the
-        // session declares it, so its one approval names what is sent.
-        const review = await processingApi.applicationAudio({
-          kind: 'review',
-          source: choice.application.id,
-        });
-        if (!review?.operation)
-          throw new Error('The selected application changed. Choose it again.');
-        if (choice.mode === 'both')
-          await bridge.command('start_live_session', {
-            application: review.operation,
-          });
-        else
-          await processingApi.applicationAudio({
-            kind: 'startSession',
-            review: review.operation,
-          });
-        setSources((current) => ({ ...current, application: null }));
+        await bridge.command('start_live_session');
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -752,6 +706,7 @@ function Notebook() {
   const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
     'notebook',
   );
+  const [showEchoes, setShowEchoes] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [sessionHistory, setSessionHistory] = useState<HistoryStatus | null>(
     null,
@@ -904,9 +859,13 @@ function Notebook() {
   useEffect(() => {
     if (!state) return;
     setEndedFocus(
-      state.live && state.status === 'ended' ? state.focus.join('\n') : null,
+      state.live &&
+        state.status === 'ended' &&
+        (state.transcript.length > 0 || state.notes.trim().length > 0)
+        ? state.focus.join('\n')
+        : null,
     );
-  }, [state?.live, state?.status]);
+  }, [state?.live, state?.status, state?.transcript.length, state?.notes]);
   // The cap's countdown is said when it first appears, not every minute.
   const lowSaid = useRef(false);
   const lowText = transcriptionLowText(state?.transcription);
@@ -937,7 +896,7 @@ function Notebook() {
   const sessionWas = useRef<string | null>(null);
   useEffect(() => {
     const now = state?.live ? (state.status ?? null) : null;
-    if (sessionWas.current === 'running' && now === 'ended')
+    if (sessionWas.current === 'running' && now !== 'running')
       setNotice('Live session ended.');
     sessionWas.current = now;
   }, [state?.live, state?.status]);
@@ -1317,6 +1276,13 @@ function Notebook() {
   }, [preview, busy]);
 
   const live = !!state?.live && state.status === 'running';
+  const emptyEndedLive =
+    !!state?.live &&
+    state.status === 'ended' &&
+    state.transcript.length === 0 &&
+    state.notes.trim().length === 0 &&
+    notes.trim().length === 0;
+  const sessionLive = !!state?.live && !emptyEndedLive;
   // Browser preview and tests only: a replay of a fictional conversation.
   // The flag comes from the browser tests' stand-in (liveTest.simulate in
   // tests/fixtures/native-microphone.ts); the desktop engine never sends it,
@@ -1681,7 +1647,7 @@ function Notebook() {
                   ? 'Meetings'
                   : 'Settings'}
             </span>
-            {view === 'notebook' && state.live && (
+            {view === 'notebook' && sessionLive && (
               <>
                 <ChevronRight size={14} />
                 <span>Live session</span>
@@ -1758,9 +1724,14 @@ function Notebook() {
           <div
             className="notebook-processing"
             hidden={
-              view !== 'settings' &&
-              !state.live &&
-              !capture.state?.source?.mayBeCapturing
+              view === 'meetings' ||
+              (!live &&
+                !preparing &&
+                !finishing &&
+                !capture.state?.source?.mayBeCapturing &&
+                !capture.state?.issue &&
+                !capture.error &&
+                !(capture.statusError && (live || preparing || finishing)))
             }
           >
             <ProcessingControl
@@ -1827,7 +1798,7 @@ function Notebook() {
                         : 'Preparing live session'
                       : finishing
                         ? 'Finishing live session'
-                        : state.live
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? 'Cues paused · session continues'
@@ -1845,7 +1816,7 @@ function Notebook() {
                           microphoneNotCapturing(microphone.state)
                           ? 'Ending live session. See Cue processing above.'
                           : 'Releasing microphone and finishing transcription…'
-                        : state.live
+                        : sessionLive
                           ? live
                             ? state.cuesPaused
                               ? sourceApp
@@ -1853,7 +1824,10 @@ function Notebook() {
                                 : 'Microphone and transcript continue. Stop live session when done.'
                               : sourceApp
                                 ? `Audio from ${sourceApp} · audio not recorded`
-                                : 'Your microphone · audio not recorded'
+                                : bothSources(state.sources) &&
+                                    !state.sources?.applicationEnded
+                                  ? 'Your microphone and system audio · audio not recorded'
+                                  : 'Your microphone · audio not recorded'
                             : sessionHistory?.kept
                               ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
                               : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
@@ -1872,8 +1846,19 @@ function Notebook() {
                                     ? `Nothing is captured. ${liveStatus.reason}`
                                     : 'Nothing is captured.'}
                   </p>
+                  {capturesSystemAudio &&
+                    liveStatus?.available &&
+                    !sessionLive &&
+                    !simulated &&
+                    !preparing &&
+                    !finishing && (
+                      <p className="small muted">
+                        Use headphones if you can—speaker playback can echo into
+                        your mic and TalkQTE can’t catch every repeat.
+                      </p>
+                    )}
                   {notMacos(platform) &&
-                    !state.live &&
+                    !sessionLive &&
                     !simulated &&
                     !preparing &&
                     !finishing && (
@@ -1913,9 +1898,8 @@ function Notebook() {
                 </div>
               </div>
               <div className="session-actions">
-                {(state.live || simulated) && !preparing && (
+                {(live || simulated) && !preparing && (
                   <span className="session-clock">
-                    {state.live && !live && !finishing ? 'Length ' : ''}
                     {clockTime(state.elapsedMs)}
                   </span>
                 )}
@@ -1964,35 +1948,20 @@ function Notebook() {
                         <button
                           className="primary-button"
                           ref={startButton}
-                          disabled={
-                            busy ||
-                            startPending ||
-                            micCheckActive ||
-                            (canChooseSources && !ready(sources))
-                          }
+                          disabled={busy || startPending || micCheckActive}
                           title={
                             micCheckActive
                               ? 'Stop the microphone check first.'
-                              : canChooseSources && !ready(sources)
-                                ? 'Choose the application first.'
-                                : undefined
+                              : undefined
                           }
                           onClick={startLive}
                         >
                           <Play size={15} />
                           Start live session
                         </button>
-                        {startDisclosure(
-                          sources,
-                          canChooseSources,
-                          liveStatus,
-                        ) && (
+                        {startDisclosure(capturesSystemAudio, liveStatus) && (
                           <p className="session-start-disclosure">
-                            {startDisclosure(
-                              sources,
-                              canChooseSources,
-                              liveStatus,
-                            )}
+                            {startDisclosure(capturesSystemAudio, liveStatus)}
                           </p>
                         )}
                       </>
@@ -2001,18 +1970,6 @@ function Notebook() {
                 )}
               </div>
             </section>
-            {canChooseSources &&
-              liveStatus?.available &&
-              !preparing &&
-              !finishing &&
-              !live &&
-              !simulated && (
-                <SessionSources
-                  value={sources}
-                  onChange={setSources}
-                  disabled={busy || startPending}
-                />
-              )}
 
             <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
             <KeepInHistory
@@ -2185,9 +2142,9 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    {(state.live || simulated) && (
+                    {(sessionLive || simulated) && (
                       <p className="muted small">
-                        {state.live
+                        {sessionLive
                           ? (sourcesHeading(
                               state.sources,
                               state.transcription,
@@ -2198,77 +2155,104 @@ function Notebook() {
                           : 'Fictional replay · not from microphone audio'}
                       </p>
                     )}
-                    {transcriptLines(state).length ? (
-                      transcriptLines(state).map(({ segment, echo }) => (
-                        <article
-                          className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
-                          key={segment.id}
-                        >
-                          <div className="transcript-segment-head">
-                            <strong>{segment.speaker}</strong>
-                            <time>{clockTime(segment.atMs)}</time>
-                            {echo && !echo.kept && (
-                              <span className="transcript-echo-label">
-                                Likely an echo of Them · not used for cues
-                              </span>
-                            )}
-                          </div>
-                          <p>{segment.text}</p>
-                          {echo && !echo.kept && (
-                            <div className="transcript-echo-actions">
+                    {(() => {
+                      const allLines = transcriptLines(state);
+                      const echoCount = allLines.filter(
+                        ({ echo }) => echo && !echo.kept,
+                      ).length;
+                      const visibleLines = showEchoes
+                        ? allLines
+                        : allLines.filter(({ echo }) => !echo || echo.kept);
+                      return (
+                        <>
+                          {echoCount > 0 && (
+                            <div className="transcript-echo-toggle-row">
                               <button
-                                className="secondary-button"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: true,
-                                    }),
-                                  )
-                                }
+                                type="button"
+                                className="transcript-echo-toggle"
+                                aria-expanded={showEchoes}
+                                onClick={() => setShowEchoes((open) => !open)}
                               >
-                                It was me
-                              </button>
-                              <button
-                                className="secondary-button transcript-echo-remove"
-                                disabled={busy}
-                                onClick={() =>
-                                  void run(() =>
-                                    bridge.command('resolve_echo_line', {
-                                      id: segment.id,
-                                      keep: false,
-                                    }),
-                                  )
-                                }
-                              >
-                                Remove
+                                {showEchoes
+                                  ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                                  : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
                               </button>
                             </div>
                           )}
-                        </article>
-                      ))
-                    ) : (
-                      <div className="empty-inline">
-                        <MessageCircle size={25} />
-                        <h2>
-                          {live || simulated
-                            ? 'A conversation starts here.'
-                            : 'No transcript yet.'}
-                        </h2>
-                        <p>
-                          {live
-                            ? sourceApp
-                              ? 'Lines from the app appear a few seconds after they’re heard.'
-                              : 'Lines appear a few seconds after they’re spoken.'
-                            : state.live
-                              ? 'No lines transcribed.'
-                              : simulated
-                                ? 'Replay lines appear here.'
-                                : 'Lines appear here during a live session.'}
-                        </p>
-                      </div>
-                    )}
+                          {visibleLines.length ? (
+                            visibleLines.map(({ segment, echo }) => (
+                              <article
+                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
+                                key={segment.id}
+                              >
+                                <div className="transcript-segment-head">
+                                  <strong>{segment.speaker}</strong>
+                                  <time>{clockTime(segment.atMs)}</time>
+                                  {echo && !echo.kept && (
+                                    <span className="transcript-echo-label">
+                                      Likely an echo of Them · not used for cues
+                                    </span>
+                                  )}
+                                </div>
+                                <p>{segment.text}</p>
+                                {echo && !echo.kept && (
+                                  <div className="transcript-echo-actions">
+                                    <button
+                                      className="secondary-button"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: true,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      It was me
+                                    </button>
+                                    <button
+                                      className="secondary-button transcript-echo-remove"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        void run(() =>
+                                          bridge.command('resolve_echo_line', {
+                                            id: segment.id,
+                                            keep: false,
+                                          }),
+                                        )
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </article>
+                            ))
+                          ) : echoCount > 0 ? null : (
+                            <div className="empty-inline">
+                              <MessageCircle size={25} />
+                              <h2>
+                                {live || simulated
+                                  ? 'A conversation starts here.'
+                                  : 'No transcript yet.'}
+                              </h2>
+                              <p>
+                                {live
+                                  ? sourceApp
+                                    ? 'Lines from the app appear a few seconds after they’re heard.'
+                                    : 'Lines appear a few seconds after they’re spoken.'
+                                  : sessionLive
+                                    ? 'No lines transcribed.'
+                                    : simulated
+                                      ? 'Replay lines appear here.'
+                                      : 'Lines appear here during a live session.'}
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </section>
@@ -2301,7 +2285,7 @@ function Notebook() {
                           ? 'Cues are paused.'
                           : live || simulated
                             ? 'A little room to think.'
-                            : state.live
+                            : sessionLive
                               ? 'Cues have stopped.'
                               : 'No cue yet.'}
                       </h3>
@@ -2310,7 +2294,7 @@ function Notebook() {
                           ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
                           : live || simulated
                             ? 'Cues pass quietly. Keep listening without needing to respond.'
-                            : state.live
+                            : sessionLive
                               ? 'Start a new session for cues.'
                               : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
                       </p>
@@ -2604,7 +2588,7 @@ function Notebook() {
               <p>
                 {live || preparing || finishing
                   ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
-                  : state.live
+                  : sessionLive
                     ? sessionHistory?.kept
                       ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
                       : 'In memory until you quit or start another session, unless you save or export it.'
@@ -2871,8 +2855,8 @@ function Notebook() {
                 </h2>
                 <p>
                   TalkQTE does not transcribe on this device. Pressing Start
-                  live session sends audio (from your mic or a chosen Mac app)
-                  to{' '}
+                  live session sends audio (from your mic and, on macOS 14.2+,
+                  system audio) to{' '}
                   {liveStatus?.transcription ??
                     'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
                   and recent lines to{' '}
@@ -2893,6 +2877,7 @@ function Notebook() {
               key={`history-${settingsEpoch}`}
               onDeleted={() => setHistoryRevision((r) => r + 1)}
             />
+            <UpdateSettings key={`updates-${settingsEpoch}`} />
             <SavedSettings
               onReset={() => {
                 setPreferredListWidth(null);

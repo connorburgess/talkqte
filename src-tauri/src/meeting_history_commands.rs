@@ -66,6 +66,7 @@ pub(crate) struct SessionKept {
 pub(crate) struct Status {
     availability: Availability,
     after_session_keep: AfterSessionKeep,
+    auto_prior_context: bool,
     /// The current session's number, so a choice in the notebook (Not this
     /// one) applies to that session only.
     session: u64,
@@ -111,6 +112,10 @@ pub(crate) fn meeting_history_status(
         .map_or(AfterSessionKeep::Auto, |settings| {
             settings.saved().after_session_keep
         });
+    let auto_prior_context = !crate::settings::lab_run()
+        && app
+            .try_state::<SettingsStore>()
+            .is_none_or(|settings| settings.saved().auto_prior_context);
     let kept = keeping
         .kept
         .as_ref()
@@ -126,6 +131,7 @@ pub(crate) fn meeting_history_status(
     Ok(Status {
         availability: store.availability(),
         after_session_keep,
+        auto_prior_context,
         session,
         kept,
     })
@@ -139,6 +145,22 @@ pub(crate) fn set_after_session_keep(
 ) -> Result<(), String> {
     main_only(&window)?;
     store.record(|settings| settings.after_session_keep = mode);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn set_auto_prior_context(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    store: tauri::State<'_, SettingsStore>,
+    enabled: bool,
+) -> Result<(), String> {
+    main_only(&window)?;
+    if crate::settings::lab_run() {
+        return Err("Auto prior context is not available in lab runs.".into());
+    }
+    store.record(|settings| settings.auto_prior_context = enabled);
+    crate::refresh_auto_prior_context(&app).await;
     Ok(())
 }
 
@@ -350,6 +372,38 @@ pub(crate) async fn set_kept_meeting_folder(
 }
 
 #[tauri::command]
+pub(crate) async fn set_kept_meeting_archived(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    archived: bool,
+) -> Result<Summary, String> {
+    main_only(&window)?;
+    let target = id.clone();
+    let summary = blocking(&app, move |store| store.set_archived(&target, archived))
+        .await?
+        .map_err(message)?;
+    if archived {
+        if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+            runtime.auto_context_ids.remove(&id);
+            runtime.dismissed_auto_context_ids.insert(id.clone());
+            if let Some(cue_changed) =
+                runtime.remove_imported_note(crate::context::Provider::History, &id)
+            {
+                crate::emit_context(&app, &mut runtime, cue_changed);
+            }
+        }
+    } else if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        runtime.dismissed_auto_context_ids.remove(&id);
+    }
+    let _ = app.emit_to("main", "meeting-history:changed", ());
+    if !archived {
+        crate::refresh_auto_prior_context(&app).await;
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
 pub(crate) async fn delete_kept_meeting(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
@@ -367,6 +421,15 @@ pub(crate) async fn delete_kept_meeting(
         keeping.export = None;
     }
     if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        let was_auto = runtime.auto_context_ids.remove(&id);
+        runtime.dismissed_auto_context_ids.remove(&id);
+        if was_auto {
+            if let Some(cue_changed) =
+                runtime.remove_imported_note(crate::context::Provider::History, &id)
+            {
+                crate::emit_context(&app, &mut runtime, cue_changed);
+            }
+        }
         let session = runtime.engine.history_session();
         if runtime
             .end_prompt
@@ -395,6 +458,21 @@ pub(crate) async fn delete_all_kept_meetings(
         keeping.export = None;
     }
     if let Ok(mut runtime) = app.state::<AppState>().0.lock() {
+        let auto_ids: Vec<String> = runtime.auto_context_ids.drain().collect();
+        runtime.dismissed_auto_context_ids.clear();
+        let mut removed_any = false;
+        let mut cue_changed = false;
+        for id in auto_ids {
+            if let Some(changed) =
+                runtime.remove_imported_note(crate::context::Provider::History, &id)
+            {
+                removed_any = true;
+                cue_changed |= changed;
+            }
+        }
+        if removed_any {
+            crate::emit_context(&app, &mut runtime, cue_changed);
+        }
         if runtime.end_prompt.is_some() {
             runtime.end_prompt = None;
             crate::publish(&app, &mut runtime);
@@ -494,6 +572,10 @@ pub(crate) async fn list_kept_meetings_for_context(
 /// Under `"ask"`, shows `Meeting ended` in the dock. Lab runs and `"off"`
 /// never save or prompt.
 pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
+    on_live_session_ended_with(app, session, false);
+}
+
+pub(crate) fn on_live_session_ended_with(app: &tauri::AppHandle, session: u64, force_save: bool) {
     let Some(store) = app.try_state::<Store>() else {
         return;
     };
@@ -505,7 +587,7 @@ pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
         .map_or(AfterSessionKeep::Auto, |settings| {
             settings.saved().after_session_keep
         });
-    if mode == AfterSessionKeep::Off {
+    if !force_save && mode == AfterSessionKeep::Off {
         return;
     }
     let Some(keeping_state) = app.try_state::<Keeping>() else {
@@ -531,7 +613,7 @@ pub(crate) fn on_live_session_ended(app: &tauri::AppHandle, session: u64) {
         let Some(counts) = runtime.engine.end_prompt_counts() else {
             return;
         };
-        if mode == AfterSessionKeep::Ask {
+        if !force_save && mode == AfterSessionKeep::Ask {
             runtime.end_prompt = Some(EndPrompt {
                 session,
                 state: EndPromptState::Ask,

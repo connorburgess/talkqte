@@ -189,6 +189,14 @@ impl Runtime {
                 ))
     }
 
+    /// A live session is actively running and not stopping.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn live_session_running(&self) -> bool {
+        self.engine.state.live
+            && self.engine.state.status == engine::Status::Running
+            && !self.engine.is_live_stopping()
+    }
+
     fn check_live_start(&self) -> Result<(), String> {
         #[cfg(all(
             debug_assertions,
@@ -265,6 +273,7 @@ impl Runtime {
         crate::dev_model::apply(&mut engine);
         self.export = None;
         self.end_prompt = None;
+        self.call_prompt.clear_live();
         self.ended_source_session = None;
         self.processing_reviews.clear();
         self.engine = engine;
@@ -289,6 +298,8 @@ impl Runtime {
             session,
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         Ok(session)
     }
@@ -337,6 +348,7 @@ impl Runtime {
         crate::lab_evaluator::cancel_active(crate::lab_evaluator::ControlReason::Stop);
         self.live_start.cancel();
         self.retire_live_source();
+        self.call_prompt.clear_live();
         self.processing_reviews.clear();
         self.engine.begin_live_stop();
         let live = self.live.take();
@@ -515,6 +527,8 @@ mod tests {
             session,
             microphone: Some(12),
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         let live = runtime.take_live_for_stop().unwrap();
         assert_eq!(live.microphone, Some(12));

@@ -36,13 +36,13 @@ async function session(page: Page, status: 'running' | 'ended') {
 const notesSection = (page: Page) =>
   page.getByRole('region', { name: 'Meeting notes', exact: true });
 const writeButton = (page: Page) =>
-  page.getByRole('button', { name: 'Write meeting notes…' });
+  page.getByRole('button', { name: 'Generate notes' });
 const commands = (page: Page) =>
   page.evaluate(() =>
     window.meetingNotesTest.calls.map((call) => call.command),
   );
 
-test('offered only after a session ends, and nothing is sent without confirming', async ({
+test('offered only after a session ends, with an optional Include my notes checkbox', async ({
   page,
 }) => {
   await openNative(page);
@@ -50,46 +50,21 @@ test('offered only after a session ends, and nothing is sent without confirming'
   await session(page, 'running');
   await expect(writeButton(page)).toHaveCount(0);
   await session(page, 'ended');
-  await writeButton(page).click();
-  const confirm = page.getByRole('group', {
-    name: 'Send this meeting to Anthropic?',
+  await expect(writeButton(page)).toBeVisible();
+  const include = notesSection(page).getByRole('checkbox', {
+    name: 'Include my notes',
   });
-  await expect(confirm).toBeVisible();
-  await expect(
-    confirm.getByRole('heading', { name: 'Send this meeting to Anthropic?' }),
-  ).toBeFocused();
-  await expect(confirm).toContainText(
-    "This sends this session's transcript: 1 line, about 1 minute (1 KB), with each line's time but no speaker labels. Your notes are not sent.",
-  );
-  await expect(confirm).toContainText(
-    'To: the Anthropic API (US), with your own Anthropic API key, billed to your Anthropic account.',
-  );
-  await expect(confirm).toContainText(
-    "Estimated cost: about $0.07, at most $0.34, on top of about $0.01 for this meeting's cues.",
-  );
-  await expect(confirm).toContainText(
-    'Notes setting: Most careful (default), model claude-opus-5-5.',
-  );
-  await expect(confirm).toContainText('One request, no retry');
-  const include = confirm.getByRole('checkbox', { name: 'Also send my notes' });
   await expect(include).not.toBeChecked();
-  await include.check();
-  await expect(confirm).toContainText('Your notes are sent too:');
-  await confirm.getByRole('button', { name: 'Cancel' }).click();
-  await expect(confirm).toHaveCount(0);
-  await expect(writeButton(page)).toBeFocused();
-  // Only plans were asked for; nothing was written or sent.
   expect(await commands(page)).not.toContain('write_meeting_notes');
 });
 
-test('confirmed notes are checked, editable and join the export only when kept', async ({
+test('generated notes are checked, editable and join the export only when kept', async ({
   page,
 }) => {
   await openNative(page);
   await session(page, 'ended');
   await page.evaluate(() => window.meetingNotesTest.hold());
   await writeButton(page).click();
-  await page.getByRole('button', { name: 'Send and write notes' }).click();
   await expect(notesSection(page).getByRole('status')).toContainText(
     'Writing meeting notes…',
   );
@@ -100,7 +75,7 @@ test('confirmed notes are checked, editable and join the export only when kept',
     page.getByRole('heading', { name: 'Check, edit, then keep or discard' }),
   ).toBeFocused();
   await expect(notesSection(page)).toContainText(
-    'Estimated cost of this request: about $0.04',
+    'Estimated cost: about $0.04.',
   );
   await page.getByText('Where each item came from').click();
   await expect(notesSection(page)).toContainText(`transcript 00:05 “${LINE}”`);
@@ -144,7 +119,6 @@ test('a failed request is shown as failed and not offered again', async ({
     ),
   );
   await writeButton(page).click();
-  await page.getByRole('button', { name: 'Send and write notes' }).click();
   await expect(notesSection(page).getByRole('alert')).toContainText(
     'an action item named an owner that its lines do not mention',
   );
@@ -165,7 +139,6 @@ test('a key problem sends nothing and leaves the request available', async ({
     ),
   );
   await writeButton(page).click();
-  await page.getByRole('button', { name: 'Send and write notes' }).click();
   await expect(notesSection(page).getByRole('alert')).toContainText(
     'Nothing was sent.',
   );
@@ -178,7 +151,6 @@ test('a new session clears the notes and offers the request again', async ({
   await openNative(page);
   await session(page, 'ended');
   await writeButton(page).click();
-  await page.getByRole('button', { name: 'Send and write notes' }).click();
   await expect(
     page.getByRole('textbox', { name: 'Notes to keep, editable' }),
   ).toBeVisible();
@@ -217,10 +189,7 @@ test('fits a narrow window', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openNative(page);
   await session(page, 'ended');
-  await writeButton(page).click();
-  await expect(
-    page.getByRole('button', { name: 'Send and write notes' }),
-  ).toBeVisible();
+  await expect(writeButton(page)).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,
   );
@@ -235,7 +204,6 @@ test('Stop waiting before anything is sent leaves the request available', async 
   // The request is held as if the Keychain were still being read.
   await page.evaluate(() => window.meetingNotesTest.hold());
   await writeButton(page).click();
-  await page.getByRole('button', { name: 'Send and write notes' }).click();
   await page.getByRole('button', { name: 'Stop waiting' }).click();
   await expect(notesSection(page).getByRole('alert')).toContainText(
     'Stopped before anything was sent. Nothing was sent.',
@@ -243,31 +211,29 @@ test('Stop waiting before anything is sent leaves the request available', async 
   await expect(writeButton(page)).toBeVisible();
 });
 
-test('the confirmation follows notes edited while it is open', async ({
+test('includes edited notes when Include my notes is checked', async ({
   page,
 }) => {
   await openNative(page);
   await session(page, 'ended');
   await page.evaluate(() =>
-    window.liveTest.publish({ notes: 'Fictional first line' }),
-  );
-  await writeButton(page).click();
-  const confirm = page.getByRole('group', {
-    name: 'Send this meeting to Anthropic?',
-  });
-  await confirm.getByRole('checkbox', { name: 'Also send my notes' }).check();
-  await expect(confirm).toContainText('Your notes are sent too: 1 line.');
-  await page.evaluate(() =>
     window.liveTest.publish({
       notes: 'Fictional first line\nFictional second line',
     }),
   );
-  await expect(confirm).toContainText('Your notes are sent too: 2 lines.');
-  await confirm.getByRole('button', { name: 'Send and write notes' }).click();
-  // The request named the plan for the edited notes, so it was accepted.
+  await notesSection(page)
+    .getByRole('checkbox', { name: 'Include my notes' })
+    .check();
+  await writeButton(page).click();
   await expect(
     page.getByRole('textbox', { name: 'Notes to keep, editable' }),
   ).toBeVisible();
+  const writeCall = await page.evaluate(() =>
+    window.meetingNotesTest.calls.find(
+      (call) => call.command === 'write_meeting_notes',
+    ),
+  );
+  expect(writeCall?.args).toMatchObject({ includeNotes: true });
 });
 
 test('uses the selected provider and omits cost estimates for custom notes models', async ({
@@ -288,41 +254,7 @@ test('uses the selected provider and omits cost estimates for custom notes model
   await session(page, 'ended');
   await writeButton(page).click();
 
-  const confirm = page.getByRole('group', {
-    name: 'Send this meeting to OpenAI?',
-  });
-  await expect(confirm).toBeVisible();
-  await expect(confirm).toContainText(
-    'To: the OpenAI API (US), with your own OpenAI API key, billed to your OpenAI account.',
-  );
-  await expect(confirm).toContainText(
-    'Notes setting: Custom, model gpt-5.4-codex.',
-  );
-  await expect(confirm).toContainText(
-    'Estimated cost unavailable for custom model',
-  );
-  await expect(confirm).not.toContainText('at most $');
-
-  await confirm.getByRole('button', { name: 'Send and write notes' }).click();
   await expect(notesSection(page)).toContainText(
-    'Estimated cost unavailable for custom model; your OpenAI Platform shows it.',
-  );
-
-  // Switch to Gemini with curated default before ending another session.
-  await page.evaluate(() => window.meetingNotesTest.reset());
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByLabel('Cue & notes provider').selectOption('gemini');
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await session(page, 'ended');
-  await writeButton(page).click();
-
-  const geminiConfirm = page.getByRole('group', {
-    name: 'Send this meeting to Gemini?',
-  });
-  await expect(geminiConfirm).toContainText(
-    'Notes setting: Most careful (default), model gemini-2.5-pro.',
-  );
-  await expect(geminiConfirm).toContainText(
-    'To: the Gemini API (Google AI Studio), with your own Gemini API key, billed to your Google account.',
+    'Estimated cost unavailable for custom model; check OpenAI Platform.',
   );
 });

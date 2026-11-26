@@ -16,6 +16,12 @@ import type {
 } from '../../src/lib/dictation';
 import type { Commands, LiveStatus, Snapshot } from '../../src/lib/types';
 import type {
+  AvailableUpdate,
+  UpdateHoldReason,
+  UpdatePhase,
+  UpdateStatus,
+} from '../../src/lib/updates';
+import type {
   ApplicationAudioAction,
   ApplicationAudioStatus,
   ProcessingSnapshot,
@@ -85,8 +91,6 @@ const stopTargets: StopTarget[] = [];
 const applicationAudio: unknown[] = [];
 /** The arguments of each start_live_session call. */
 const liveStarts: unknown[] = [];
-// The call-starting prompt's settings and the companion's answers.
-let callPrompt = { enabled: false, autoStart: false, notFor: [] as string[] };
 /** The settings file, as the stand-in keeps it: set
  * `window.standInSavedSettings` before loading to start from saved values. */
 const savedSettings = {
@@ -105,6 +109,12 @@ const savedSettings = {
       }>;
     }
   ).standInSavedSettings,
+};
+// The call-starting prompt's settings and the companion's answers.
+let callPrompt = {
+  enabled: savedSettings.status.saving !== 'labRun',
+  autoStart: false,
+  notFor: [] as string[],
 };
 
 /** The menu bar item and the system's login item, as the stand-in plays
@@ -132,7 +142,103 @@ const presenceReply = () => ({
   openAtLogin: presence.openAtLogin,
 });
 
+type StandInUpdatesConfig = {
+  currentVersion?: string;
+  configured?: boolean;
+  labRun?: boolean;
+  checkAtLaunch?: boolean;
+  available?: AvailableUpdate | null;
+  phase?: UpdatePhase;
+  nextCheck?: 'upToDate' | { available: AvailableUpdate } | { error: string };
+  nextInstall?: 'ok' | { error: string };
+};
+
+const initialUpdates = (
+  window as typeof window & { standInUpdates?: StandInUpdatesConfig }
+).standInUpdates;
+
+const updatesState = {
+  currentVersion: initialUpdates?.currentVersion ?? '0.1.0',
+  configured: initialUpdates?.configured ?? true,
+  labRun:
+    initialUpdates?.labRun ?? new URLSearchParams(location.search).has('lab'),
+  checkAtLaunch: initialUpdates?.checkAtLaunch ?? true,
+  phase: (initialUpdates?.phase ??
+    (initialUpdates?.available ? 'available' : 'idle')) as UpdatePhase,
+  available: (initialUpdates?.available ?? null) as AvailableUpdate | null,
+  downloadedBytes: undefined as number | undefined,
+  totalBytes: undefined as number | undefined,
+  error: undefined as string | undefined,
+  nextCheck: (initialUpdates?.nextCheck ?? 'upToDate') as
+    'upToDate' | { available: AvailableUpdate } | { error: string },
+  nextInstall: (initialUpdates?.nextInstall ?? 'ok') as
+    'ok' | { error: string },
+  restarts: 0,
+  checks: 0,
+};
+
+function currentUpdateHold(): UpdateHoldReason | null {
+  if (
+    session?.live &&
+    (session.status === 'running' || session.status === 'paused')
+  ) {
+    return 'liveSession';
+  }
+  if (
+    dictation.status === 'starting' ||
+    dictation.status === 'listening' ||
+    dictation.status === 'stopping'
+  ) {
+    return 'dictation';
+  }
+  if (
+    microphone.status === 'starting' ||
+    microphone.status === 'listening' ||
+    microphone.status === 'stopping'
+  ) {
+    return 'microphone';
+  }
+  return null;
+}
+
+function currentUpdateStatus(): UpdateStatus {
+  const hold = currentUpdateHold();
+  if (hold) {
+    return {
+      currentVersion: updatesState.currentVersion,
+      configured: updatesState.configured,
+      checkAtLaunch: updatesState.labRun ? false : updatesState.checkAtLaunch,
+      labRun: updatesState.labRun,
+      phase: updatesState.available ? 'deferred' : 'idle',
+      hold,
+      available: null,
+    };
+  }
+  const phase =
+    updatesState.available && updatesState.phase === 'deferred'
+      ? 'available'
+      : updatesState.phase;
+  return {
+    currentVersion: updatesState.currentVersion,
+    configured: updatesState.configured,
+    checkAtLaunch: updatesState.labRun ? false : updatesState.checkAtLaunch,
+    labRun: updatesState.labRun,
+    phase,
+    hold: null,
+    available: updatesState.available,
+    downloadedBytes: updatesState.downloadedBytes,
+    totalBytes: updatesState.totalBytes,
+    error: updatesState.error,
+  };
+}
+
+let lastEmittedUpdateHold: UpdateHoldReason | null = null;
+async function emitUpdates() {
+  await emit('updates:changed', structuredClone(currentUpdateStatus()));
+}
+
 const callPromptAnswers: unknown[] = [];
+const callEndPromptAnswers: unknown[] = [];
 // A fictional application-audio host: no OS listing, prompt or capture.
 let host: ApplicationAudioStatus | null = null;
 let hostRefusal: string | null = null;
@@ -198,6 +304,26 @@ if (new URLSearchParams(location.search).has('processor'))
       new URLSearchParams(location.search).has('audio'),
     ),
   };
+async function endLivePublish() {
+  const empty =
+    session.transcript.length === 0 && session.notes.trim().length === 0;
+  await publish(
+    empty
+      ? {
+          live: false,
+          status: 'ready',
+          elapsedMs: 0,
+          durationMs: 0,
+          title: '',
+          description: '',
+          autoStarted: false,
+          cuesPaused: false,
+          cue: null,
+          sources: undefined,
+        }
+      : { status: 'ended', cue: null, cuesPaused: false },
+  );
+}
 async function completeCaptureStop() {
   await send({
     status: 'off',
@@ -205,7 +331,7 @@ async function completeCaptureStop() {
     activity: 'quiet',
     message: null,
   });
-  await publish({ status: 'ended', cue: null, cuesPaused: false });
+  await endLivePublish();
   await sendProcessing({
     capture: 'off',
     phase: 'ended',
@@ -273,17 +399,27 @@ Object.defineProperty(window, 'isTauri', { value: true, configurable: true });
 async function send(value: Partial<MicrophoneSnapshot>) {
   microphone = { ...microphone, revision: microphone.revision + 1, ...value };
   await emit('microphone:changed', microphone);
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 
 async function sendDictation(value: Partial<DictationSnapshot>) {
   dictation = { ...dictation, revision: dictation.revision + 1, ...value };
   await emit('dictation:changed', structuredClone(dictation));
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 
 // Stands in for the Rust live session: no device, stream, or transcription.
 /** Counts sessions, as Rust's session number does, for kept meetings. */
 let historySession = 0;
-async function publish(value: Partial<Snapshot>) {
+async function publish(value: Partial<Snapshot>, forceSave = false) {
   const wasRunning = session?.status === 'running';
   if (value.status === 'running' && session?.status !== 'running') {
     historySession += 1;
@@ -303,7 +439,12 @@ async function publish(value: Partial<Snapshot>) {
     next.status === 'ended' &&
     !('endPrompt' in value)
   ) {
-    const ended = historyFixture.onSessionEnded(next, historySession);
+    delete next.callEndPrompt;
+    const ended = historyFixture.onSessionEnded(
+      next,
+      historySession,
+      forceSave,
+    );
     if (ended.endPrompt) next.endPrompt = ended.endPrompt;
     else delete next.endPrompt;
     historyChanged = ended.changed;
@@ -312,6 +453,11 @@ async function publish(value: Partial<Snapshot>) {
   await emit('session:changed', session);
   await emit('cue:changed', session);
   if (historyChanged) await emit('meeting-history:changed');
+  const hold = currentUpdateHold();
+  if (hold !== lastEmittedUpdateHold) {
+    lastEmittedUpdateHold = hold;
+    await emitUpdates();
+  }
 }
 /** A replay of a fictional conversation: no microphone, nothing captured.
  * The app labels it as simulated in its own words. Used by the lab recorder. */
@@ -428,6 +574,7 @@ mockIPC(
       );
       if (
         command === 'keep_meeting_in_history' ||
+        command === 'set_kept_meeting_archived' ||
         command === 'delete_kept_meeting' ||
         command === 'delete_all_kept_meetings'
       ) {
@@ -436,6 +583,28 @@ mockIPC(
           await publish({ endPrompt: updated ?? undefined });
         }
         await emit('meeting-history:changed');
+      }
+      if (
+        command === 'set_auto_prior_context' ||
+        command === 'set_kept_meeting_archived' ||
+        command === 'delete_kept_meeting' ||
+        command === 'delete_all_kept_meetings'
+      ) {
+        if (
+          command === 'set_auto_prior_context' ||
+          command === 'set_kept_meeting_archived'
+        ) {
+          historyFixture.refreshAutoContext(
+            session.focus,
+            session.title || null,
+            session.status,
+            session.live,
+          );
+        }
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
       }
       return result;
     }
@@ -604,7 +773,21 @@ mockIPC(
           });
         }
         try {
-          return preview.command('set_focus', { lines });
+          const out = preview.command('set_focus', { lines });
+          if (
+            historyFixture.refreshAutoContext(
+              lines,
+              session.title || null,
+              session.status,
+              session.live,
+            )
+          ) {
+            await emit('context:changed', [
+              ...(await preview.contextItemsNow()),
+              ...historyFixture.selectedContextItems(),
+            ]);
+          }
+          return out;
         } finally {
           completedFocus++;
         }
@@ -626,7 +809,10 @@ mockIPC(
         return preview.command('set_user_name', { name });
       }
       case 'context_items':
-        return [];
+        return [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ];
       case 'granola_status':
         return preview.granolaStatus();
       case 'connect_granola':
@@ -648,7 +834,10 @@ mockIPC(
         const { ids } = args as { ids: string[] };
         if (historyFixture.hasPendingContext()) {
           const { outcome, items } = historyFixture.importPendingContext(ids);
-          const merged = [...(await preview.contextItemsNow()), ...items];
+          const merged = [
+            ...(await preview.contextItemsNow()),
+            ...historyFixture.selectedContextItems(),
+          ];
           const noteMap = new Map(
             processing.notes.map((note) => [
               `${note.provider}:${note.sourceId}`,
@@ -675,21 +864,34 @@ mockIPC(
           return outcome;
         }
         const outcome = preview.importContextNotes(ids);
-        await emit('context:changed', await preview.contextItemsNow());
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return outcome;
       }
       case 'remove_context_from': {
-        const removed = preview.removeAllContext();
-        await emit('context:changed', await preview.contextItemsNow());
+        const removed =
+          preview.removeAllContext() + historyFixture.removeAllHistoryContext();
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return removed;
       }
-      case 'remove_context_item':
-        preview.command(
-          'remove_context_item',
-          args as Commands['remove_context_item'],
-        );
-        await emit('context:changed', await preview.contextItemsNow());
+      case 'remove_context_item': {
+        const target = args as Commands['remove_context_item'];
+        if (target.provider === 'history') {
+          historyFixture.removeHistoryContextItem(target.sourceId);
+        } else {
+          preview.command('remove_context_item', target);
+        }
+        await emit('context:changed', [
+          ...(await preview.contextItemsNow()),
+          ...historyFixture.selectedContextItems(),
+        ]);
         return;
+      }
       case 'live_status': {
         const stt = providerKeysFixture.providerKeysTest.provider();
         const provider = stt === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
@@ -742,9 +944,126 @@ mockIPC(
       case 'reset_settings':
         savedSettings.resets++;
         savedSettings.panels = { sidebarWidth: null, notesRatio: null };
-        callPrompt = { enabled: false, autoStart: false, notFor: [] };
+        callPrompt = {
+          enabled: savedSettings.status.saving !== 'labRun',
+          autoStart: false,
+          notFor: [],
+        };
+        updatesState.checkAtLaunch = true;
         historyFixture.resetAfterSessionKeep();
+        if (
+          historyFixture.refreshAutoContext(
+            session.focus,
+            session.title || null,
+            session.status,
+            session.live,
+          )
+        ) {
+          await emit('context:changed', [
+            ...(await preview.contextItemsNow()),
+            ...historyFixture.selectedContextItems(),
+          ]);
+        }
+        await emitUpdates();
         return;
+      case 'update_status':
+        return structuredClone(currentUpdateStatus());
+      case 'set_check_for_updates_at_launch': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not save update settings.');
+        }
+        const { enabled } = args as { enabled: boolean };
+        updatesState.checkAtLaunch = enabled;
+        const reply = currentUpdateStatus();
+        await emitUpdates();
+        return structuredClone(reply);
+      }
+      case 'check_for_updates': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not check for updates.');
+        }
+        if (!updatesState.configured) {
+          throw new Error('Updates are not configured in this build');
+        }
+        if (currentUpdateHold() !== null) {
+          throw new Error('Update paused until this session ends.');
+        }
+        updatesState.checks += 1;
+        updatesState.phase = 'checking';
+        updatesState.error = undefined;
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 20));
+        if (currentUpdateHold() !== null) {
+          if (
+            typeof updatesState.nextCheck === 'object' &&
+            'available' in updatesState.nextCheck
+          ) {
+            updatesState.available = updatesState.nextCheck.available;
+            updatesState.phase = 'deferred';
+          }
+          await emitUpdates();
+          return structuredClone(currentUpdateStatus());
+        }
+        if (updatesState.nextCheck === 'upToDate') {
+          updatesState.available = null;
+          updatesState.phase = 'upToDate';
+          updatesState.error = undefined;
+        } else if ('available' in updatesState.nextCheck) {
+          updatesState.available = updatesState.nextCheck.available;
+          updatesState.phase = 'available';
+          updatesState.error = undefined;
+        } else {
+          updatesState.phase = 'error';
+          updatesState.error = updatesState.nextCheck.error;
+          await emitUpdates();
+          throw new Error(updatesState.nextCheck.error);
+        }
+        await emitUpdates();
+        return structuredClone(currentUpdateStatus());
+      }
+      case 'download_and_install_update': {
+        if (updatesState.labRun) {
+          throw new Error('Lab runs do not install updates.');
+        }
+        if (!updatesState.configured) {
+          throw new Error('Updates are not configured in this build');
+        }
+        if (currentUpdateHold() !== null) {
+          throw new Error('Update paused until this session ends.');
+        }
+        if (!updatesState.available) {
+          throw new Error('No update is ready to install.');
+        }
+        updatesState.phase = 'downloading';
+        updatesState.downloadedBytes = 500;
+        updatesState.totalBytes = 1000;
+        updatesState.error = undefined;
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 30));
+        if (typeof updatesState.nextInstall === 'object') {
+          updatesState.phase = 'error';
+          updatesState.downloadedBytes = undefined;
+          updatesState.totalBytes = undefined;
+          updatesState.error = updatesState.nextInstall.error;
+          await emitUpdates();
+          throw new Error(updatesState.nextInstall.error);
+        }
+        if (currentUpdateHold() !== null) {
+          updatesState.phase = 'deferred';
+          updatesState.downloadedBytes = undefined;
+          updatesState.totalBytes = undefined;
+          await emitUpdates();
+          throw new Error('Update paused until this session ends.');
+        }
+        updatesState.downloadedBytes = 1000;
+        updatesState.phase = 'installing';
+        await emitUpdates();
+        await new Promise((r) => setTimeout(r, 20));
+        updatesState.phase = 'restarting';
+        updatesState.restarts += 1;
+        await emitUpdates();
+        return structuredClone(currentUpdateStatus());
+      }
       case 'respond_to_end_prompt': {
         const { session: targetSession, action } =
           args as Commands['respond_to_end_prompt'];
@@ -791,13 +1110,36 @@ mockIPC(
       case 'respond_to_call_prompt':
         callPromptAnswers.push(structuredClone(args));
         return;
+      case 'respond_to_call_end_prompt': {
+        const { id, answer } = args as Commands['respond_to_call_end_prompt'];
+        callEndPromptAnswers.push(structuredClone(args));
+        if (session.callEndPrompt?.id !== id) return;
+        await publish({ callEndPrompt: undefined });
+        if (answer === 'stopAndSave') {
+          await send({
+            status: 'stopping',
+            canStart: false,
+            activity: 'quiet',
+          });
+          await send({
+            status: 'off',
+            canStart: true,
+            activity: 'quiet',
+          });
+          await publish(
+            { status: 'ended', cue: null, cuesPaused: false },
+            true,
+          );
+        }
+        return;
+      }
       case 'start_live_session':
         liveStarts.push(structuredClone(args ?? null));
         await beginStart();
         return;
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
-        await publish({ status: 'ended', cue: null, cuesPaused: false });
+        await endLivePublish();
         return;
       case 'set_live_cues_paused':
         if (rejectCuePause) {
@@ -852,6 +1194,7 @@ mockIPC(
           });
         }
         return;
+      case 'update_notes':
       case 'save_notes':
         if (session && session.revision >= 1_000) {
           session = { ...session, notes: (args as { notes: string }).notes };
@@ -912,6 +1255,7 @@ declare global {
       applicationAudio: unknown[];
       liveStarts: unknown[];
       callPromptAnswers: unknown[];
+      callEndPromptAnswers: unknown[];
       callPrompt: () => {
         enabled: boolean;
         autoStart: boolean;
@@ -991,6 +1335,14 @@ declare global {
       rejectNextStart: (message: string) => void;
       rejectNextStop: (message: string) => void;
     };
+    updatesTest: {
+      state: () => typeof updatesState;
+      setNextCheck: (
+        next: 'upToDate' | { available: AvailableUpdate } | { error: string },
+      ) => void;
+      setNextInstall: (next: 'ok' | { error: string }) => void;
+      setAvailable: (offer: AvailableUpdate | null) => Promise<void>;
+    };
   }
 }
 window.permissionTest = permissionFixture;
@@ -1009,6 +1361,7 @@ window.captureTest = {
   applicationAudio,
   liveStarts,
   callPromptAnswers,
+  callEndPromptAnswers,
   callPrompt: () => structuredClone(callPrompt),
   callPromptStart: (application) => emit('call-prompt:start', application),
   host: (value) => {
@@ -1138,6 +1491,20 @@ window.dictationTest = {
   },
   rejectNextStop: (message) => {
     dictationRejectStop = message;
+  },
+};
+window.updatesTest = {
+  state: () => structuredClone(updatesState),
+  setNextCheck: (next) => {
+    updatesState.nextCheck = next;
+  },
+  setNextInstall: (next) => {
+    updatesState.nextInstall = next;
+  },
+  setAvailable: async (offer) => {
+    updatesState.available = offer;
+    updatesState.phase = offer ? 'available' : 'idle';
+    await emitUpdates();
   },
 };
 await import('../../src/main');

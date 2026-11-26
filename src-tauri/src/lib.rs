@@ -89,6 +89,8 @@ mod meeting_notes_commands;
 mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
+mod microphone_macos_aec;
+#[cfg(target_os = "macos")]
 mod native_session_clock;
 #[cfg(target_os = "macos")]
 mod native_source;
@@ -111,8 +113,10 @@ pub mod provider_keys;
 mod selected_attestation;
 pub mod settings;
 mod settings_commands;
+pub mod system_audio_tap;
 pub mod timing_log;
 pub mod transcription;
+mod update_commands;
 mod updates;
 
 use engine::{CompanionPosition, Engine, QuestionSize, Response, Sensitivity};
@@ -159,7 +163,7 @@ struct Runtime {
     /// The join setting declared its application once; it never does again.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     dev_join_declared: bool,
-    /// The call-starting prompt: off unless the person turns it on.
+    /// The call-starting prompt: on by default (off in lab runs).
     call_prompt: call_prompt::Watcher,
     /// End-of-call prompt for the floating companion when a non-empty live
     /// session ends.
@@ -171,6 +175,12 @@ struct Runtime {
     processing_status: engine::ProcessingTracker,
     /// Prior notes the user imported this session, in memory only.
     context: context::ContextStore,
+    /// Source IDs of kept meetings (`Provider::History`) auto-selected for
+    /// this session.
+    pub(crate) auto_context_ids: std::collections::HashSet<String>,
+    /// Source IDs of kept meetings explicitly removed during this session,
+    /// so auto-selection never re-adds them.
+    pub(crate) dismissed_auto_context_ids: std::collections::HashSet<String>,
     /// A listed note source kept for selection, retry, or cancellation.
     pending_import: Option<context_import::PendingImport>,
     /// Identity of the latest explicit file read; cancellation/replacement wins.
@@ -211,6 +221,8 @@ impl Default for Runtime {
             processing_reviews: processing_reviews::Reviews::default(),
             processing_status: engine::ProcessingTracker::default(),
             context: context::ContextStore::default(),
+            auto_context_ids: std::collections::HashSet::new(),
+            dismissed_auto_context_ids: std::collections::HashSet::new(),
             pending_import: None,
             pending_file_pick: None,
             refresh: context_refresh::Refresh::default(),
@@ -616,12 +628,14 @@ fn set_user_name(
     )
 }
 #[tauri::command]
-fn set_focus(
+async fn set_focus(
     app: tauri::AppHandle,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     lines: Vec<String>,
 ) -> Result<(), String> {
-    change(&app, &state, |e| e.set_focus(lines))
+    change(&app, &state, |e| e.set_focus(lines))?;
+    refresh_auto_prior_context(&app).await;
+    Ok(())
 }
 #[tauri::command]
 fn set_sensitivity(
@@ -991,6 +1005,211 @@ pub(crate) struct PickedNotes {
     pub(crate) asks_for_dates: bool,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextItemView {
+    #[serde(flatten)]
+    item: context::ContextItem,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    auto_selected: bool,
+}
+
+fn context_views(runtime: &Runtime) -> Vec<ContextItemView> {
+    runtime
+        .context
+        .items()
+        .iter()
+        .map(|item| ContextItemView {
+            auto_selected: item.provider == context::Provider::History
+                && runtime.auto_context_ids.contains(&item.source_id),
+            item: item.clone(),
+        })
+        .collect()
+}
+
+impl Runtime {
+    /// Updates auto-selected kept meetings while preserving manual imports and
+    /// respecting per-session removals. Returns `(context_changed, cue_changed)`.
+    pub(crate) fn apply_auto_prior_context(
+        &mut self,
+        candidates: Option<Vec<context::ContextItem>>,
+    ) -> (bool, bool) {
+        let non_auto_count = self
+            .context
+            .items()
+            .iter()
+            .filter(|item| {
+                !(item.provider == context::Provider::History
+                    && self.auto_context_ids.contains(&item.source_id))
+            })
+            .count();
+        let capacity = context::MAX_ITEMS
+            .saturating_sub(non_auto_count)
+            .min(meeting_history::MAX_AUTO_PRIOR_CONTEXT);
+
+        let desired: Vec<context::ContextItem> = match candidates {
+            Some(list) if capacity > 0 => list
+                .into_iter()
+                .filter(|item| {
+                    item.provider == context::Provider::History
+                        && !self.dismissed_auto_context_ids.contains(&item.source_id)
+                        && !self.context.items().iter().any(|existing| {
+                            existing.provider == context::Provider::History
+                                && existing.source_id == item.source_id
+                                && !self.auto_context_ids.contains(&existing.source_id)
+                        })
+                })
+                .take(capacity)
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        let current: Vec<context::ContextItem> = self
+            .context
+            .items()
+            .iter()
+            .filter(|item| {
+                item.provider == context::Provider::History
+                    && self.auto_context_ids.contains(&item.source_id)
+            })
+            .cloned()
+            .collect();
+        if current == desired {
+            return (false, false);
+        }
+
+        let old_ids: Vec<String> = self.auto_context_ids.drain().collect();
+        for id in old_ids {
+            self.context.remove(context::Provider::History, &id);
+            self.refresh.forget(context::Provider::History, &id);
+        }
+        if desired.is_empty() {
+            return (true, self.sync_prior_notes());
+        }
+        let ids: Vec<String> = desired.iter().map(|item| item.source_id.clone()).collect();
+        for id in &ids {
+            self.auto_context_ids.insert(id.clone());
+        }
+        let (_, cue_changed) = self.merge_imported_notes(context::Provider::History, &ids, desired);
+        (true, cue_changed)
+    }
+}
+
+pub(crate) fn refresh_auto_prior_context_sync(app: &tauri::AppHandle) {
+    if settings::lab_run() {
+        return;
+    }
+    let enabled = app
+        .try_state::<settings::Store>()
+        .is_none_or(|store| store.saved().auto_prior_context);
+    let Some(history) = app.try_state::<meeting_history::Store>() else {
+        return;
+    };
+    let (should_suggest, focus, title, dismissed_count) = {
+        let state = app.state::<AppState>();
+        let Ok(runtime) = state.0.lock() else {
+            return;
+        };
+        let ready =
+            runtime.engine.state.status == engine::Status::Ready && !runtime.engine.state.live;
+        let title = (!runtime.engine.state.title.trim().is_empty())
+            .then(|| runtime.engine.state.title.clone());
+        (
+            enabled && ready,
+            runtime.engine.state.focus.clone(),
+            title,
+            runtime.dismissed_auto_context_ids.len(),
+        )
+    };
+    let candidates = if should_suggest {
+        let limit = meeting_history::MAX_AUTO_PRIOR_CONTEXT.saturating_add(dismissed_count);
+        history
+            .suggest_prior_context(&focus, title.as_deref(), limit)
+            .ok()
+    } else if !enabled {
+        Some(Vec::new())
+    } else {
+        return;
+    };
+    let Some(candidates) = candidates else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if enabled
+        && (runtime.engine.state.status != engine::Status::Ready || runtime.engine.state.live)
+    {
+        return;
+    }
+    let arg = enabled.then_some(candidates);
+    let (changed, cue_changed) = runtime.apply_auto_prior_context(arg);
+    if changed {
+        emit_context(app, &mut runtime, cue_changed);
+    }
+}
+
+pub(crate) async fn refresh_auto_prior_context(app: &tauri::AppHandle) {
+    if settings::lab_run() {
+        return;
+    }
+    let enabled = app
+        .try_state::<settings::Store>()
+        .is_none_or(|store| store.saved().auto_prior_context);
+    if app.try_state::<meeting_history::Store>().is_none() {
+        return;
+    }
+    let (ready, focus, title, dismissed_count) = {
+        let state = app.state::<AppState>();
+        let Ok(runtime) = state.0.lock() else {
+            return;
+        };
+        let ready =
+            runtime.engine.state.status == engine::Status::Ready && !runtime.engine.state.live;
+        let title = (!runtime.engine.state.title.trim().is_empty())
+            .then(|| runtime.engine.state.title.clone());
+        (
+            ready,
+            runtime.engine.state.focus.clone(),
+            title,
+            runtime.dismissed_auto_context_ids.len(),
+        )
+    };
+    if enabled && !ready {
+        return;
+    }
+    let candidates = if enabled {
+        let handle = app.clone();
+        let limit = meeting_history::MAX_AUTO_PRIOR_CONTEXT.saturating_add(dismissed_count);
+        let Ok(Ok(found)) = tauri::async_runtime::spawn_blocking(move || {
+            handle
+                .state::<meeting_history::Store>()
+                .suggest_prior_context(&focus, title.as_deref(), limit)
+        })
+        .await
+        else {
+            return;
+        };
+        Some(found)
+    } else {
+        None
+    };
+    let state = app.state::<AppState>();
+    let Ok(mut runtime) = state.0.lock() else {
+        return;
+    };
+    if enabled
+        && (runtime.engine.state.status != engine::Status::Ready || runtime.engine.state.live)
+    {
+        return;
+    }
+    let (changed, cue_changed) = runtime.apply_auto_prior_context(candidates);
+    if changed {
+        emit_context(app, &mut runtime, cue_changed);
+    }
+}
+
 fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
     // The engine may quote an imported note as a context reminder.
     let cue_changed = runtime.sync_prior_notes();
@@ -998,12 +1217,13 @@ fn publish_context(app: &tauri::AppHandle, runtime: &mut Runtime) {
 }
 
 /// Tells the windows about prior notes the engine has already been given.
-fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
+pub(crate) fn emit_context(app: &tauri::AppHandle, runtime: &mut Runtime, cue_changed: bool) {
     if cue_changed {
         // A changed or removed note may be visible in either window, even held.
         publish(app, runtime);
     }
-    let _ = app.emit_to("main", "context:changed", runtime.context.items());
+    let views = context_views(runtime);
+    let _ = app.emit_to("main", "context:changed", &views);
     publish_processing(app, runtime);
 }
 
@@ -1155,6 +1375,13 @@ async fn import_context_notes(
         _ => "The selected notes could not be read. Nothing was imported. Try again, or cancel to choose other notes.",
     })?;
     runtime.pending_import = None;
+    if provider == context::Provider::History {
+        for id in &ids {
+            let trimmed = id.trim();
+            runtime.auto_context_ids.remove(trimmed);
+            runtime.dismissed_auto_context_ids.remove(trimmed);
+        }
+    }
     let (outcome, cue_changed) = runtime.merge_imported_notes(provider, &ids, fetched);
     emit_context(&app, &mut runtime, cue_changed);
     Ok(outcome)
@@ -1169,11 +1396,11 @@ fn cancel_context_import(state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
-fn context_items(state: tauri::State<AppState>) -> Result<Vec<context::ContextItem>, String> {
+fn context_items(state: tauri::State<AppState>) -> Result<Vec<ContextItemView>, String> {
     state
         .0
         .lock()
-        .map(|runtime| runtime.context.items().to_vec())
+        .map(|runtime| context_views(&runtime))
         .map_err(|_| "The notebook is unavailable.".into())
 }
 
@@ -1189,6 +1416,11 @@ fn remove_context_item(
     let Some(cue_changed) = runtime.remove_imported_note(provider, &source_id) else {
         return Err("That note is no longer imported.".into());
     };
+    if provider == context::Provider::History {
+        let trimmed = source_id.trim().to_string();
+        runtime.auto_context_ids.remove(&trimmed);
+        runtime.dismissed_auto_context_ids.insert(trimmed);
+    }
     emit_context(&app, &mut runtime, cue_changed);
     Ok(())
 }
@@ -1201,6 +1433,17 @@ fn remove_context_from(
     state: tauri::State<AppState>,
 ) -> Result<usize, String> {
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    let history_ids: Vec<String> = runtime
+        .context
+        .items()
+        .iter()
+        .filter(|item| item.provider == context::Provider::History)
+        .map(|item| item.source_id.clone())
+        .collect();
+    for id in history_ids {
+        runtime.dismissed_auto_context_ids.insert(id);
+    }
+    runtime.auto_context_ids.clear();
     let removed = runtime.context.remove_all_from(context::Provider::File)
         + runtime.context.remove_all_from(context::Provider::Granola)
         + runtime.context.remove_all_from(context::Provider::History);
@@ -1501,19 +1744,27 @@ fn disconnect_granola(
 }
 
 /// A live session's parts: the engine session it feeds, the microphone start
-/// capturing for it, and its runner once capture has begun.
+/// capturing for it, its runner once capture has begun, and on macOS the
+/// global system audio tap when active.
 struct Live {
     operation: Option<String>,
     session: u64,
     microphone: Option<u64>,
     runner: Option<live::LiveSession>,
+    #[cfg(target_os = "macos")]
+    system_audio: Option<system_audio_tap::Handle>,
 }
 
 /// Finishes a live session already taken out of the runtime: releases its
-/// microphone, transcribes the queued audio (`flush`) or discards it, then
-/// ends the engine session if it is still the one this fed. Blocks; call it
-/// without holding the runtime lock, because delivering lines takes it.
+/// microphone, stops any global system audio tap, transcribes the queued audio
+/// (`flush`) or discards it, then ends the engine session if it is still the
+/// one this fed. Blocks; call it without holding the runtime lock, because
+/// delivering lines takes it.
 fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
+    finish_live_with(app, live, flush, false);
+}
+
+fn finish_live_with(app: &tauri::AppHandle, live: Live, flush: bool, force_save: bool) {
     #[cfg(all(
         debug_assertions,
         target_os = "macos",
@@ -1524,6 +1775,10 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     if let Some(generation) = live.microphone {
         let controller = app.state::<microphone::Controller>().inner().clone();
         microphone::stop_blocking(app, controller, generation);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(system_audio) = live.system_audio {
+        system_audio.stop(flush);
     }
     if let Some(runner) = live.runner {
         if flush {
@@ -1536,11 +1791,14 @@ fn finish_live(app: &tauri::AppHandle, live: Live, flush: bool) {
     let mut ended = false;
     let finished = change(app, &state, |e| {
         ended = e.finish_live_stop(live.session);
+        if ended {
+            e.return_to_ready_if_empty();
+        }
         Ok(())
     })
     .is_ok();
     if finished && ended {
-        meeting_history_commands::on_live_session_ended(app, live.session);
+        meeting_history_commands::on_live_session_ended_with(app, live.session, force_save);
     }
     #[cfg(all(
         debug_assertions,
@@ -1624,10 +1882,20 @@ pub(crate) async fn start_live_session_now(
             None => None,
             Some(review) => Some(application_source::reviewed(&app, &review)?),
         };
-        let start = {
+        let (start, use_system_audio) = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
-            let sources = runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app));
-            runtime.begin_live_start()?.with_sources(sources)
+            let has_joining = joining.is_some() || runtime.dev_join_application.is_some();
+            let use_system_audio =
+                cfg!(target_os = "macos") && !has_joining && !crate::settings::lab_run();
+            let sources = if use_system_audio {
+                engine::SessionSources::system_audio()
+            } else {
+                runtime.next_microphone_sources(joining.as_ref().map(|(app, _)| app))
+            };
+            (
+                runtime.begin_live_start()?.with_sources(sources),
+                use_system_audio,
+            )
         };
         // Made only once this start holds the gate, so a refused second
         // start can never replace or reuse this session's minute budget.
@@ -1639,14 +1907,15 @@ pub(crate) async fn start_live_session_now(
                 .await
                 .map_err(|_| "Could not start the live session.")??;
         let (opener, reopener) = streams.into_parts();
-        let session = {
+        let (session, session_started_at) = {
             let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
             runtime.sync();
             let session = runtime.install_live_start_with(&start, auto_started)?;
+            let started_at = runtime.engine.state.elapsed_ms;
             // An application joining this session spends the same budget.
-            runtime.live_budget = budget.map(|budget| (session, budget));
+            runtime.live_budget = budget.clone().map(|budget| (session, budget));
             publish(&app, &mut runtime);
-            session
+            (session, started_at)
         };
         companion::refresh(&app);
         let handle = app.clone();
@@ -1791,6 +2060,11 @@ pub(crate) async fn start_live_session_now(
                             publish(&app, &mut runtime);
                         }
                     }
+                } else if use_system_audio {
+                    #[cfg(target_os = "macos")]
+                    start_system_audio_tap(&app, session, session_started_at, budget);
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = (session_started_at, budget);
                 }
                 Ok(())
             }
@@ -1817,6 +2091,120 @@ pub(crate) async fn start_live_session_now(
                 Err(error)
             }
         }
+    }
+}
+
+/// Starts the macOS 14.2+ Core Audio global system audio tap (`Them`) beside
+/// the running microphone (`You`) for `session`. If system audio is unavailable
+/// (macOS < 14.2 or permission denied), falls back cleanly to microphone-only.
+#[cfg(target_os = "macos")]
+fn start_system_audio_tap(
+    app: &tauri::AppHandle,
+    session: u64,
+    session_started_at: u64,
+    budget: Option<transcription::cloud::Budget>,
+) {
+    let state = app.state::<AppState>();
+    let Ok(streams) = transcription::cloud::streams_sharing(budget) else {
+        if let Ok(mut runtime) = state.0.lock() {
+            runtime.engine.application_ended(session, "not_started");
+            publish(app, &mut runtime);
+        }
+        return;
+    };
+    let (opener, reopener) = streams.into_parts();
+    let approval_app = app.clone();
+    let keep_app = app.clone();
+    let dropped_app = app.clone();
+    let reconnect_app = app.clone();
+    let failure_app = app.clone();
+    let sink_app = app.clone();
+    let attached_app = app.clone();
+    let unavailable_app = app.clone();
+
+    let feed = transcription::cloud::CloudFeed::new(
+        session,
+        1,
+        opener,
+        move || {
+            approval_app
+                .state::<AppState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|runtime| runtime.engine.audio_approval(session))
+        },
+        move |session, segment| {
+            let state = sink_app.state::<AppState>();
+            let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+            runtime.sync();
+            let result =
+                runtime.ingest_timed_from(session, engine::LineOrigin::Application, segment);
+            publish(&sink_app, &mut runtime);
+            result
+        },
+    )
+    .stop_sending_when(move || {
+        keep_app.state::<AppState>().0.lock().map_or(
+            Some(transcription::cloud::SttFailure::Withdrawn),
+            |runtime| transcription::cloud::withdrawal(runtime.engine.audio_withdrawal(session)),
+        )
+    })
+    .on_dropped(move || {
+        if let Ok(mut runtime) = dropped_app.state::<AppState>().0.lock() {
+            runtime.engine.cloud_transcription_dropped(session);
+            publish(&dropped_app, &mut runtime);
+        }
+    })
+    .on_failure(move |failure| {
+        if let Ok(mut runtime) = failure_app.state::<AppState>().0.lock() {
+            runtime.engine.source_transcription_stopped(
+                session,
+                engine::LineOrigin::Application,
+                failure.code(),
+            );
+            publish(&failure_app, &mut runtime);
+        }
+    })
+    .on_reconnect(move |lost_ms| {
+        if let Ok(mut runtime) = reconnect_app.state::<AppState>().0.lock() {
+            runtime
+                .engine
+                .cloud_transcription_reconnected(session, lost_ms);
+            publish(&reconnect_app, &mut runtime);
+        }
+    })
+    .with_reopener(reopener);
+
+    let handle = system_audio_tap::Handle::start(
+        session,
+        session_started_at,
+        feed,
+        move || {
+            if let Ok(mut runtime) = attached_app.state::<AppState>().0.lock() {
+                runtime.engine.application_attached(session);
+                publish(&attached_app, &mut runtime);
+            }
+        },
+        move |err| {
+            if let Ok(mut runtime) = unavailable_app.state::<AppState>().0.lock() {
+                runtime.engine.application_ended(session, err.ended_code());
+                publish(&unavailable_app, &mut runtime);
+            }
+        },
+    );
+
+    let installed = state.0.lock().is_ok_and(|mut runtime| {
+        match runtime.live.as_mut().filter(|live| live.session == session) {
+            Some(live) => {
+                live.system_audio = Some(handle);
+                true
+            }
+            None => false,
+        }
+    });
+    if !installed {
+        // Session ended before the handle could be stored; Drop stops it.
     }
 }
 
@@ -1881,6 +2269,24 @@ async fn stop_live_session(
         .map_err(|_| "Could not finish the live session.".into())
 }
 
+/// Stops a live session from the "Call ended" dock prompt and saves a
+/// non-empty meeting to local history (except in lab runs).
+pub(crate) async fn stop_and_save_live_session(app: tauri::AppHandle) -> Result<(), String> {
+    let live = {
+        let state = app.state::<AppState>();
+        let mut runtime = state.0.lock().map_err(|_| "The session is unavailable.")?;
+        let live = runtime.take_live_for_stop();
+        publish(&app, &mut runtime);
+        live
+    };
+    let Some(live) = live else {
+        return Ok(());
+    };
+    tauri::async_runtime::spawn_blocking(move || finish_live_with(&app, live, true, true))
+        .await
+        .map_err(|_| "Could not finish the live session.".into())
+}
+
 /// The menu bar's Stop: ends a running session as the notebook's Stop does.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn stop_live_from_menu(app: &tauri::AppHandle) {
@@ -1928,8 +2334,14 @@ pub fn run() {
     let context = application_context();
     #[cfg(target_os = "macos")]
     let context = companion_macos::configure(context);
+    let mut updater_builder = tauri_plugin_updater::Builder::new();
+    if let Some(pubkey) = updates::compile_time_pubkey() {
+        updater_builder = updater_builder.pubkey(pubkey);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(updater_builder.build())
         .manage(AppState(Mutex::new(Runtime::default())))
         .manage(companion::WindowState::default())
         .manage(microphone::Controller::default())
@@ -1945,6 +2357,7 @@ pub fn run() {
             call_prompt_commands::set_call_prompt,
             call_prompt_commands::clear_call_prompt_apps,
             call_prompt_commands::respond_to_call_prompt,
+            call_prompt_commands::respond_to_call_end_prompt,
             processing_commands::review_processing_scope,
             processing_commands::approve_processing_scope,
             processing_commands::cancel_processing_review,
@@ -1982,6 +2395,8 @@ pub fn run() {
             meeting_history_commands::kept_meetings,
             meeting_history_commands::open_kept_meeting,
             meeting_history_commands::rename_kept_meeting,
+            meeting_history_commands::set_kept_meeting_archived,
+            meeting_history_commands::set_auto_prior_context,
             meeting_history_commands::delete_kept_meeting,
             meeting_history_commands::delete_all_kept_meetings,
             meeting_history_commands::create_meeting_folder,
@@ -2037,14 +2452,23 @@ pub fn run() {
             settings_commands::presence_settings,
             settings_commands::set_keep_running_in_menu_bar,
             settings_commands::set_open_at_login,
-            settings_commands::open_login_items
+            settings_commands::open_login_items,
+            update_commands::update_status,
+            update_commands::set_check_for_updates_at_launch,
+            update_commands::check_for_updates,
+            update_commands::download_and_install_update
         ])
         .setup(|app| {
             // The person's saved settings, before anything is published. A
             // lab run reads none (settings.rs).
             settings_commands::load(app.handle());
+            app.manage(update_commands::Controller::for_app(app.handle()));
+            update_commands::schedule_launch_check(app.handle());
             // Kept meetings: off in a lab run, read only when asked.
             meeting_history_commands::manage(app);
+            // Pre-select relevant recent kept meetings (notes only) when
+            // enabled; lab runs skip this completely.
+            refresh_auto_prior_context_sync(app.handle());
             // A lab launch may give the user's name; it is set before the
             // first session, as if typed in Settings, over any saved name,
             // and is never written to the settings file.
@@ -2131,12 +2555,15 @@ pub fn run() {
                     let cue = runtime.cue_snapshot();
                     publish_processing(&handle, &mut runtime);
                     let menu = menu_bar::state_of(&runtime);
+                    let mic_snapshot = handle.state::<microphone::Controller>().try_status();
+                    let dictation_active = handle.state::<dictation::Controller>().is_active();
+                    let update_hold = runtime.update_hold(mic_snapshot, dictation_active);
                     drop(runtime);
                     menu_bar::update(&handle, menu);
                     microphone::refresh(&handle);
                     dictation::refresh(&handle);
-                    let Some(microphone) = handle.state::<microphone::Controller>().try_status()
-                    else {
+                    update_commands::refresh_with_hold(&handle, update_hold);
+                    let Some(microphone) = mic_snapshot else {
                         continue;
                     };
                     let mode = companion::Mode::for_snapshot(&cue, microphone);
@@ -2214,6 +2641,84 @@ pub fn run() {
 #[cfg(test)]
 mod granola_privacy_tests;
 
+#[cfg(test)]
+mod auto_prior_context_tests {
+    use super::*;
+
+    fn history_item(id: &str, title: &str) -> context::ContextItem {
+        context::ContextItem {
+            provider: context::Provider::History,
+            source_id: id.into(),
+            title: title.into(),
+            source_date: "2026-11-02".into(),
+            excerpt: format!("Notes for {title}"),
+            revision: 1,
+        }
+    }
+
+    fn file_item(id: &str, title: &str) -> context::ContextItem {
+        context::ContextItem {
+            provider: context::Provider::File,
+            source_id: id.into(),
+            title: title.into(),
+            source_date: "2026-11-01".into(),
+            excerpt: format!("File note for {title}"),
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn per_session_removal_is_respected_and_manual_imports_stay_when_auto_is_off() {
+        let mut runtime = Runtime::default();
+        runtime.merge_imported_notes(
+            context::Provider::File,
+            &["manual-file".into()],
+            vec![file_item("manual-file", "Manual file note")],
+        );
+
+        let (changed, _) = runtime.apply_auto_prior_context(Some(vec![
+            history_item("m1", "Orchard sync"),
+            history_item("m2", "Budget check"),
+            history_item("m3", "Gate planning"),
+        ]));
+        assert!(changed);
+        assert_eq!(runtime.context.items().len(), 4);
+        assert!(runtime.auto_context_ids.contains("m2"));
+
+        // Simulate user clicking Remove on m2 during this session.
+        assert!(runtime
+            .remove_imported_note(context::Provider::History, "m2")
+            .is_some());
+        runtime.auto_context_ids.remove("m2");
+        runtime.dismissed_auto_context_ids.insert("m2".into());
+
+        // Subsequent Focus update returns m2 again, plus m4; m2 stays removed.
+        let (changed, _) = runtime.apply_auto_prior_context(Some(vec![
+            history_item("m2", "Budget check"),
+            history_item("m1", "Orchard sync"),
+            history_item("m3", "Gate planning"),
+            history_item("m4", "Seed order"),
+        ]));
+        assert!(changed);
+        let history_ids: Vec<&str> = runtime
+            .context
+            .items()
+            .iter()
+            .filter(|i| i.provider == context::Provider::History)
+            .map(|i| i.source_id.as_str())
+            .collect();
+        assert_eq!(history_ids, vec!["m1", "m3", "m4"]);
+        assert!(!history_ids.contains(&"m2"));
+
+        // Turning auto_prior_context off removes only auto-selected items, keeping manual file note.
+        let (changed, _) = runtime.apply_auto_prior_context(None);
+        assert!(changed);
+        assert_eq!(runtime.context.items().len(), 1);
+        assert_eq!(runtime.context.items()[0].source_id, "manual-file");
+        assert!(runtime.auto_context_ids.is_empty());
+    }
+}
+
 #[cfg(all(
     test,
     debug_assertions,
@@ -2237,6 +2742,8 @@ mod lab_clock_tests {
             session: runtime.engine.session(),
             microphone: None,
             runner: None,
+            #[cfg(target_os = "macos")]
+            system_audio: None,
         });
         runtime
     }
@@ -3177,6 +3684,248 @@ mod dictation_ipc_tests {
         assert_eq!(
             err.as_str().unwrap(),
             "Stop the live session before dictating."
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod update_ipc_tests {
+    use super::*;
+
+    #[test]
+    fn updater_commands_are_restricted_to_main_and_defer_when_busy_or_unconfigured() {
+        use tauri::Manager;
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let (store, _) = settings::Store::open(None, false);
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(store)
+            .manage(update_commands::Controller::new(
+                "0.1.0".into(),
+                false,
+                false,
+            ))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::set_check_for_updates_at_launch,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let cue = tauri::WebviewWindowBuilder::new(&app, "cue", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+                      cmd: &str,
+                      body: serde_json::Value,
+                      url: &str| {
+            tauri::test::get_ipc_response(
+                window,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: url.parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+        let local = "http://127.0.0.1:1420";
+
+        // Main window reads unconfigured status safely without panic or network call.
+        let status: serde_json::Value =
+            invoke(&main, "update_status", serde_json::json!({}), local)
+                .unwrap()
+                .deserialize()
+                .unwrap();
+        assert_eq!(status["currentVersion"], "0.1.0");
+        assert_eq!(status["configured"], false);
+        assert_eq!(status["checkAtLaunch"], true);
+        assert_eq!(status["phase"], "idle");
+
+        // Unconfigured build reports clean error without touching network.
+        let err = invoke(&main, "check_for_updates", serde_json::json!({}), local).unwrap_err();
+        assert_eq!(err.as_str().unwrap(), updates::NOT_CONFIGURED_MESSAGE);
+        let err = invoke(
+            &main,
+            "download_and_install_update",
+            serde_json::json!({}),
+            local,
+        )
+        .unwrap_err();
+        assert_eq!(err.as_str().unwrap(), updates::NOT_CONFIGURED_MESSAGE);
+
+        // Toggle check_for_updates_at_launch persists to settings store.
+        let updated: serde_json::Value = invoke(
+            &main,
+            "set_check_for_updates_at_launch",
+            serde_json::json!({ "enabled": false }),
+            local,
+        )
+        .unwrap()
+        .deserialize()
+        .unwrap();
+        assert_eq!(updated["checkAtLaunch"], false);
+        assert!(
+            !app.state::<settings::Store>()
+                .saved()
+                .check_for_updates_at_launch
+        );
+
+        // Companion window and untrusted origins are denied by capability boundaries.
+        for (window, url) in [(&cue, local), (&main, "https://example.invalid/")] {
+            for (cmd, body) in [
+                ("update_status", serde_json::json!({})),
+                (
+                    "set_check_for_updates_at_launch",
+                    serde_json::json!({ "enabled": true }),
+                ),
+                ("check_for_updates", serde_json::json!({})),
+                ("download_and_install_update", serde_json::json!({})),
+            ] {
+                let denied = invoke(window, cmd, body, url).unwrap_err();
+                assert!(
+                    denied.as_str().unwrap().contains("not allowed"),
+                    "{cmd}: {denied}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn configured_updater_refuses_checks_and_installs_during_live_session_and_lab_runs() {
+        use tauri::Manager;
+        let mut context = application_context();
+        context.config_mut().app.windows.clear();
+        let (store, _) = settings::Store::open(None, false);
+        let app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(store)
+            .manage(update_commands::Controller::new(
+                "0.1.0".into(),
+                true,
+                false,
+            ))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(context)
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |cmd: &str| {
+            tauri::test::get_ipc_response(
+                &main,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://127.0.0.1:1420".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state.0.lock().unwrap();
+            runtime.engine = Engine::live();
+            runtime.engine.start().unwrap();
+        }
+        let status: serde_json::Value = invoke("update_status").unwrap().deserialize().unwrap();
+        assert_eq!(status["hold"], "liveSession");
+        assert_eq!(status["available"], serde_json::Value::Null);
+
+        for cmd in ["check_for_updates", "download_and_install_update"] {
+            let err = invoke(cmd).unwrap_err();
+            assert_eq!(
+                err.as_str().unwrap(),
+                "Update paused until this session ends."
+            );
+        }
+
+        // Lab run refuses checks, installs, and preference writes.
+        let mut lab_context = application_context();
+        lab_context.config_mut().app.windows.clear();
+        let (lab_store, _) = settings::Store::open(None, true);
+        let lab_app = tauri::test::mock_builder()
+            .manage(AppState(Mutex::new(Runtime::default())))
+            .manage(microphone::Controller::default())
+            .manage(dictation::Controller::default())
+            .manage(lab_store)
+            .manage(update_commands::Controller::new("0.1.0".into(), true, true))
+            .invoke_handler(tauri::generate_handler![
+                update_commands::update_status,
+                update_commands::set_check_for_updates_at_launch,
+                update_commands::check_for_updates,
+                update_commands::download_and_install_update,
+            ])
+            .build(lab_context)
+            .unwrap();
+        let lab_main = tauri::WebviewWindowBuilder::new(&lab_app, "main", Default::default())
+            .build()
+            .unwrap();
+        let lab_invoke = |cmd: &str, body: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &lab_main,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "http://127.0.0.1:1420".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+        let lab_status: serde_json::Value = lab_invoke("update_status", serde_json::json!({}))
+            .unwrap()
+            .deserialize()
+            .unwrap();
+        assert_eq!(lab_status["labRun"], true);
+        assert_eq!(lab_status["checkAtLaunch"], false);
+        assert_eq!(
+            lab_invoke("check_for_updates", serde_json::json!({}))
+                .unwrap_err()
+                .as_str()
+                .unwrap(),
+            "Lab runs do not check for updates."
+        );
+        assert_eq!(
+            lab_invoke("download_and_install_update", serde_json::json!({}))
+                .unwrap_err()
+                .as_str()
+                .unwrap(),
+            "Lab runs do not install updates."
+        );
+        assert_eq!(
+            lab_invoke(
+                "set_check_for_updates_at_launch",
+                serde_json::json!({ "enabled": true })
+            )
+            .unwrap_err()
+            .as_str()
+            .unwrap(),
+            "Lab runs do not save update settings."
         );
     }
 }

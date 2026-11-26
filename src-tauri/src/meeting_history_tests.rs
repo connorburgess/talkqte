@@ -246,6 +246,7 @@ fn damaged_oversized_or_out_of_bounds_files_are_not_shown_and_never_replaced() {
                     title: "Bad".into(),
                     revision: 1,
                     folder: None,
+                    archived: false,
                     content: long,
                 },
             })
@@ -263,6 +264,7 @@ fn damaged_oversized_or_out_of_bounds_files_are_not_shown_and_never_replaced() {
                 title: "Bad\u{7}".into(),
                 revision: 1,
                 folder: None,
+                archived: false,
                 content: content(1, "Fine."),
             },
         }),
@@ -355,6 +357,7 @@ fn out_of_bounds_content_and_a_full_history_are_refused() {
             sources: Sources::Microphone,
             has_meeting_notes: false,
             folder: None,
+            archived: false,
         })
         .collect();
     Store::write_index(&folder.root(), &entries, &[]).unwrap();
@@ -680,4 +683,203 @@ fn newer_history_and_invalid_folder_fields_are_handled_safely() {
     assert_eq!(store.rename_folder("Future", "Renamed"), Err(Error::Newer));
     assert_eq!(store.delete_folder("Future"), Err(Error::Newer));
     assert_eq!(fs::read(&index_path).unwrap(), newer);
+}
+
+#[test]
+fn archived_flag_persists_and_stays_backwards_compatible_with_v1_files() {
+    let folder = Folder::new("archived-compat");
+    let store = folder.store();
+    let id = "abcdef0123456789abcdef0123456789";
+    owner_only_dir(&folder.root().join(id)).unwrap();
+    fs::write(
+        folder.root().join(INDEX),
+        format!(
+            r#"{{"version":1,"meetings":[{{"id":"{id}","title":"Version one","revision":1,"startedAtMs":1795000000000,"durationMs":60000,"sources":"microphone"}}]}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        folder.root().join(id).join(MEETING),
+        format!(
+            r#"{{"version":1,"id":"{id}","title":"Version one","revision":1,"startedAtMs":1795000000000,"durationMs":60000,"sources":"microphone","transcript":[],"notes":"Legacy note.","cues":[]}}"#
+        ),
+    )
+    .unwrap();
+
+    let listing = store.list(None);
+    assert_eq!(listing.meetings.len(), 1);
+    assert!(!listing.meetings[0].archived);
+    assert!(!store.open_meeting(id).unwrap().archived);
+
+    let archived = store.set_archived(id, true).unwrap();
+    assert!(archived.archived);
+    assert_eq!(archived.revision, 2);
+    assert!(store.list(None).meetings[0].archived);
+    assert!(store.open_meeting(id).unwrap().archived);
+
+    let unarchived = store.set_archived(id, false).unwrap();
+    assert!(!unarchived.archived);
+    assert_eq!(unarchived.revision, 3);
+    assert!(!store.open_meeting(id).unwrap().archived);
+
+    assert_eq!(store.set_archived("bad-id", true), Err(Error::Missing));
+}
+
+#[test]
+fn suggest_prior_context_ranks_keyword_overlap_falls_back_to_recency_and_excludes_archived_or_empty(
+) {
+    use crate::context::{Provider, MAX_EXCERPT_CHARS};
+    let folder = Folder::new("suggest");
+    let store = folder.store();
+
+    let mut only_transcript = content(1_795_000_050_000, "Orchard secret transcript line.");
+    only_transcript.notes = "General logistics.".into();
+    only_transcript.meeting_notes = None;
+    let transcript_id = store.keep("General sync", only_transcript).unwrap().id;
+
+    let mut archived_match = content(1_795_000_060_000, "Hello.");
+    archived_match.notes = "Orchard gate latch checklist.".into();
+    let archived_id = store
+        .keep("Archived orchard meeting", archived_match)
+        .unwrap()
+        .id;
+    store.set_archived(&archived_id, true).unwrap();
+
+    let mut empty_match = content(1_795_000_070_000, "Orchard transcript.");
+    empty_match.notes = "   ".into();
+    empty_match.meeting_notes = None;
+    let empty_id = store.keep("Orchard empty", empty_match).unwrap().id;
+
+    let mut old_match = content(1_795_000_010_000, "Secret transcript line.");
+    old_match.notes = "Inspect south latch.".into();
+    old_match.meeting_notes = Some("## Decisions\n\n- Confirm supplier delivery.".into());
+    let old_match_id = store.keep("Orchard gate supplier", old_match).unwrap().id;
+
+    let mut recent_other = content(1_795_000_080_000, "Recent transcript.");
+    recent_other.notes = "Review seed invoices.".into();
+    recent_other.meeting_notes = None;
+    let recent_other_id = store.keep("Budget check", recent_other).unwrap().id;
+
+    let mut newest_long = content(1_795_000_090_000, "Latest transcript.");
+    newest_long.notes = "x".repeat(MAX_EXCERPT_CHARS + 200);
+    newest_long.meeting_notes = None;
+    let newest_long_id = store.keep("Weekly notes", newest_long).unwrap().id;
+
+    // With Focus matching "orchard" and "latch", old_match ranks #1 despite being oldest,
+    // and recency fills the remaining slots up to max_items = 3.
+    let suggested = store
+        .suggest_prior_context(&["Check orchard latch".into()], Some("Live session"), 3)
+        .unwrap();
+    let ids: Vec<&str> = suggested.iter().map(|i| i.source_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            old_match_id.as_str(),
+            newest_long_id.as_str(),
+            recent_other_id.as_str()
+        ]
+    );
+    assert!(!ids.contains(&archived_id.as_str()));
+    assert!(!ids.contains(&empty_id.as_str()));
+    assert!(!ids.contains(&transcript_id.as_str()));
+    assert_eq!(suggested[0].provider, Provider::History);
+    assert!(!suggested[0].excerpt.contains("Secret transcript line."));
+    assert_eq!(suggested[1].excerpt.chars().count(), MAX_EXCERPT_CHARS);
+
+    // Without Focus, session title keywords ("budget") rank budget meeting first.
+    let by_title = store
+        .suggest_prior_context(&[], Some("Budget planning"), 2)
+        .unwrap();
+    assert_eq!(by_title[0].source_id, recent_other_id);
+
+    // Without Focus or meaningful session title ("Live session"), falls back to newest non-archived.
+    let fallback = store
+        .suggest_prior_context(&[], Some("Live session"), 2)
+        .unwrap();
+    assert_eq!(
+        fallback
+            .iter()
+            .map(|i| i.source_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![newest_long_id.as_str(), recent_other_id.as_str()]
+    );
+
+    // Lab runs never read kept meetings.
+    let lab = Store::open(Some(folder.root()), true);
+    assert_eq!(lab.suggest_prior_context(&[], None, 3), Err(Error::Off));
+}
+
+#[test]
+fn long_meetings_over_400_lines_keep_and_export_intact() {
+    let folder = Folder::new("long-meeting");
+    let store = folder.store();
+    let mut long = content(1_795_000_000_000, "First fictional line.");
+    long.sources = Sources::Both;
+    long.transcript = (0..1_500u64)
+        .map(|i| Line {
+            at_ms: i * 4_000,
+            label: Some(if i % 2 == 0 { Label::You } else { Label::Them }),
+            echo: false,
+            text: format!("Fictional planning line {i}."),
+        })
+        .collect();
+    long.duration_ms = 6_000_000;
+    let kept = store.keep("Long planning call", long).unwrap();
+    let opened = store.open_meeting(&kept.id).unwrap();
+    assert_eq!(opened.content.transcript.len(), 1_500);
+    assert_eq!(
+        opened.content.transcript[0].text,
+        "Fictional planning line 0."
+    );
+    assert_eq!(
+        opened.content.transcript[1_499].text,
+        "Fictional planning line 1499."
+    );
+    let md = opened.markdown();
+    assert!(md.contains("Fictional planning line 0."));
+    assert!(md.contains("Fictional planning line 1499."));
+}
+
+#[test]
+fn folder_changes_preserve_archives_and_recover_from_an_uncommitted_file_copy() {
+    let folder = Folder::new("folder-commit-point");
+    let store = folder.store();
+    store.create_folder("Client A").unwrap();
+    let kept = store
+        .keep("Fictional orchard", content(1, "Gate review."))
+        .unwrap();
+    store.set_folder(&kept.id, Some("Client A")).unwrap();
+    store.set_archived(&kept.id, true).unwrap();
+
+    // Simulate a file written before an interrupted folder rename commits its index.
+    let mut pending = store.open_meeting(&kept.id).unwrap();
+    pending.folder = Some("Uncommitted rename".into());
+    Store::write_meeting(&folder.root(), &pending).unwrap();
+    let reopened = folder.store();
+    assert_eq!(
+        reopened.open_meeting(&kept.id).unwrap().folder.as_deref(),
+        Some("Client A")
+    );
+    assert_eq!(reopened.list(Some("Client A")).meetings.len(), 1);
+    assert!(reopened.list(Some("Uncommitted")).meetings.is_empty());
+    let updated = reopened
+        .update(&kept.id, content(1, "Gate reviewed."))
+        .unwrap();
+    assert_eq!(updated.folder.as_deref(), Some("Client A"));
+    assert!(updated.archived);
+
+    reopened.rename_folder("Client A", "Project B").unwrap();
+    reopened.delete_folder("Project B").unwrap();
+    let unfiled = reopened.open_meeting(&kept.id).unwrap();
+    assert!(unfiled.folder.is_none());
+    assert!(unfiled.archived);
+    assert!(reopened
+        .suggest_prior_context(&[], None, 3)
+        .unwrap()
+        .is_empty());
+    reopened.set_archived(&kept.id, false).unwrap();
+    assert_eq!(
+        reopened.suggest_prior_context(&[], None, 3).unwrap().len(),
+        1
+    );
 }

@@ -818,6 +818,36 @@ svg {
 .transcript-echo-remove:hover:not(:disabled) {
   background: var(--danger-surface);
 }
+.transcript-echo-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: var(--space-8);
+  margin-bottom: var(--space-4);
+}
+.transcript-echo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 10px;
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.transcript-echo-toggle:hover {
+  color: var(--ink);
+  border-color: var(--border);
+}
+.transcript-echo-toggle:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 .context-panel {
   margin-top: var(--space-8);
   padding: 0 0 var(--space-16);
@@ -939,6 +969,36 @@ svg {
   display: block;
   font-size: 15px;
   font-weight: 600;
+}
+.context-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.context-auto-chip {
+  padding: 2px 6px;
+  background: var(--cue-asked-surface);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--radius-control);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.context-item-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.context-archive-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
 }
 .context-list li .muted,
 .context-freshness {
@@ -1395,11 +1455,31 @@ svg {
   padding: 8px 20px;
   font-size: 14px;
 }
-.call-prompt,
+.call-prompt {
+  position: relative;
+  color: var(--companion-fg);
+  background: #151a21;
+  border: 1px solid var(--companion-border);
+  border-radius: var(--radius-dock-card);
+  padding: 10px 12px 6px;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 .end-prompt {
   position: relative;
   color: var(--companion-fg);
   padding: 6px 10px;
+}
+.call-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.call-prompt-mark {
+  flex-shrink: 0;
 }
 .call-prompt-title {
   font-size: 14px;
@@ -1407,12 +1487,22 @@ svg {
   line-height: 1.24;
   letter-spacing: -0.015em;
   color: var(--companion-fg);
+}
+.call-prompt .call-prompt-title {
+  font-size: 15px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.end-prompt .call-prompt-title {
   padding-right: 36px;
 }
 .call-prompt.is-large .call-prompt-title,
 .end-prompt.is-large .call-prompt-title {
   font-size: 17px;
   line-height: 1.24;
+  white-space: normal;
 }
 .call-prompt-detail {
   font-size: 12px;
@@ -1441,6 +1531,56 @@ svg {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
+}
+.call-prompt .call-prompt-actions {
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.call-prompt .call-prompt-actions .primary-button,
+.call-prompt .call-prompt-actions .secondary-button {
+  flex: 1 1 0;
+}
+.call-prompt.is-large .call-prompt-actions .primary-button,
+.call-prompt.is-large .call-prompt-actions .secondary-button,
+.call-end-prompt .call-prompt-actions .primary-button,
+.call-end-prompt .call-prompt-actions .secondary-button {
+  white-space: nowrap;
+}
+.call-end-prompt {
+  padding: 10px 12px;
+}
+.call-end-prompt .call-prompt-actions {
+  flex-wrap: wrap;
+}
+.call-prompt-subtle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.call-prompt-quiet {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--companion-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.call-prompt-quiet:hover:not(:disabled) {
+  background: var(--companion-hover);
+  border-color: #637286;
+  color: var(--companion-fg);
+}
+.call-prompt-off {
+  margin-left: auto;
+}
+.call-prompt.is-large .call-prompt-quiet {
+  font-size: 13px;
 }
 .call-prompt .primary-button,
 .end-prompt .primary-button {
@@ -1744,4 +1884,96 @@ svg {
   flex-wrap: wrap;
   gap: var(--space-8);
   margin-top: var(--space-12);
+}
+
+/* Settings → Updates: uniform borders and Direction C tokens. */
+.update-settings {
+  display: grid;
+  gap: var(--space-12);
+  width: 100%;
+  min-width: 0;
+}
+.update-settings > p {
+  margin-top: 0;
+}
+.update-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+.update-version {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--band);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.update-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+}
+.update-paused {
+  margin-top: 0;
+  padding: 10px 14px;
+  background: var(--band);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-size: 14px;
+}
+.update-offer {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  background: var(--band);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  max-width: 60ch;
+}
+.update-offer h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.update-notes {
+  margin-top: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.update-progress {
+  display: grid;
+  gap: 6px;
+}
+.update-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--ink);
+}
+.update-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-4);
+}
+.update-error {
+  margin-top: 0;
+  padding: 10px 14px;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 60ch;
 }

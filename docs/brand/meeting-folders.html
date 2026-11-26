@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meeting folder states · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/tokens.css" />
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-history.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: var(--space-16);
+        background: var(--paper);
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: var(--space-32);
+      }
+      article {
+        min-width: 0;
+      }
+      h2 {
+        margin: 0 0 var(--space-16);
+        font-size: 18px;
+      }
+      .history {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <main aria-label="Fictional folder specimens">
+      <article class="history">
+        <h2>Unfiled · no folders</h2>
+        <div class="history-toolbar">
+          <label class="history-search"
+            >Search meetings
+            <input type="search" placeholder="Search meetings" /></label
+          ><button
+            type="button"
+            class="secondary-button history-new-folder-btn"
+          >
+            + New folder
+          </button>
+        </div>
+        <ul class="history-list">
+          <li>
+            <button class="history-item" type="button">
+              <span class="history-item-title">Fictional orchard sync</span
+              ><span class="history-meta"
+                >Tue, 24 Nov · 20 min · Microphone</span
+              >
+            </button>
+          </li>
+        </ul>
+      </article>
+      <article class="history">
+        <h2>Open folder · optional row selector</h2>
+        <details class="history-folder history-folder-group" open>
+          <summary class="history-folder-summary">Client A · 1 meeting</summary>
+          <div class="history-folder-body">
+            <button class="history-item" type="button">
+              <span class="history-item-title">Fictional orchard sync</span
+              ><span class="history-meta"
+                >Tue, 24 Nov · 20 min · Microphone</span
+              ></button
+            ><label class="history-folder-label"
+              >Folder
+              <select class="history-folder-select">
+                <option>Client A</option>
+                <option>Unfiled / Top</option>
+              </select></label
+            >
+            <div class="history-actions">
+              <button class="secondary-button" type="button">
+                Rename folder</button
+              ><button class="secondary-button history-danger" type="button">
+                Delete folder
+              </button>
+            </div>
+          </div>
+        </details>
+      </article>
+      <article class="history">
+        <h2>Collapsed folder · keyboard toggle</h2>
+        <details class="history-folder history-folder-group">
+          <summary class="history-folder-summary">Client A · 1 meeting</summary>
+          <div class="history-folder-body">Fictional orchard sync</div>
+        </details>
+      </article>
+      <article class="history">
+        <h2>Empty folder</h2>
+        <details class="history-folder history-folder-group" open>
+          <summary class="history-folder-summary">
+            Project B · 0 meetings
+          </summary>
+          <div class="history-folder-body">
+            <p class="history-help">No meetings in this folder yet.</p>
+          </div>
+        </details>
+      </article>
+      <article class="history">
+        <h2>Create folder</h2>
+        <form class="history-folder-form">
+          <label class="history-field"
+            >Folder name <input type="text" value="Client A" maxlength="80"
+          /></label>
+          <div class="history-actions">
+            <button type="button" class="primary-button">Create folder</button
+            ><button type="button" class="secondary-button">Cancel</button>
+          </div>
+        </form>
+      </article>
+      <article class="history">
+        <h2>Rename · duplicate-name error</h2>
+        <form class="history-folder-form">
+          <label class="history-field"
+            >Folder name <input type="text" value="Project B" maxlength="80"
+          /></label>
+          <p role="alert">A folder with that name already exists.</p>
+          <div class="history-actions">
+            <button type="button" class="primary-button">Save folder</button
+            ><button type="button" class="secondary-button">Cancel</button>
+          </div>
+        </form>
+      </article>
+      <article class="history">
+        <h2>Delete folder · meetings stay</h2>
+        <div class="history-confirm">
+          <p>
+            Delete folder “Client A”? Its 1 meeting will move to unfiled at the
+            top (it will not be deleted).
+          </p>
+          <div class="history-actions">
+            <button type="button" class="secondary-button history-danger">
+              Delete folder</button
+            ><button type="button" class="secondary-button">Cancel</button>
+          </div>
+        </div>
+      </article>
+      <article class="history">
+        <h2>Search · matching folder opens</h2>
+        <label class="history-search"
+          >Search meetings <input type="search" value="gate"
+        /></label>
+        <details class="history-folder history-folder-group" open>
+          <summary class="history-folder-summary">Client A · 1 meeting</summary>
+          <div class="history-folder-body">
+            <button type="button" class="history-item">
+              Fictional gate review
+            </button>
+          </div>
+        </details>
+      </article>
+      <article class="history">
+        <h2>Search · no matches</h2>
+        <label class="history-search"
+          >Search meetings <input type="search" value="snow"
+        /></label>
+        <p class="history-help">No meetings match this search.</p>
+      </article>
+      <article class="history">
+        <h2>Moving · controls disabled</h2>
+        <label class="history-folder-label"
+          >Folder
+          <select class="history-folder-select" disabled>
+            <option>Client A</option>
+          </select></label
+        ><button type="button" class="secondary-button" disabled>
+          Archive
+        </button>
+        <p class="history-help">Updating meetings…</p>
+      </article>
+      <article class="history">
+        <h2>Move failed · retry stays available</h2>
+        <p role="alert">The meeting could not be moved.</p>
+        <label class="history-folder-label"
+          >Folder
+          <select class="history-folder-select">
+            <option>Unfiled / Top</option>
+            <option>Client A</option>
+          </select></label
+        >
+      </article>
+      <article class="history">
+        <h2>Moved · success announcement</h2>
+        <p role="status">Moved to “Client A”.</p>
+        <label class="history-folder-label"
+          >Folder
+          <select class="history-folder-select">
+            <option>Client A</option>
+            <option>Unfiled / Top</option>
+          </select></label
+        >
+      </article>
+      <article class="history">
+        <h2>Archived in folder · shown on request</h2>
+        <label class="history-check"
+          ><input type="checkbox" checked /> Show archived (1)</label
+        >
+        <details class="history-folder history-folder-group" open>
+          <summary class="history-folder-summary">Client A · 1 meeting</summary>
+          <div class="history-folder-body">
+            <div class="history-row is-archived">
+              <button class="history-item" type="button">
+                <span class="history-item-title">Fictional orchard sync</span
+                ><span class="history-tag">Archived</span></button
+              ><button
+                class="secondary-button history-archive-button"
+                type="button"
+              >
+                Unarchive
+              </button>
+            </div>
+          </div>
+        </details>
+      </article>
+      <article class="history">
+        <h2>Long folder name · wrapping</h2>
+        <details class="history-folder history-folder-group" open>
+          <summary class="history-folder-summary">
+            Fictional orchard restoration and greenhouse planning for next
+            season · 0 meetings
+          </summary>
+          <div class="history-folder-body">
+            <p class="history-help">No meetings in this folder yet.</p>
+          </div>
+        </details>
+      </article>
+    </main>
+  </body>
+</html>

@@ -121,7 +121,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  padding: 4px 8px 4px 12px;
+  padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--paper);
@@ -244,6 +244,11 @@
   gap: var(--space-12);
   padding: var(--space-12);
 }
+.history-search:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-color: var(--ink);
+}
 .history-search input {
   flex: 1 1 auto;
   min-width: 0;
@@ -253,8 +258,9 @@
   color: var(--ink);
   font: inherit;
 }
+.history-search input:focus,
 .history-search input:focus-visible {
-  outline-offset: 2px;
+  outline: none;
 }
 .history-list {
   list-style: none;
@@ -262,6 +268,31 @@
   padding: 0;
   display: grid;
   gap: var(--space-8);
+}
+.history-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.history-row.is-archived .history-item {
+  background: var(--band);
+}
+.history-archive-button {
+  min-height: 44px;
+  align-self: center;
+}
+@media (max-width: 520px) {
+  .history-row {
+    flex-direction: column;
+  }
+  .history-row .history-item {
+    flex-basis: auto;
+  }
+  .history-archive-button {
+    justify-self: start;
+  }
 }
 .history-item {
   width: 100%;
@@ -342,6 +373,13 @@
   font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.015em;
+}
+.history-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
 }
 .history-text {
   margin: 0;

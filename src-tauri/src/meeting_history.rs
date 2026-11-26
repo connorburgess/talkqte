@@ -50,6 +50,82 @@ pub const VERSION: u64 = 1;
 /// The most meetings kept at once. Keeping another past this asks the
 /// person to delete one first; nothing is dropped on its own.
 pub const MAX_MEETINGS: usize = 1_000;
+/// Maximum number of kept meetings auto-selected as prior context per session.
+pub const MAX_AUTO_PRIOR_CONTEXT: usize = 3;
+const MAX_AUTO_CANDIDATE_SCANS: usize = 200;
+const AUTO_TERM_MIN_CHARS: usize = 3;
+const AUTO_CONTEXT_STOP_WORDS: &[&str] = &[
+    "about",
+    "after",
+    "again",
+    "agenda",
+    "ahead",
+    "all",
+    "and",
+    "any",
+    "are",
+    "but",
+    "call",
+    "can",
+    "catch",
+    "check",
+    "could",
+    "daily",
+    "discussion",
+    "every",
+    "first",
+    "for",
+    "from",
+    "going",
+    "has",
+    "have",
+    "into",
+    "live",
+    "meeting",
+    "minutes",
+    "month",
+    "monthly",
+    "not",
+    "notes",
+    "other",
+    "our",
+    "people",
+    "planning",
+    "quick",
+    "really",
+    "review",
+    "session",
+    "should",
+    "standup",
+    "still",
+    "sync",
+    "talkqte",
+    "team",
+    "that",
+    "the",
+    "their",
+    "there",
+    "these",
+    "thing",
+    "things",
+    "think",
+    "this",
+    "those",
+    "today",
+    "tomorrow",
+    "update",
+    "was",
+    "weekly",
+    "were",
+    "where",
+    "which",
+    "while",
+    "will",
+    "with",
+    "would",
+    "yesterday",
+    "your",
+];
 const MAX_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_MEETING_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_TITLE_CHARS: usize = 200;
@@ -136,11 +212,14 @@ pub struct Content {
 pub struct Meeting {
     pub id: String,
     pub title: String,
-    /// Increases on every change: rename, folder move, or update.
+    /// Increases on every change: rename, folder move, update, or archive.
     pub revision: u64,
     /// Optional folder name; `None` means unfiled at the top.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// Excluded from automatic prior-context selection when true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
     #[serde(flatten)]
     pub content: Content,
 }
@@ -161,6 +240,9 @@ pub struct Summary {
     /// Optional folder name; `None` means unfiled at the top.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// Whether the meeting is archived (excluded from auto prior context).
+    #[serde(default)]
+    pub archived: bool,
 }
 
 impl Meeting {
@@ -174,6 +256,7 @@ impl Meeting {
             sources: self.content.sources,
             has_meeting_notes: self.content.meeting_notes.is_some(),
             folder: self.folder.clone(),
+            archived: self.archived,
         }
     }
 
@@ -336,6 +419,21 @@ impl Meeting {
             revision: self.revision,
         })
     }
+}
+
+fn context_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for raw in text.split(|c: char| !c.is_alphanumeric() && c != '\'') {
+        let word = raw.trim_matches('\'').to_lowercase();
+        if word.chars().count() >= AUTO_TERM_MIN_CHARS
+            && word.chars().any(char::is_alphabetic)
+            && !AUTO_CONTEXT_STOP_WORDS.contains(&word.as_str())
+            && !tokens.contains(&word)
+        {
+            tokens.push(word);
+        }
+    }
+    tokens
 }
 
 fn preview_of(text: &str) -> String {
@@ -909,7 +1007,10 @@ impl Store {
         let mut unreadable = 0;
         for entry in entries {
             match read_meeting(&Self::meeting_path(&root, &entry.id), &entry.id) {
-                Found::Meeting(meeting) => {
+                Found::Meeting(mut meeting) => {
+                    // The atomic index is the folder commit point. A failed
+                    // multi-file rename/delete may leave a newer file copy.
+                    meeting.folder = entry.folder;
                     if words.is_empty() || meeting.matches(&words) {
                         meetings.push(meeting.summary());
                     }
@@ -933,14 +1034,22 @@ impl Store {
         }
         let _guard = self.lock.lock();
         let root = self.root.clone().ok_or(Error::Off)?;
-        match self.read_index(&root) {
-            Ok((entries, _)) if entries.iter().any(|entry| entry.id == id) => {}
-            Ok(_) => return Err(Error::Missing),
+        let folder = match self.read_index(&root) {
+            Ok((entries, _)) => {
+                entries
+                    .into_iter()
+                    .find(|entry| entry.id == id)
+                    .ok_or(Error::Missing)?
+                    .folder
+            }
             Err(Availability::Newer) => return Err(Error::Newer),
             Err(_) => return Err(Error::Unreadable),
-        }
+        };
         match read_meeting(&Self::meeting_path(&root, id), id) {
-            Found::Meeting(meeting) => Ok(*meeting),
+            Found::Meeting(mut meeting) => {
+                meeting.folder = folder;
+                Ok(*meeting)
+            }
             Found::Newer => Err(Error::Newer),
             Found::Unreadable => Err(Error::Unreadable),
         }
@@ -963,6 +1072,7 @@ impl Store {
             title,
             revision: 1,
             folder: None,
+            archived: false,
             content,
         };
         Self::write_meeting(&root, &meeting)?;
@@ -992,6 +1102,7 @@ impl Store {
             Found::Newer => return Err(Error::Newer),
             Found::Unreadable => return Err(Error::Unreadable),
         };
+        meeting.folder = entries[position].folder.clone();
         apply(&mut meeting, &folders)?;
         if !meeting.content.valid() {
             return Err(Error::Invalid);
@@ -1040,6 +1151,15 @@ impl Store {
                 None => None,
             };
             meeting.folder = resolved;
+            Ok(())
+        })
+    }
+
+    /// Marks a kept meeting as archived (permanently excluded from automatic
+    /// prior-context selection) or restores it.
+    pub fn set_archived(&self, id: &str, archived: bool) -> Result<Summary, Error> {
+        self.change(id, |meeting, _| {
+            meeting.archived = archived;
             Ok(())
         })
     }
@@ -1157,6 +1277,119 @@ impl Store {
         folders.remove(idx);
         Self::write_index(&root, &entries, &folders)?;
         Ok(folders)
+    }
+
+    /// Selects up to `max_items` non-archived kept meetings that actually hold
+    /// kept meeting notes or user notes, ranked by keyword overlap with `focus`
+    /// and `session_title` first and falling back to most recent meetings.
+    /// Never includes transcripts, cues, archived meetings, or empty meetings.
+    pub fn suggest_prior_context(
+        &self,
+        focus: &[String],
+        session_title: Option<&str>,
+        max_items: usize,
+    ) -> Result<Vec<crate::context::ContextItem>, Error> {
+        let _guard = self.lock.lock();
+        let Some(root) = self.root.clone() else {
+            return Err(Error::Off);
+        };
+        let mut entries = match self.read_index(&root) {
+            Ok((entries, _)) => {
+                self.set_availability(Availability::On);
+                entries
+            }
+            Err(Availability::Newer) => {
+                self.set_availability(Availability::Newer);
+                return Err(Error::Newer);
+            }
+            Err(_) => return Err(Error::Unreadable),
+        };
+        if max_items == 0 {
+            return Ok(Vec::new());
+        }
+        entries.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
+        let mut keywords = Vec::new();
+        for line in focus {
+            for token in context_tokens(line) {
+                if !keywords.contains(&token) {
+                    keywords.push(token);
+                }
+            }
+        }
+        if let Some(title) = session_title {
+            for token in context_tokens(title) {
+                if !keywords.contains(&token) {
+                    keywords.push(token);
+                }
+            }
+        }
+
+        struct Candidate {
+            item: crate::context::ContextItem,
+            started_at_ms: u64,
+            matched: usize,
+            title_matched: usize,
+        }
+
+        let mut candidates = Vec::new();
+        let mut scanned = 0usize;
+        for entry in entries {
+            if entry.archived {
+                continue;
+            }
+            if scanned >= MAX_AUTO_CANDIDATE_SCANS {
+                break;
+            }
+            scanned += 1;
+            let Found::Meeting(meeting) =
+                read_meeting(&Self::meeting_path(&root, &entry.id), &entry.id)
+            else {
+                continue;
+            };
+            if meeting.archived {
+                continue;
+            }
+            let Some(item) = meeting.context_item() else {
+                continue;
+            };
+            let (matched, title_matched) = if keywords.is_empty() {
+                (0, 0)
+            } else {
+                let title_tokens = context_tokens(&item.title);
+                let note_tokens = context_tokens(&item.excerpt);
+                let mut matched = 0usize;
+                let mut title_matched = 0usize;
+                for kw in &keywords {
+                    let in_title = title_tokens.iter().any(|t| t == kw);
+                    let in_notes = note_tokens.iter().any(|t| t == kw);
+                    if in_title {
+                        title_matched += 1;
+                    }
+                    if in_title || in_notes {
+                        matched += 1;
+                    }
+                }
+                (matched, title_matched)
+            };
+            candidates.push(Candidate {
+                item,
+                started_at_ms: meeting.content.started_at_ms,
+                matched,
+                title_matched,
+            });
+        }
+        candidates.sort_by(|a, b| {
+            b.matched
+                .cmp(&a.matched)
+                .then(b.title_matched.cmp(&a.title_matched))
+                .then(b.started_at_ms.cmp(&a.started_at_ms))
+                .then(a.item.source_id.cmp(&b.item.source_id))
+        });
+        Ok(candidates
+            .into_iter()
+            .take(max_items)
+            .map(|candidate| candidate.item)
+            .collect())
     }
 
     /// Deletes one kept meeting for good: its folder is removed, then the

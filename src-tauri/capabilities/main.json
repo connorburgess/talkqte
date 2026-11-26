@@ -41,6 +41,8 @@
     "allow-kept-meetings",
     "allow-open-kept-meeting",
     "allow-rename-kept-meeting",
+    "allow-set-kept-meeting-archived",
+    "allow-set-auto-prior-context",
     "allow-delete-kept-meeting",
     "allow-delete-all-kept-meetings",
     "allow-create-meeting-folder",
@@ -106,6 +108,10 @@
     "allow-presence-settings",
     "allow-set-keep-running-in-menu-bar",
     "allow-set-open-at-login",
-    "allow-open-login-items"
+    "allow-open-login-items",
+    "allow-update-status",
+    "allow-set-check-for-updates-at-launch",
+    "allow-check-for-updates",
+    "allow-download-and-install-update"
   ]
 }

@@ -12,8 +12,10 @@ use std::collections::VecDeque;
 
 /// The label for a microphone line in a session with both sources.
 pub const YOU: &str = "You";
-/// The label for an application line in a session with both sources.
+/// The label for an application or system-audio line in a session with both sources.
 pub const THEM: &str = "Them";
+/// The application label used when macOS captures global system audio alongside the microphone.
+pub const SYSTEM_AUDIO: &str = "System audio";
 
 /// Longest application name the session keeps and the review shows.
 const MAX_APPLICATION_CHARS: usize = 60;
@@ -22,19 +24,33 @@ const MAX_APPLICATION_CHARS: usize = 60;
 /// compared with it. Each stream cuts lines at its own pauses, so a copy of
 /// the same words can start a little earlier or later.
 pub const ECHO_WINDOW_MS: u64 = 4_000;
+/// Short 1-2 word exact duplicates and ASR-corrupted short phrases must fall
+/// within +/-1.5 s of the application line to be flagged as echoes.
+pub const SHORT_ECHO_WINDOW_MS: u64 = 1_500;
 /// The longest common run of words, in order, must be at least this share
 /// of the longer of the two lines: a copy, not a reply that repeats part of
 /// what was said.
 const ECHO_SHARE_PERCENT: usize = 85;
 /// The shorter line must be at least this share of the longer one.
 const ECHO_LENGTH_PERCENT: usize = 70;
-/// Shorter microphone lines are never suppressed: "I don't know", "yes I
-/// agree" or a repeated figure are too often a reply.
+/// Shorter microphone lines are only matched by exact 1-2 word or short-phrase
+/// similarity within [`SHORT_ECHO_WINDOW_MS`], never by the looser 4 s window.
 pub const ECHO_MIN_WORDS: usize = 6;
+/// Minimum normalized character length for short-phrase bigram similarity so
+/// unrelated two-letter words like "no" vs "so" are not conflated.
+const SHORT_ECHO_MIN_CHARS: usize = 5;
+/// Length ratio (%) required between normalized short phrases for bigram match.
+const SHORT_ECHO_LENGTH_PERCENT: usize = 65;
+/// Minimum character-bigram Dice similarity (%) for short-phrase ASR bleed.
+const SHORT_ECHO_BIGRAM_PERCENT: usize = 58;
+/// Minimum Levenshtein character similarity (%) for short-phrase ASR bleed so
+/// contrasting replies sharing a common prefix ("I don't know" vs "I don't
+/// think") are not misclassified.
+const SHORT_ECHO_CHAR_SIMILARITY_PERCENT: usize = 65;
 /// Recent application lines kept for comparison.
 const ECHO_RECENT_LINES: usize = 16;
 /// Suppressed lines a session keeps for the person to review.
-const MAX_ECHO_LINES: usize = 200;
+const MAX_ECHO_LINES: usize = 2_000;
 
 /// The capture sources a live session was started with. Fixed at the start:
 /// the session's review names exactly these, and an application can feed
@@ -99,6 +115,22 @@ impl SessionSources {
 
     pub fn both<'a>(declared: impl Into<Declared<'a>>) -> Self {
         Self::with(true, declared.into())
+    }
+
+    /// Microphone plus macOS global system audio tap (all apps except TalkQTE).
+    pub fn system_audio() -> Self {
+        Self {
+            microphone: true,
+            application: Some(SYSTEM_AUDIO.into()),
+            selection: None,
+            bundle_id: None,
+        }
+    }
+
+    /// Whether this session uses the global system audio tap rather than a
+    /// named application picker selection.
+    pub fn is_system_audio(&self) -> bool {
+        self.microphone && self.application.as_deref() == Some(SYSTEM_AUDIO)
     }
 
     /// Whether `application` is the one this session was started with: the
@@ -261,22 +293,115 @@ impl EchoGuard {
         }
     }
 
-    /// Whether a microphone line is a copy of one application line already
-    /// heard within [`ECHO_WINDOW_MS`] of it: the same words in the same
-    /// order (longest common subsequence at least 85% of the longer line),
-    /// of similar length, at least six words. Lines are compared one at a
-    /// time, never pooled. Only an application line that arrived first can
-    /// be matched.
+    /// Whether a microphone line is a likely echo of one application line
+    /// already heard:
+    /// - >= 6 words: longest common word run >= 85% and length >= 70% within [`ECHO_WINDOW_MS`],
+    /// - 1-2 words: exact normalized match within [`SHORT_ECHO_WINDOW_MS`],
+    /// - short phrases (< 6 words): exact normalized match or character-bigram
+    ///   similarity within [`SHORT_ECHO_WINDOW_MS`].
     pub(super) fn is_echo(&self, at_ms: u64, text: &str) -> bool {
         let line = words(text);
-        if line.len() < ECHO_MIN_WORDS {
+        if line.is_empty() {
             return false;
         }
         self.recent
             .iter()
-            .filter(|(at, _)| at.abs_diff(at_ms) <= ECHO_WINDOW_MS)
-            .any(|(_, heard)| copies(&line, heard))
+            .any(|(at, heard)| pair_matches(at_ms, &line, *at, heard))
     }
+
+    /// Whether a microphone line and an application line pair are a likely
+    /// echo regardless of which stream arrived first.
+    pub(super) fn is_pair_echo(
+        mic_at_ms: u64,
+        mic_text: &str,
+        app_at_ms: u64,
+        app_text: &str,
+    ) -> bool {
+        let mic = words(mic_text);
+        let app = words(app_text);
+        if mic.is_empty() || app.is_empty() {
+            return false;
+        }
+        pair_matches(mic_at_ms, &mic, app_at_ms, &app)
+    }
+}
+
+fn pair_matches(mic_at_ms: u64, mic: &[String], app_at_ms: u64, app: &[String]) -> bool {
+    let diff = mic_at_ms.abs_diff(app_at_ms);
+    if diff > ECHO_WINDOW_MS {
+        return false;
+    }
+    if mic.len() >= ECHO_MIN_WORDS && copies(mic, app) {
+        return true;
+    }
+    if diff <= SHORT_ECHO_WINDOW_MS && mic.len() < ECHO_MIN_WORDS && app.len() < ECHO_MIN_WORDS {
+        return short_phrase_echo(mic, app);
+    }
+    false
+}
+
+/// Short-phrase echo detection within +/-1.5 s:
+/// (a) 1-2 word (and short-phrase) exact normalized matches ("No." vs "No.",
+///     "So" vs "So."), and
+/// (b) character-bigram Dice similarity for slight ASR-corrupted speaker bleed
+///     ("goo goo noise." vs "Google noise.").
+fn short_phrase_echo(a: &[String], b: &[String]) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.len() <= 2 && b.len() <= 2 && a.join(" ") == b.join(" ") {
+        return true;
+    }
+    let a_norm = a.join(" ");
+    let b_norm = b.join(" ");
+    let a_chars: Vec<char> = a_norm.chars().collect();
+    let b_chars: Vec<char> = b_norm.chars().collect();
+    let (short_len, long_len) = if a_chars.len() <= b_chars.len() {
+        (a_chars.len(), b_chars.len())
+    } else {
+        (b_chars.len(), a_chars.len())
+    };
+    if short_len < SHORT_ECHO_MIN_CHARS || short_len * 100 < long_len * SHORT_ECHO_LENGTH_PERCENT {
+        return false;
+    }
+    bigram_dice_percent(&a_chars, &b_chars) >= SHORT_ECHO_BIGRAM_PERCENT
+        && char_similarity_percent(&a_chars, &b_chars) >= SHORT_ECHO_CHAR_SIMILARITY_PERCENT
+}
+
+fn char_similarity_percent(a: &[char], b: &[char]) -> usize {
+    let max_len = a.len().max(b.len());
+    if max_len == 0 {
+        return 100;
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    let dist = prev[b.len()];
+    ((max_len.saturating_sub(dist)) * 100) / max_len
+}
+
+fn bigram_dice_percent(a: &[char], b: &[char]) -> usize {
+    if a.len() < 2 || b.len() < 2 {
+        return 0;
+    }
+    let total = (a.len() - 1) + (b.len() - 1);
+    let mut b_bigrams: Vec<[char; 2]> = b.windows(2).map(|w| [w[0], w[1]]).collect();
+    let mut matches = 0usize;
+    for pair in a.windows(2) {
+        let key = [pair[0], pair[1]];
+        if let Some(pos) = b_bigrams.iter().position(|candidate| *candidate == key) {
+            matches += 1;
+            b_bigrams.swap_remove(pos);
+        }
+    }
+    (matches * 2 * 100) / total
 }
 
 /// `a` and `b` are the same words in the same order, give or take a few.
@@ -383,6 +508,40 @@ mod tests {
             guard.heard_application(at, "unrelated words here");
         }
         assert!(!guard.is_echo(0, "the fictional harbour project starts in May next year"));
+    }
+
+    #[test]
+    fn short_exact_duplicates_within_1500ms_are_flagged_as_likely_echoes() {
+        let mut guard = EchoGuard::default();
+        guard.heard_application(462_000, "No.");
+        guard.heard_application(464_000, "So");
+        guard.heard_application(470_000, "Thank you.");
+        // Exact normalized 1-2 word matches within +/-1.5s are flagged.
+        assert!(guard.is_echo(462_000, "No."));
+        assert!(guard.is_echo(462_400, "no"));
+        assert!(guard.is_echo(464_000, "So."));
+        assert!(guard.is_echo(471_200, "thank you"));
+        // Outside +/-1.5s, short replies are not flagged.
+        assert!(!guard.is_echo(463_600, "No."));
+        assert!(!guard.is_echo(472_000, "Thank you."));
+        // Different short words are never flagged.
+        assert!(!guard.is_echo(462_000, "Yes."));
+        assert!(!guard.is_echo(464_000, "Wait."));
+    }
+
+    #[test]
+    fn short_asr_corrupted_bleed_within_1500ms_is_flagged_via_bigram_similarity() {
+        let mut guard = EchoGuard::default();
+        guard.heard_application(460_000, "Google noise.");
+        assert!(guard.is_echo(460_000, "goo goo noise."));
+        assert!(guard.is_echo(461_000, "Goo goo noise"));
+        // Outside +/-1.5s it is not flagged.
+        assert!(!guard.is_echo(462_000, "goo goo noise."));
+        // Distinct short phrases at the same timestamp are not flagged.
+        guard.heard_application(480_000, "I don't know.");
+        assert!(!guard.is_echo(480_000, "I don't think."));
+        guard.heard_application(490_000, "Yes, I agree.");
+        assert!(!guard.is_echo(490_000, "No, I disagree."));
     }
 
     #[test]

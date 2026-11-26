@@ -5543,109 +5543,318 @@
           <div id="dock-call-prompt">
             <div class="dock-matrix-head">
               <h3>
-                5. Call-Starting Offer (320 × 232px standard · 320 × 276px
+                5. Call-Starting Offer (320 × 160px standard · 320 × 204px
                 large)
               </h3>
               <span class="mono-label" style="color: var(--g-muted)"
-                >CallPrompt.tsx · Solar Amber Start · 44px targets · never takes
-                focus or auto-starts</span
+                >CallPrompt.tsx · Calibrated Cue mark · Solar Amber Start · 44px
+                targets · never takes focus</span
               >
             </div>
             <div class="dock-grid">
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >21 · Meeting app offer (standard · 320 × 232px)</span
+                  >21 · Meeting app offer (standard · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    A call seems to be starting in Fictional Call.
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone and Fictional Call? You
-                    choose and approve everything in the notebook; nothing is
-                    heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Call
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Not for Fictional Call</span>
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Call</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >22 · Browser offer with caveat (standard · 320 × 232px)</span
+                  >22 · Browser offer (standard · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    The microphone is in use and Fictional Browser is in front.
-                    A call?
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone? You approve it in the
-                    notebook; nothing is heard until then. You can add Fictional
-                    Browser there, but a browser’s audio includes every tab and
-                    may not be heard yet.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Browser
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn"
-                      >Not for Fictional Browser</span
-                    >
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Browser</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >23 · Unknown app offer (no app named · 320 × 232px)</span
+                  >23 · Unknown app offer (no app named · 320 × 160px)</span
                 >
-                <div class="dock-prompt">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    The microphone is in use. A call?
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone? You approve it in the
-                    notebook; nothing is heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Start listening?
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: flex-end;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 12px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="comp-col">
                 <span class="mono-label comp-label"
-                  >24 · Meeting app offer · Larger text (320 × 276px)</span
+                  >24 · Meeting app offer · Larger text (320 × 204px)</span
                 >
-                <div class="dock-prompt is-large">
-                  <span class="dock-prompt-close" aria-hidden="true">×</span>
-                  <div class="dock-prompt-title">
-                    A call seems to be starting in Fictional Call.
-                  </div>
-                  <p class="dock-prompt-copy">
-                    Start a session with your microphone and Fictional Call? You
-                    choose and approve everything in the notebook; nothing is
-                    heard until then.
-                  </p>
-                  <div class="dock-prompt-actions">
-                    <span class="dock-prompt-btn-primary"
-                      >▶ Start session…</span
+                <div class="dock-prompt is-large" style="padding: 6px">
+                  <div
+                    style="
+                      background: #151a21;
+                      border: 1px solid #252c36;
+                      border-radius: 13px;
+                      padding: 10px 12px 6px;
+                    "
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="0.5"
+                          y="0.5"
+                          width="31"
+                          height="31"
+                          rx="3.5"
+                          fill="#0d1014"
+                          stroke="#505c6e"
+                          stroke-width="1"
+                        />
+                        <path
+                          d="M8 13V8h5M24 19v5h-5"
+                          fill="none"
+                          stroke="#f5f7fa"
+                          stroke-width="2.4"
+                          stroke-linecap="square"
+                        />
+                        <rect
+                          x="10.5"
+                          y="14.5"
+                          width="11"
+                          height="3"
+                          rx="1"
+                          fill="#ebb45b"
+                        />
+                      </svg>
+                      <div class="dock-prompt-title" style="padding-right: 0">
+                        Call in Fictional Call
+                      </div>
+                    </div>
+                    <div class="dock-prompt-actions" style="margin-top: 10px">
+                      <span class="dock-prompt-btn-primary" style="flex: 1"
+                        >▶ Start</span
+                      >
+                      <span class="dock-prompt-btn" style="flex: 1"
+                        >Not now</span
+                      >
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 2px;
+                        min-height: 44px;
+                        padding: 0 4px;
+                        font-size: 13px;
+                        color: #9aa4b2;
+                      "
                     >
-                    <span class="dock-prompt-btn">Not for Fictional Call</span>
-                    <span class="dock-prompt-btn">Don’t ask again</span>
+                      <span>Not for Fictional Call</span>
+                      <span>Off</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5655,12 +5864,10 @@
               <code>src/components/CallPrompt.tsx</code> (styled in
               <code>src/styles.css</code>), mounted in
               <code>FloatingQuestion</code> when no session is running and
-              <code>callPrompt</code> is present. Four answers:
-              <code>Start session…</code>,
-              <code>Not for &lt;App&gt;</code> (when named),
-              <code>Don’t ask again</code>, and top-right <code>×</code> (<code
-                >Not now</code
-              >). Settings opt-in lives in
+              <code>callPrompt</code> is present. Four controls:
+              <code>Start</code>, <code>Not now</code>,
+              <code>Not for &lt;App&gt;</code> (when named), and
+              <code>Off</code>. Settings controls live in
               <code>src/components/CallPromptSetting.tsx</code> (Panel 15).
             </div>
             <div class="dock-prompt-spec">
@@ -5698,6 +5905,37 @@
               <code>Keep meeting</code>, <code>Write notes</code>, and
               <code>Dismiss</code>, briefly confirming <code>Kept</code>. Lab
               runs and <code>off</code> attach no prompt.
+            </div>
+            <div class="dock-prompt-spec">
+              <div class="dock-prompt-meta">
+                <span class="mono-label"
+                  >7 · Call-Ended Dock Prompt (320 × 232px standard · 320 ×
+                  276px large)</span
+                >
+                <code>CallEndPrompt.tsx</code>
+              </div>
+              <div class="dock-prompt-preview">
+                <div class="dock-prompt-card">
+                  <div class="dock-prompt-title">Call ended</div>
+                  <p class="dock-prompt-copy">Camera and mic look inactive.</p>
+                  <div class="dock-prompt-actions">
+                    <span class="dock-prompt-btn-primary">Stop &amp; save</span>
+                    <span class="dock-prompt-btn">Keep recording</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="up-boundary">
+              <strong>Component boundary:</strong>
+              <code>src/components/CallEndPrompt.tsx</code> (styled alongside
+              <code>.call-prompt</code> in <code>src/styles.css</code>), mounted
+              in <code>FloatingQuestion</code> while a live session is running
+              when macOS call-end detection attaches
+              <code>callEndPrompt</code> after a previously active call’s camera
+              and non-TalkQTE mic go inactive for 18 seconds. Two controls:
+              <code>Stop &amp; save</code> (stops and saves the session) and
+              <code>Keep recording</code>
+              (dismisses the prompt and continues recording).
             </div>
           </div>
         </div>
@@ -6567,6 +6805,57 @@
                 </div>
                 <div class="panel-note-row" style="margin-top: 10px">
                   <div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                      "
+                    >
+                      <strong style="font-size: 13px"
+                        >Orchard gate supplier</strong
+                      >
+                      <span
+                        class="mono-label"
+                        style="
+                          padding: 2px 6px;
+                          background: var(--g-asked-bg, #fdf6e9);
+                          border: 1px solid var(--g-accent-ink, #875500);
+                          border-radius: 2px;
+                          color: var(--g-accent-ink, #875500);
+                        "
+                        >AUTO</span
+                      >
+                    </div>
+                    <span
+                      class="mono-label"
+                      style="
+                        display: block;
+                        color: var(--g-muted);
+                        margin-top: 2px;
+                      "
+                      >2026-11-02 · AUTO-SELECTED FROM KEPT MEETINGS</span
+                    >
+                    <p class="panel-muted" style="margin-top: 4px">
+                      Check south latch bolts before supplier delivery.
+                    </p>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      color: var(--g-muted);
+                      font-size: 12px;
+                    "
+                  >
+                    <span style="text-decoration: underline">Archive</span
+                    ><span>×</span>
+                  </div>
+                </div>
+                <div class="panel-note-row" style="margin-top: 10px">
+                  <div>
                     <strong style="font-size: 13px"
                       >Garden launch · watering plan</strong
                     >
@@ -6877,6 +7166,94 @@ Cue processing stopped: -</pre>
                   >Diagnostics.tsx</span
                 >
               </div>
+              <div class="panel-setting-row">
+                <div style="max-width: 56ch">
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      flex-wrap: wrap;
+                    "
+                  >
+                    <strong class="panel-h3">Updates</strong>
+                    <span class="sk-chip">v0.1.0</span>
+                  </div>
+                  <p class="panel-muted" style="margin-top: 4px">
+                    Checks signed GitHub Releases for newer versions. Updates
+                    never check, prompt, or restart during a live session,
+                    microphone check, or voice dictation.
+                  </p>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                    "
+                  >
+                    <span class="panel-box is-checked">✓</span>
+                    <span style="font-size: 13px"
+                      >Check for updates on launch</span
+                    >
+                  </div>
+                  <p class="panel-muted" style="margin-top: 8px">
+                    State 1 (idle / up to date):
+                    <strong>Check for updates</strong>
+                    (secondary) + "TalkQTE is up to date." State 2
+                    (unconfigured): "Updates are not configured in this build".
+                  </p>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 12px;
+                      background: var(--g-band, #f3f5f7);
+                      border: 1px solid var(--g-border, #737f90);
+                      border-radius: 2px;
+                    "
+                  >
+                    <strong class="panel-h3">Update available: v0.2.0</strong>
+                    <p
+                      class="panel-muted"
+                      style="margin-top: 4px; font-size: 13px"
+                    >
+                      State 3 (offer): brief release notes, note that restarting
+                      quits TalkQTE, download progress bar, and
+                      <strong>Download and restart</strong> (primary).
+                    </p>
+                  </div>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 10px 12px;
+                      background: var(--g-band, #f3f5f7);
+                      border: 1px solid var(--g-border, #737f90);
+                      border-radius: 2px;
+                      font-size: 13px;
+                    "
+                  >
+                    State 4 (active session, mic check, or dictation): Update
+                    paused until this session ends
+                  </div>
+                  <div
+                    style="
+                      margin-top: 8px;
+                      padding: 10px 12px;
+                      background: var(--g-error-surface, #fdf3f0);
+                      border: 1px solid var(--g-error-ink, #9c3418);
+                      border-radius: 2px;
+                      color: var(--g-error-ink, #9c3418);
+                      font-size: 13px;
+                    "
+                  >
+                    State 5 (error recovery): plain error message; retry stays
+                    enabled.
+                  </div>
+                </div>
+                <span class="mono-label" style="color: var(--g-muted)"
+                  >UpdateSettings.tsx</span
+                >
+              </div>
             </article>
 
             <!-- 11. Settings · Your API keys (merged ProviderKeys.tsx + Transcription language) -->
@@ -6905,7 +7282,7 @@ Cue processing stopped: -</pre>
                 </div>
                 <p class="panel-muted" style="margin-top: 6px; max-width: 70ch">
                   Transcribes a live session's audio. Billed by Deepgram per
-                  minute, at most 120 minutes per session.
+                  minute, at most 480 minutes per session.
                 </p>
                 <div class="sk-entry">
                   <div class="sk-input-row">
@@ -7105,7 +7482,7 @@ Cue processing stopped: -</pre>
                     style="margin-top: 4px; font-size: 12px"
                   >
                     Transcribes a live session's audio. Billed by Deepgram per
-                    minute, at most 120 minutes per session.
+                    minute, at most 480 minutes per session.
                   </p>
                   <div class="sk-actions">
                     <span class="sk-btn-primary is-disabled">Save key</span>
@@ -7235,106 +7612,55 @@ Cue processing stopped: -</pre>
               </p>
             </article>
 
-            <!-- 14. Session sources chooser (Listen to) -->
+            <!-- 14. Zero-picker session sources & start disclosure -->
             <article class="panel-card is-wide" id="panel-session-sources">
               <div class="panel-card-tag mono-label">
-                <span>14 · Session sources (Listen to chooser)</span
+                <span>14 · Session sources (Zero-picker start)</span
                 ><span
-                  >Microphone, both, or one application · all built states</span
+                  >macOS 14.2+ Microphone + System Audio · Windows/Linux Mic
+                  only</span
                 >
               </div>
               <div class="km-split">
                 <div class="km-pane">
                   <div class="sk-row-head">
                     <strong class="panel-h3"
-                      >Listen to · Call offer preselect &amp; listed
-                      apps</strong
+                      >Start live session · Automatic dual-stream</strong
                     >
                     <span class="mono-label" style="color: var(--g-amber-ink)"
-                      >SessionSources.tsx</span
+                      >App.tsx</span
                     >
                   </div>
-                  <div class="panel-check" style="margin-top: 8px">
-                    <span class="panel-radio"></span>
-                    <div>
-                      <strong>Microphone</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        Everyone your Mac’s microphone hears, as in a room.
-                      </p>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-radio is-checked"></span>
-                    <div>
-                      <strong>Microphone and one application</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        For a call: you through the microphone, the other side
-                        from the app you choose.
-                      </p>
-                    </div>
-                  </div>
-                  <div class="panel-check">
-                    <span class="panel-radio"></span>
-                    <div>
-                      <strong>One application only</strong>
-                      <p class="panel-muted" style="font-size: 12px">
-                        Only the app’s sound, such as a recording. The
-                        microphone is not used.
-                      </p>
-                    </div>
-                  </div>
-
+                  <p
+                    class="panel-muted"
+                    style="font-size: 12px; margin-top: 8px"
+                  >
+                    Starts immediately: sends your microphone and system audio
+                    to Deepgram and recent lines to Anthropic until you press
+                    Stop.
+                  </p>
                   <div
                     style="
                       margin-top: 10px;
-                      padding: 12px 14px;
-                      background: var(--g-band);
+                      padding: 8px 12px;
+                      background: #ffffff;
                       border: 1px solid var(--g-line);
                       border-radius: 2px;
-                      display: grid;
-                      gap: 10px;
+                      font-size: 12px;
                     "
                   >
-                    <div class="panel-wanted-box">
-                      For the call in Fictional Call: list applications, check
-                      it is chosen, then start.
-                    </div>
-                    <p class="panel-muted" style="font-size: 12px">
-                      Audio from all windows of this application may be
-                      included. The first time you list applications, macOS asks
-                      you to allow Screen &amp; System Audio Recording for
-                      TalkQTE. Nothing is captured until the session starts, and
-                      nothing is sent until you enable cue processing for it;
-                      that one approval covers the microphone and the
-                      application.
-                    </p>
-                    <div
-                      style="
-                        padding: 8px 12px;
-                        background: #ffffff;
-                        border: 1px solid var(--g-line);
-                        border-radius: 2px;
-                        font-size: 12px;
-                      "
-                    >
-                      Use headphones if you can. Through speakers the microphone
-                      also hears the call; TalkQTE leaves out lines it can tell
-                      are repeats, but not all of them.
-                    </div>
-                    <div class="sk-actions" style="margin-top: 0">
-                      <span class="sk-btn">List applications</span>
-                      <span class="sk-btn">Cancel listing</span>
-                    </div>
+                    Use headphones if you can—speaker playback can echo into
+                    your mic and TalkQTE can’t catch every repeat.
                   </div>
                 </div>
 
                 <div class="km-pane">
                   <div class="sk-row-head">
                     <strong class="panel-h3"
-                      >Listed applications &amp; permission problem</strong
+                      >Mic-only fallback &amp; Windows/Linux</strong
                     >
                     <span class="mono-label" style="color: var(--g-muted)"
-                      >Matches bundle ID</span
+                      >Graceful notice</span
                     >
                   </div>
                   <div
@@ -7348,34 +7674,21 @@ Cue processing stopped: -</pre>
                       gap: 8px;
                     "
                   >
-                    <strong style="font-size: 13px">Application</strong>
-                    <div class="panel-check" style="padding: 3px 0">
-                      <span class="panel-radio"></span
-                      ><span>Fictional player</span>
-                    </div>
-                    <div class="panel-check" style="padding: 3px 0">
-                      <span class="panel-radio is-checked"></span
-                      ><span><strong>Fictional Call</strong></span>
+                    <div class="panel-error-box" style="font-size: 12px">
+                      System audio permission was not allowed. Check System
+                      Audio Recording Only for TalkQTE in System Settings →
+                      Privacy &amp; Security. Only your microphone is heard now.
                     </div>
                     <p class="panel-muted" style="font-size: 12px">
-                      Only open applications with a window are listed. If yours
-                      is missing, open it or one of its windows, then list
-                      again. A browser can be listed and still give no sound:
-                      browser calls are not yet known to work.
+                      On macOS &lt; 14.2 or when System Audio Recording Only is
+                      declined, live sessions continue smoothly with the
+                      microphone only.
                     </p>
-                    <div class="sk-actions" style="margin-top: 0">
-                      <span class="sk-btn">List again</span>
-                    </div>
-                    <div class="panel-error-box" style="font-size: 12px">
-                      Application audio did not start. Try again.
-                    </div>
                   </div>
                   <p class="panel-footer-line" style="margin-top: 12px">
-                    Component boundary:
-                    <code>src/components/SessionSources.tsx</code> +
-                    <code>src/components/processing.css</code>, mounted in
-                    <code>src/App.tsx</code> directly below
-                    <code>.session-strip</code> before a live session starts.
+                    Component boundary: <code>src/App.tsx</code> +
+                    <code>src-tauri/src/system_audio_tap.rs</code> (no app
+                    picker in the notebook).
                   </p>
                 </div>
               </div>
@@ -7423,6 +7736,26 @@ Cue processing stopped: -</pre>
                     transcribed by Deepgram once cue processing is enabled. The
                     labels say where a line was heard, not who said it.
                   </p>
+                  <div class="sk-actions" style="margin-top: 10px">
+                    <span
+                      class="sk-btn"
+                      style="
+                        background: var(--g-band);
+                        border-color: var(--g-line);
+                        color: var(--g-muted);
+                      "
+                      >Show 1 likely echo line (default collapsed)</span
+                    >
+                    <span
+                      class="sk-btn"
+                      style="
+                        background: var(--g-band);
+                        border-color: var(--g-line);
+                        color: var(--g-muted);
+                      "
+                      >Hide 1 likely echo line (expanded)</span
+                    >
+                  </div>
                   <div class="panel-transcript-row" style="margin-top: 8px">
                     <div
                       style="
@@ -8157,7 +8490,7 @@ Cue processing stopped: -</pre>
                         style="margin-top: 4px; font-size: 12px"
                       >
                         Transcribes a live session's audio. Billed by Deepgram
-                        per minute, at most 120 minutes per session.
+                        per minute, at most 480 minutes per session.
                       </p>
                       <p
                         class="panel-muted"
@@ -8388,17 +8721,18 @@ Cue processing stopped: -</pre>
                     <div class="ob-perm-card">
                       <div class="sk-row-head">
                         <strong class="panel-h3"
-                          >Screen &amp; System Audio Recording</strong
+                          >System Audio Recording Only</strong
                         >
                         <span class="mono-label" style="color: var(--g-muted)"
-                          >Only if choosing application audio</span
+                          >Asked on first session start</span
                         >
                       </div>
                       <p class="panel-muted" style="margin-top: 6px">
-                        Needed only if you choose to capture audio from a
-                        specific application window instead of your microphone.
-                        macOS will not ask for this unless you pick an
-                        application audio source.
+                        Needed on macOS 14.2 and later so TalkQTE can hear the
+                        other side of your call (all apps except TalkQTE) with
+                        no Screen Recording permission and no app picker. If you
+                        decline or run an earlier macOS, live sessions continue
+                        with your microphone only.
                       </p>
                     </div>
                   </div>
@@ -8553,7 +8887,7 @@ Cue processing stopped: -</pre>
                           >
                           names both services explicitly:
                           <strong>Deepgram</strong> (session audio from your
-                          microphone or chosen application, at most 120 minutes
+                          microphone or chosen application, at most 480 minutes
                           per session) and <strong>Anthropic</strong> (up to six
                           recent transcript lines labelled only "Speaker", any
                           lines the cue on screen cites, the cue on screen, up
@@ -8709,8 +9043,8 @@ Cue processing stopped: -</pre>
                 >What macOS will ask later</strong
               >
               <p class="panel-muted" style="margin-top: 6px; font-size: 12px">
-                Nothing requested here. Microphone on first session start;
-                Screen &amp; System Audio only for application audio.
+                Nothing requested here. Microphone and System Audio Recording
+                Only on first session start (no Screen Recording permission).
               </p>
               <div
                 class="ob-perm-card"
@@ -8722,7 +9056,7 @@ Cue processing stopped: -</pre>
                 class="ob-perm-card"
                 style="padding: 8px 10px; font-size: 12px"
               >
-                <strong>App audio</strong> · optional
+                <strong>System audio</strong> · first start
               </div>
               <div
                 class="sk-actions"
@@ -9462,8 +9796,9 @@ Date: 2026-11-23 · Length: 06:42
                 (<code>KeepInHistory.tsx</code>, <code>EndPrompt.tsx</code>,
                 <code>MeetingHistory.tsx</code>,
                 <code>MeetingHistorySettings.tsx</code>): built plainly with
-                shared tokens and no one-sided borders; tiles for every state
-                are still to be added here. Component boundaries:
+                shared tokens and no one-sided borders; the folder states below
+                cover the organization controls. Other history states still
+                await dedicated specimens. Component boundaries:
                 <code>KeepInHistory.tsx</code> (after a non-empty live session
                 ends: kept confirmation or Update kept meeting under default
                 <code>auto</code>, or keep offer under <code>ask</code>; a
@@ -9474,14 +9809,34 @@ Date: 2026-11-23 · Length: 06:42
                 unfiled list, optional collapsible folder sections, search,
                 empty/unreadable/lab-run/newer states, read-only meeting detail
                 with folder selector and notes/meeting notes/cues/transcript,
-                inline rename, inline delete confirmation, and export review
-                dialog), and <code>MeetingHistorySettings.tsx</code> (Settings →
-                Kept meetings: the <code>After a live session ends</code> choice
+                inline rename, Archive/Unarchive with Show archived filter,
+                inline delete confirmation, and export review dialog), and
+                <code>MeetingHistorySettings.tsx</code> (Settings → Kept
+                meetings: the <code>After a live session ends</code> choice
                 (<code>auto</code> default, <code>ask</code>, <code>off</code>),
-                where the files are, Delete all with its inline confirmation,
-                and the lab-run, unavailable and newer-version states). Styles:
-                <code>meeting-history.css</code>.
+                <code>Auto-select relevant past meetings as prior context</code>
+                toggle, where the files are, Delete all with its inline
+                confirmation, and the lab-run, unavailable and newer-version
+                states). Styles: <code>meeting-history.css</code>.
               </p>
+              <h3 id="meeting-folder-states">Meeting folders · built states</h3>
+              <p class="studio-line">
+                Fictional content. Shared app tokens and meeting-history styles
+                cover unfiled, open/collapsed/empty folders, create,
+                rename/error, delete confirmation, search/results, busy, move
+                error/success, archived and long-name states. Focus and hover
+                use the app styles. Native VoiceOver remains unverified.
+              </p>
+              <iframe
+                title="Meeting folder states"
+                src="meeting-folders.html"
+                style="
+                  width: 100%;
+                  height: 2300px;
+                  border: 1px solid var(--g-line);
+                  border-radius: 8px;
+                "
+              ></iframe>
             </div>
           </div>
         </div>

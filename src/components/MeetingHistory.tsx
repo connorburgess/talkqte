@@ -26,6 +26,7 @@ import {
   renameKeptMeeting,
   renameMeetingFolder,
   setKeptMeetingFolder,
+  setKeptMeetingArchived,
   sourceNames,
   type AfterSessionKeep,
   type KeptListing,
@@ -57,6 +58,7 @@ export function MeetingHistory({
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [listing, setListing] = useState<KeptListing | null>(null);
   const [afterKeep, setAfterKeep] = useState<AfterSessionKeep>('auto');
   const [selected, setSelected] = useState<KeptMeeting | null>(null);
@@ -93,8 +95,13 @@ export function MeetingHistory({
   // Export review modal for the opened meeting.
   const [exportPreview, setExportPreview] = useState<string | null>(null);
   const [exportError, setExportError] = useState('');
+  const [showEchoes, setShowEchoes] = useState(false);
   const exportDialog = useRef<HTMLDialogElement>(null);
   const exportButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setShowEchoes(false);
+  }, [selected?.id]);
 
   const listRequest = useRef(0);
   const openRequestRef = useRef(0);
@@ -212,6 +219,40 @@ export function MeetingHistory({
     }
   };
 
+  const toggleArchived = async (meetingId: string, archived: boolean) => {
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await setKeptMeetingArchived(meetingId, archived);
+      setSelected((current) =>
+        current && current.id === updated.id
+          ? {
+              ...current,
+              archived: updated.archived,
+              revision: updated.revision,
+            }
+          : current,
+      );
+      setNotice(
+        archived
+          ? `Archived “${updated.title}”.`
+          : `Unarchived “${updated.title}”.`,
+      );
+      await loadList(query);
+    } catch (problem) {
+      setError(
+        failure(
+          problem,
+          archived
+            ? 'The meeting could not be archived.'
+            : 'The meeting could not be unarchived.',
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmDeleteMeeting = async () => {
     if (!selected) return;
     const title = selected.title;
@@ -286,10 +327,12 @@ export function MeetingHistory({
       const updated = await renameMeetingFolder(oldName, draftFolderName);
       const nextName =
         updated.find(
-          (f) => f.toLowerCase() === draftFolderName.trim().toLowerCase(),
+          (f) =>
+            f.toLowerCase() ===
+            draftFolderName.trim().replace(/\s+/g, ' ').toLowerCase(),
         ) ?? draftFolderName.trim();
       setCollapsedFolders((prev) => {
-        if (!(oldName in prev)) return prev;
+        if (!Object.hasOwn(prev, oldName)) return prev;
         const next = { ...prev };
         next[nextName] = prev[oldName];
         if (nextName !== oldName) delete next[oldName];
@@ -314,7 +357,7 @@ export function MeetingHistory({
     try {
       await deleteMeetingFolder(target);
       setCollapsedFolders((prev) => {
-        if (!(target in prev)) return prev;
+        if (!Object.hasOwn(prev, target)) return prev;
         const next = { ...prev };
         delete next[target];
         return next;
@@ -406,6 +449,16 @@ export function MeetingHistory({
             >
               <ArrowUpRight size={16} />
               Export…
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() =>
+                void toggleArchived(selected.id, !selected.archived)
+              }
+            >
+              {selected.archived ? 'Unarchive' : 'Archive'}
             </button>
             {!confirmDelete && (
               <button
@@ -513,6 +566,7 @@ export function MeetingHistory({
             {selected.transcribedBy && (
               <span>Transcribed by {selected.transcribedBy}</span>
             )}
+            {selected.archived && <span className="history-tag">Archived</span>}
           </p>
           {(folders.length > 0 || selected.folder) && (
             <div className="history-detail-folder">
@@ -589,37 +643,65 @@ export function MeetingHistory({
           )}
         </section>
 
-        <section
-          className="history-section"
-          aria-labelledby={`${id}-transcript-heading`}
-        >
-          <h2 id={`${id}-transcript-heading`}>
-            Transcript ({selected.transcript.length})
-          </h2>
-          {selected.transcript.length === 0 ? (
-            <p className="history-help">No transcript lines.</p>
-          ) : (
-            <div className="transcript">
-              {selected.transcript.map((line, index) => (
-                <article
-                  key={`${line.atMs}-${index}`}
-                  className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
-                >
-                  <div className="transcript-segment-head">
-                    {both && (
-                      <span>{line.label === 'them' ? 'Them' : 'You'}</span>
-                    )}
-                    {line.echo && (
-                      <span className="transcript-echo-label">Likely echo</span>
-                    )}
-                    <time>{clockTime(line.atMs)}</time>
-                  </div>
-                  <p>{line.text}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+        {(() => {
+          const spokenTranscript = selected.transcript.filter(
+            (line) => !line.echo,
+          );
+          const echoCount =
+            selected.transcript.length - spokenTranscript.length;
+          const visibleTranscript = showEchoes
+            ? selected.transcript
+            : spokenTranscript;
+          return (
+            <section
+              className="history-section"
+              aria-labelledby={`${id}-transcript-heading`}
+            >
+              <div className="history-section-head">
+                <h2 id={`${id}-transcript-heading`}>
+                  Transcript ({spokenTranscript.length})
+                </h2>
+                {echoCount > 0 && (
+                  <button
+                    type="button"
+                    className="transcript-echo-toggle"
+                    aria-expanded={showEchoes}
+                    onClick={() => setShowEchoes((open) => !open)}
+                  >
+                    {showEchoes
+                      ? `Hide ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`
+                      : `Show ${echoCount} likely echo ${echoCount === 1 ? 'line' : 'lines'}`}
+                  </button>
+                )}
+              </div>
+              {selected.transcript.length === 0 ? (
+                <p className="history-help">No transcript lines.</p>
+              ) : visibleTranscript.length === 0 ? null : (
+                <div className="transcript">
+                  {visibleTranscript.map((line, index) => (
+                    <article
+                      key={`${line.atMs}-${index}`}
+                      className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
+                    >
+                      <div className="transcript-segment-head">
+                        {both && (
+                          <span>{line.label === 'them' ? 'Them' : 'You'}</span>
+                        )}
+                        {line.echo && (
+                          <span className="transcript-echo-label">
+                            Likely echo
+                          </span>
+                        )}
+                        <time>{clockTime(line.atMs)}</time>
+                      </div>
+                      <p>{line.text}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })()}
 
         <dialog
           ref={exportDialog}
@@ -671,13 +753,19 @@ export function MeetingHistory({
     );
   }
 
+  const archivedCount = (listing?.meetings ?? []).filter(
+    (item) => item.archived,
+  ).length;
+  const visibleMeetings = (listing?.meetings ?? []).filter(
+    (item) => showArchived || !item.archived,
+  );
   const searching = query.trim().length > 0;
   const canonicalFolder = new Map(folders.map((f) => [f.toLowerCase(), f]));
   const unfiledMeetings: KeptSummary[] = [];
   const meetingsByFolder = new Map<string, KeptSummary[]>(
     folders.map((folder) => [folder, []]),
   );
-  for (const item of listing?.meetings ?? []) {
+  for (const item of visibleMeetings) {
     const matched = item.folder
       ? canonicalFolder.get(item.folder.toLowerCase())
       : undefined;
@@ -709,31 +797,43 @@ export function MeetingHistory({
           {item.hasMeetingNotes && (
             <span className="history-tag">Meeting notes</span>
           )}
+          {item.archived && <span className="history-tag">Archived</span>}
         </span>
       </button>
     );
-    if (folders.length === 0) {
-      return <li key={item.id}>{button}</li>;
-    }
     return (
-      <li key={item.id} className="history-row">
+      <li
+        key={item.id}
+        className={`history-row${item.archived ? ' is-archived' : ''}`}
+      >
         {button}
-        <select
-          className="history-row-folder"
-          aria-label={`Folder for ${item.title}`}
-          value={item.folder ?? ''}
+        <button
+          type="button"
+          className="secondary-button history-archive-button"
+          aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
           disabled={busy}
-          onChange={(event) =>
-            void moveMeeting(item.id, event.target.value || null)
-          }
+          onClick={() => void toggleArchived(item.id, !item.archived)}
         >
-          <option value="">Unfiled / Top</option>
-          {folders.map((folder) => (
-            <option key={folder} value={folder}>
-              {folder}
-            </option>
-          ))}
-        </select>
+          {item.archived ? 'Unarchive' : 'Archive'}
+        </button>
+        {folders.length > 0 && (
+          <select
+            className="history-row-folder"
+            aria-label={`Folder for ${item.title}`}
+            value={item.folder ?? ''}
+            disabled={busy}
+            onChange={(event) =>
+              void moveMeeting(item.id, event.target.value || null)
+            }
+          >
+            <option value="">Unfiled / Top</option>
+            {folders.map((folder) => (
+              <option key={folder} value={folder}>
+                {folder}
+              </option>
+            ))}
+          </select>
+        )}
       </li>
     );
   };
@@ -867,6 +967,18 @@ export function MeetingHistory({
               </div>
             </form>
           )}
+          {(archivedCount > 0 || showArchived) && (
+            <div className="history-filter-row">
+              <label className="history-check">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                <span>Show archived ({archivedCount})</span>
+              </label>
+            </div>
+          )}
 
           {listing && listing.unreadable > 0 && (
             <p className="history-help" role="status">
@@ -877,7 +989,7 @@ export function MeetingHistory({
           )}
 
           {listing &&
-          listing.meetings.length === 0 &&
+          visibleMeetings.length === 0 &&
           (searching || folders.length === 0) ? (
             <div className="history-empty">
               {searching ? (
@@ -889,6 +1001,21 @@ export function MeetingHistory({
                     onClick={() => setQuery('')}
                   >
                     Clear search
+                  </button>
+                </>
+              ) : archivedCount > 0 && !showArchived ? (
+                <>
+                  <p>
+                    {archivedCount === 1
+                      ? '1 archived meeting is hidden from the list and from auto prior context.'
+                      : `${archivedCount} archived meetings are hidden from the list and from auto prior context.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setShowArchived(true)}
+                  >
+                    Show archived
                   </button>
                 </>
               ) : (
@@ -916,8 +1043,14 @@ export function MeetingHistory({
                 const isOpen = isEditingFolder
                   ? true
                   : searching
-                    ? !searchCollapsed[folder]
-                    : !collapsedFolders[folder];
+                    ? !(
+                        Object.hasOwn(searchCollapsed, folder) &&
+                        searchCollapsed[folder]
+                      )
+                    : !(
+                        Object.hasOwn(collapsedFolders, folder) &&
+                        collapsedFolders[folder]
+                      );
                 const countWord =
                   folderMeetings.length === 1 ? 'meeting' : 'meetings';
                 return (
