@@ -641,8 +641,10 @@ mod tests {
             ),
             (Some(None), None),
         ] {
-            let mut runtime = Runtime::default();
-            runtime.pending_calendar_title = Some("Fictional Planning".into());
+            let mut runtime = Runtime {
+                pending_calendar_title: Some("Fictional Planning".into()),
+                ..Runtime::default()
+            };
             let ticket = runtime
                 .begin_live_start()
                 .unwrap()

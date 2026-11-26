@@ -271,7 +271,7 @@ fn in_prompt_window(start_epoch_s: i64, end_epoch_s: i64, now_epoch_s: i64) -> b
         return false;
     }
     let delta = start_epoch_s - now_epoch_s;
-    delta <= PROMPT_LEAD_SECS && delta >= -IN_PROGRESS_WINDOW_SECS
+    (-IN_PROGRESS_WINDOW_SECS..=PROMPT_LEAD_SECS).contains(&delta)
 }
 
 #[derive(Default)]
