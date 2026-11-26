@@ -33,9 +33,6 @@
         color: var(--muted);
         line-height: 1.55;
       }
-      .specimen-narrow {
-        max-width: 390px;
-      }
     </style>
   </head>
   <body>
@@ -381,7 +378,7 @@
         </ul>
       </article>
       <article class="history">
-        <h2>Filters · combined and empty</h2>
+        <h2>Filters · invalid range and empty</h2>
         <div
           class="history-filter-row"
           role="group"
@@ -390,7 +387,7 @@
           <label class="history-field"
             >From date<input type="date" value="2026-01-12" /></label
           ><label class="history-field"
-            >To date<input type="date" value="2026-01-14" /></label
+            >To date<input type="date" value="2026-01-01" /></label
           ><label class="history-check"
             ><input type="checkbox" checked />Has notes</label
           ><button class="secondary-button">Clear filters</button>
@@ -418,88 +415,14 @@
           </p>
         </section>
       </article>
-      <article class="history specimen-narrow">
-        <h2>Narrow layout</h2>
+      <article class="history">
+        <h2>Narrow viewport review</h2>
         <p>
-          Reorder controls share a row with Archive; title and folder picker
-          retain the full width.
+          Open this sheet at 390px to review the actual responsive component
+          styles: reorder controls share a row with Archive; title and folder
+          picker retain the full width. Each built state above adapts at the
+          same breakpoint as the app.
         </p>
-        <ul class="history-list">
-          <li class="history-row">
-            <div
-              class="history-order-controls"
-              role="group"
-              aria-label="Organize Fictional orchard review"
-            >
-              <button
-                class="icon-button history-drag-handle"
-                aria-label="Drag Fictional orchard review"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <circle cx="9" cy="5" r="1" />
-                  <circle cx="9" cy="12" r="1" />
-                  <circle cx="9" cy="19" r="1" />
-                  <circle cx="15" cy="5" r="1" />
-                  <circle cx="15" cy="12" r="1" />
-                  <circle cx="15" cy="19" r="1" />
-                </svg></button
-              ><button
-                class="icon-button"
-                aria-label="Move Fictional orchard review up"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path d="m6 12 6-6 6 6M12 6v14" />
-                </svg></button
-              ><button
-                class="icon-button"
-                aria-label="Move Fictional orchard review down"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path d="m6 12 6 6 6-6M12 4v14" />
-                </svg>
-              </button>
-            </div>
-            <button class="history-item">
-              <span class="history-item-title">Fictional orchard review</span
-              ><span class="history-meta"
-                >15 Jan 2026 · Microphone
-                <span class="history-tag">Meeting notes</span></span
-              ></button
-            ><button class="secondary-button history-archive-button">
-              Archive</button
-            ><select
-              class="history-row-folder"
-              aria-label="Folder for Fictional orchard review"
-            >
-              <option>Orchard</option>
-              <option>Unfiled / Top</option>
-            </select>
-          </li>
-        </ul>
       </article>
     </main>
   </body>
