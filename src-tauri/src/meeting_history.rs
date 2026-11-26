@@ -1144,6 +1144,14 @@ impl Store {
         }
         let default = crate::engine::default_speaker_label(speaker_id);
         self.change_meeting(id, |meeting| {
+            if !meeting
+                .content
+                .transcript
+                .iter()
+                .any(|line| line.speaker_id == Some(speaker_id))
+            {
+                return Err(Error::SpeakerName);
+            }
             if normalized.is_empty() || normalized == default {
                 meeting.content.speaker_names.remove(&speaker_id);
             } else {

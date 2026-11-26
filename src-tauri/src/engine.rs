@@ -49,7 +49,7 @@ pub struct Segment {
 
 /// Default display label for a 0-based diarized remote speaker ID (`0` -> `"Speaker 1"`).
 pub fn default_speaker_label(speaker_id: u32) -> String {
-    format!("Speaker {}", speaker_id.saturating_add(1))
+    format!("Speaker {}", u64::from(speaker_id) + 1)
 }
 
 /// Which capture a live line came from. Each has its own recognizer stream,
@@ -477,6 +477,8 @@ struct NoteTerms {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub revision: u64,
+    /// Main-window session token for commands that edit meeting identity.
+    pub session: String,
     pub title: String,
     pub description: String,
     pub status: Status,
@@ -761,6 +763,7 @@ impl Engine {
             identity: std::sync::Arc::new(()),
             state: Snapshot {
                 revision: 0,
+                session: "0".into(),
                 title: script.title.clone(),
                 description: script.description.clone(),
                 status: Status::Ready,
@@ -859,6 +862,7 @@ impl Engine {
     }
 
     fn changed(&mut self) {
+        self.state.session = self.generation.to_string();
         // Publishing the state shows any cue created since the last change.
         self.unshown = None;
         self.state.revision += 1;
@@ -1318,10 +1322,30 @@ impl Engine {
             .unwrap_or_else(|| default_speaker_label(speaker_id))
     }
 
+    /// Reject a delayed rename from a previous meeting before changing names.
+    pub fn rename_session_speaker(
+        &mut self,
+        session: &str,
+        speaker_id: u32,
+        name: &str,
+    ) -> Result<(), String> {
+        if session != self.state.session {
+            return Err("This meeting has changed. Open its transcript and try again.".into());
+        }
+        self.rename_speaker(speaker_id, name)
+    }
+
     /// Renames a diarized remote speaker across this session's transcript and
     /// meeting record. Blank input or the default `"Speaker N"` label clears
     /// the custom name back to `"Speaker N"`.
     pub fn rename_speaker(&mut self, speaker_id: u32, name: &str) -> Result<(), String> {
+        if !self
+            .meeting
+            .iter()
+            .any(|line| line.speaker_id == Some(speaker_id))
+        {
+            return Err("That speaker is no longer in this meeting.".into());
+        }
         if name.chars().any(char::is_control) {
             return Err("Give the speaker a name of up to 80 characters.".into());
         }
@@ -1333,6 +1357,11 @@ impl Engine {
         if normalized.is_empty() || normalized == default {
             self.state.speaker_names.remove(&speaker_id);
         } else {
+            if !self.state.speaker_names.contains_key(&speaker_id)
+                && self.state.speaker_names.len() >= 200
+            {
+                return Err("This meeting has reached its limit of 200 speaker names.".into());
+            }
             self.state.speaker_names.insert(speaker_id, normalized);
         }
         let resolved = self.resolved_remote_speaker(speaker_id);
@@ -1442,7 +1471,7 @@ impl Engine {
                 (self.resolved_remote_speaker(id), Some(id))
             }
             (LineOrigin::Application, true, _, _) => (THEM.to_string(), None),
-            (LineOrigin::Application, false, _, _) => (speaker.to_string(), None),
+            (LineOrigin::Application, false, _, _) => (THEM.to_string(), None),
         };
         let segment = Segment {
             text: text.into(),
@@ -7597,6 +7626,10 @@ mod tests {
         assert!(e.rename_speaker(0, "Priya\n").is_err());
         assert_eq!(e.state.transcript[0].speaker, "Priya Patel");
 
+        assert!(e.rename_speaker(99, "Invented").is_err());
+        assert_eq!(e.state.speaker_names.len(), 1);
+        assert_eq!(default_speaker_label(u32::MAX), "Speaker 4294967296");
+
         // Blank or default resets back to Speaker 1 and removes the map entry.
         e.rename_speaker(0, "   ").unwrap();
         assert!(e.state.speaker_names.is_empty());
@@ -7623,9 +7656,29 @@ mod tests {
         assert!(md.contains("- 00:03 Them: Sounds good."));
         assert!(md.contains("- 00:04 You: Thanks, let's review on Friday."));
 
-        // Starting a new session clears speaker_names.
+        // Delayed commands from the ended meeting cannot name a new meeting's speaker 0.
+        let old_session = e.state.session.clone();
         e.start().unwrap();
+        e.set_sources(SessionSources::system_audio());
+        e.advance(1_000);
+        e.ingest_from(
+            e.session(),
+            LineOrigin::Application,
+            Segment {
+                id: "new-remote".into(),
+                at_ms: 0,
+                speaker: "Speaker".into(),
+                speaker_id: Some(0),
+                text: "A different fictional person.".into(),
+            },
+        )
+        .unwrap();
+        assert!(e.rename_session_speaker(&old_session, 0, "Priya").is_err());
+        assert_eq!(e.state.transcript[0].speaker, "Speaker 1");
         assert!(e.state.speaker_names.is_empty());
+        let current = e.state.session.clone();
+        e.rename_session_speaker(&current, 0, "Alex").unwrap();
+        assert_eq!(e.state.transcript[0].speaker, "Alex");
     }
 
     #[test]

@@ -211,7 +211,7 @@ export function MeetingHistory({
       setNotice(`Speaker updated to “${resolved}”.`);
       await loadList(query);
     } catch (problem) {
-      setError(failure(problem, 'The speaker could not be renamed.'));
+      throw new Error(failure(problem, 'The speaker could not be renamed.'));
     } finally {
       setBusy(false);
     }

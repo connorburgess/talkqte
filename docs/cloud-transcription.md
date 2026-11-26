@@ -193,7 +193,9 @@ Any provider speaker label is untrusted: the cue model still receives the
 fixed label "Speaker", while remote (`Them`) lines in a two-source or
 application session surface distinct diarized speaker IDs as `Speaker 1`,
 `Speaker 2`, etc. (falling back to `Them` when no speaker ID is present)
-and allow inline renaming on the device.
+and allow inline renaming on the device. After a reconnect, new remote lines
+use `Them` without a speaker ID for the rest of the session, preventing a
+replacement connection from inheriting earlier custom names.
 
 **What the review says.** The review's audio sentence names the chosen provider
 and model plus the session's capture sources, fixed when the session starts:

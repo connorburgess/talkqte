@@ -758,6 +758,20 @@ fn v1_meetings_without_speaker_fields_still_load_and_speaker_renames_persist() {
         Err(Error::SpeakerName)
     );
 
+    assert_eq!(
+        store.rename_speaker(&kept.id, 99, "Invented"),
+        Err(Error::SpeakerName)
+    );
+    assert_eq!(
+        store
+            .open_meeting(&kept.id)
+            .unwrap()
+            .content
+            .speaker_names
+            .len(),
+        1
+    );
+
     // Blank name resets back to default and omits speakerNames from disk JSON.
     let reset = store.rename_speaker(&kept.id, 0, "   ").unwrap();
     assert!(reset.content.speaker_names.is_empty());

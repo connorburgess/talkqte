@@ -823,7 +823,7 @@ svg {
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  min-height: 26px;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--band);
@@ -853,7 +853,7 @@ svg {
   gap: var(--space-4);
 }
 .transcript-speaker-rename input {
-  min-height: 28px;
+  min-height: 44px;
   width: 160px;
   max-width: 100%;
   padding: 2px 8px;
@@ -871,7 +871,7 @@ svg {
   border-color: var(--ink);
 }
 .transcript-speaker-rename .secondary-button {
-  min-height: 28px;
+  min-height: 44px;
   padding: 2px 8px;
   font-size: 12px;
 }
@@ -2033,4 +2033,17 @@ svg {
   font-size: 13px;
   line-height: 1.5;
   max-width: 60ch;
+}
+
+.transcript-speaker-error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.transcript-speaker-chip {
+  max-width: 100%;
+}
+.transcript-speaker-chip strong {
+  overflow-wrap: anywhere;
 }

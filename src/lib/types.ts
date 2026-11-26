@@ -89,6 +89,7 @@ export interface CueSnapshot {
   sources?: import('./transcription').SessionSources;
 }
 export interface Snapshot extends CueSnapshot {
+  session: string;
   title: string;
   description: string;
   elapsedMs: number;
@@ -133,7 +134,7 @@ export type Commands = {
   /** Keep a line marked as a likely echo as the person's own, or remove it. */
   resolve_echo_line: { id: string; keep: boolean };
   /** Rename a diarized remote speaker across this session's transcript. */
-  rename_speaker: { speakerId: number; name: string };
+  rename_speaker: { session: string; speakerId: number; name: string };
   /** `application`: the review of an application to hear beside the
    * microphone; the session declares it, and its review names both. */
   start_live_session: { application?: string } | undefined;

@@ -561,7 +561,14 @@ impl CloudFeed {
                         id: format!("c{}-{}-{}", self.session, self.stream_index, seq),
                         at_ms: at,
                         speaker: "Speaker".into(),
-                        speaker_id: untrusted_speaker,
+                        // Provider IDs are connection-scoped. After reconnect we
+                        // cannot know which previous person (if any) is speaking;
+                        // fail safely to Them instead of inheriting a custom name.
+                        speaker_id: if self.reconnects == 0 {
+                            untrusted_speaker
+                        } else {
+                            None
+                        },
                         text,
                     };
                     match (self.sink)(self.session, segment) {
@@ -1522,6 +1529,42 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1].id, "c7-1-2");
         assert_eq!(lines[1].at_ms, 3_200);
+    }
+
+    #[test]
+    fn replacement_speaker_zero_cannot_inherit_a_previous_connections_custom_name() {
+        use crate::engine::{Engine, LineOrigin, SessionSources, THEM};
+        let first = Script::default();
+        let second = Script::default();
+        let (mut feed, rx, _) = reconnecting(&first, vec![Ok(second.clone())]);
+        let mut engine = Engine::live();
+        engine.start().unwrap();
+        engine.set_sources(SessionSources::system_audio());
+        engine.advance(5_000);
+        let session = engine.session();
+        feed.push(0, 1_000, &[0.1; 16_000]).unwrap();
+        first.events.lock().unwrap().push(final_(1, 100, Some(0)));
+        feed.poll().unwrap();
+        engine
+            .ingest_from(session, LineOrigin::Application, rx.recv().unwrap())
+            .unwrap();
+        engine.rename_speaker(0, "Priya Patel").unwrap();
+        first
+            .events
+            .lock()
+            .unwrap()
+            .push(SttEvent::Failed(SttFailure::Network));
+        feed.poll().unwrap();
+        feed.push(1_000, 2_000, &[0.1; 16_000]).unwrap();
+        second.events.lock().unwrap().push(final_(1, 100, Some(0)));
+        feed.poll().unwrap();
+        engine
+            .ingest_from(session, LineOrigin::Application, rx.recv().unwrap())
+            .unwrap();
+        assert_eq!(engine.state.transcript[0].speaker, "Priya Patel");
+        assert_eq!(engine.state.transcript[1].speaker, THEM);
+        assert_eq!(engine.state.transcript[1].speaker_id, None);
+        assert_eq!(engine.state.speaker_names.len(), 1);
     }
 
     #[test]

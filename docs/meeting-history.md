@@ -23,7 +23,7 @@ By default, non-empty live sessions save automatically into local **Meetings** h
 | Sources used: microphone, application or both                         | The application's name, unless the person ticks it |
 | Transcript, times from the start                                      | The person's name setting and focus lines          |
 | You/Them labels, 0-based remote speaker IDs, and custom speaker names | Imported notes and note reminders                  |
-| Likely-echo marks, for lines neither removed nor kept as their own    | Imported notes and note reminders                  |
+| Likely-echo marks, for lines neither removed nor kept as their own    |                                                    |
 | The person's notes                                                    | The Still open list                                |
 | Cues shown from the conversation, with the line each quoted           | Cue usage, spend or provider replies               |
 | Meeting notes, only if the person kept them, as edited                | Anything from a lab run                            |
@@ -146,3 +146,9 @@ thread (`src-tauri/src/meeting_history_commands.rs`).
 - A long meeting (two hours or more) keeps and opens within a reasonable time.
 - A rollback between two signed candidates leaves a newer history untouched.
 - Time Machine and FileVault behaviour as described.
+
+## Remote speaker names
+
+Deepgram diarization IDs appear as **Speaker 1**, **Speaker 2**, and so on; missing IDs stay **Them**. Click a remote name in either Transcript to rename that speaker throughout the meeting. Enter or Save submits, leaving the editor also saves, and Escape or Cancel discards the draft. Blank input restores the numbered label. Names are limited to 80 characters, stored only with that meeting, searchable, and included in its transcript export. Existing v1 meetings without IDs or names still open unchanged. Renaming a kept meeting does not rewrite already generated notes.
+
+Speaker numbers are provider guesses, not verified identities. After a reconnect, new remote lines use Them without an editable speaker ID for the rest of the session, preventing a reused provider ID from inheriting an earlier custom name. Start a new session to restore numbering. Confirm attribution before naming someone or relying on generated notes. Native call accuracy remains unverified. The next acceptance check is an explicitly authorized fictional macOS call covering two remote voices, reconnect, rename, stop, reopen and export, with no cross-meeting names.

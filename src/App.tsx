@@ -2218,12 +2218,11 @@ function Notebook() {
                                         setEditingSpeaker(null)
                                       }
                                       onRename={async (speakerId, name) => {
-                                        await run(() =>
-                                          bridge.command('rename_speaker', {
-                                            speakerId,
-                                            name,
-                                          }),
-                                        );
+                                        await bridge.command('rename_speaker', {
+                                          session: state.session,
+                                          speakerId,
+                                          name,
+                                        });
                                         setEditingSpeaker(null);
                                       }}
                                     />

@@ -67,6 +67,9 @@ let operation = 0;
 let heldStart = new URLSearchParams(location.search).has('hold-start');
 let releaseStart: (() => void) | undefined;
 let startFailure = '';
+let rejectSpeakerRename = new URLSearchParams(location.search).has(
+  'reject-speaker-rename',
+);
 let heldCaptureStop = false;
 let releaseCaptureStop: (() => void) | undefined;
 let heldDrain = false;
@@ -429,6 +432,7 @@ async function publish(value: Partial<Snapshot>, forceSave = false) {
     ...session,
     ...value,
     revision: Math.max(session.revision, 1_000) + 1,
+    session: String(historySession),
   };
   let historyChanged = false;
   if (value.status === 'running') {
@@ -1170,7 +1174,19 @@ mockIPC(
         echoAnswers.push(structuredClone(args));
         return;
       case 'rename_speaker': {
-        const { speakerId, name } = args as Commands['rename_speaker'];
+        if (rejectSpeakerRename) {
+          rejectSpeakerRename = false;
+          throw new Error('The speaker could not be renamed. Try again.');
+        }
+        const {
+          session: expectedSession,
+          speakerId,
+          name,
+        } = args as Commands['rename_speaker'];
+        if (expectedSession !== session.session)
+          throw new Error(
+            'This meeting has changed. Open its transcript and try again.',
+          );
         const normalized = name.trim().replace(/\s+/g, ' ');
         if ([...normalized].length > 80 || /[\p{Cc}]/u.test(name)) {
           throw new Error('Give the speaker a name of up to 80 characters.');

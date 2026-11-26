@@ -710,6 +710,7 @@ fn rename_speaker(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
+    session: String,
     speaker_id: u32,
     name: String,
 ) -> Result<(), String> {
@@ -717,7 +718,9 @@ fn rename_speaker(
         return Err("Only the notebook can rename speakers.".into());
     }
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    runtime.engine.rename_speaker(speaker_id, &name)?;
+    runtime
+        .engine
+        .rename_session_speaker(&session, speaker_id, &name)?;
     runtime.export = None;
     publish(&app, &mut runtime);
     Ok(())
