@@ -306,7 +306,7 @@ test('narrow permission review wraps long sources and leaves capture controls re
     name: 'Enable for this session',
   });
   await approve.scrollIntoViewIfNeeded();
-  expect((await approve.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  expect((await approve.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await panel(page)
     .getByRole('button', { name: 'Cancel', exact: true })
     .click();

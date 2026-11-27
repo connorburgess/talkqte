@@ -1,5 +1,5 @@
 .processing-panel {
-  padding: var(--space-16) 0 var(--space-24);
+  padding: var(--space-12) 0 var(--space-16);
   border-top: 1px solid var(--line);
   background: transparent;
   max-width: 760px;
@@ -47,10 +47,10 @@
   color: var(--accent-ink);
 }
 .processing-actions {
-  margin-top: var(--space-16);
+  margin-top: var(--space-12);
 }
 .processing-actions button {
-  min-height: 48px;
+  min-height: var(--control-h);
 }
 .processing-review {
   margin-top: var(--space-24);
@@ -166,8 +166,8 @@
 .processing-approved summary,
 .processing-dev-details summary {
   cursor: pointer;
-  padding: var(--space-8) 0;
-  min-height: 44px;
+  padding: 5px 0;
+  min-height: var(--control-h);
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -256,7 +256,16 @@
 }
 .notebook-processing .processing-panel {
   max-width: none;
+  padding: 10px 0 12px;
   border-bottom: 1px solid var(--line);
+}
+.notebook-processing .processing-panel .processing-heading h2 {
+  font-size: 15px;
+}
+.notebook-processing .processing-panel > p {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .notebook-processing .processing-panel.is-compact-live {
   padding: var(--space-12) 0;
@@ -287,9 +296,9 @@
   .processing-panel.is-compact-live
   .processing-actions
   button {
-  min-height: 44px;
-  padding: 6px 14px;
-  font-size: 13px;
+  min-height: var(--control-h-sm);
+  padding: 4px 10px;
+  font-size: 12.5px;
 }
 .notebook-processing .processing-panel.is-compact-live > .processing-muted {
   flex: 1 1 100%;
@@ -366,8 +375,8 @@
   margin-top: 0;
 }
 .session-sources-application .processing-actions button {
-  min-height: 44px;
-  padding: 8px 14px;
+  min-height: var(--control-h);
+  padding: 5px 12px;
   font-size: 13px;
 }
 .session-sources-wanted {

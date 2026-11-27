@@ -2,9 +2,9 @@
    Uniform all-round borders only; zero one-sided accent borders. */
 .meeting-notes {
   display: grid;
-  gap: var(--space-12);
-  margin: var(--space-16) 0;
-  padding: var(--space-16);
+  gap: 10px;
+  margin: var(--space-12) 0;
+  padding: 14px var(--space-16);
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
@@ -82,9 +82,9 @@
   gap: var(--space-12) var(--space-16);
 }
 .meeting-notes-controls .primary-button {
-  min-height: 44px;
-  padding: 8px 18px;
-  font-size: 14px;
+  min-height: var(--control-h);
+  padding: 5px 14px;
+  font-size: 13.5px;
 }
 .meeting-notes-result,
 .meeting-notes-writing {
@@ -96,17 +96,17 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  min-height: 44px;
+  min-height: var(--control-h);
 }
 .meeting-notes-choice input {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
   accent-color: var(--ink);
   cursor: pointer;
 }
 .meeting-notes-choice label {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -116,9 +116,9 @@
   gap: var(--space-8);
 }
 .meeting-notes-actions .secondary-button {
-  min-height: 44px;
-  padding: 8px 16px;
-  font-size: 14px;
+  min-height: var(--control-h);
+  padding: 5px 12px;
+  font-size: 13px;
 }
 .meeting-notes-danger:not(:disabled) {
   border-color: var(--danger);
@@ -130,14 +130,14 @@
 .meeting-notes-writing {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding: var(--space-12) 14px;
+  padding: 10px 14px;
   background: var(--band);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
 }
 .meeting-notes-writing .secondary-button {
-  min-height: 44px;
-  padding: 8px 14px;
+  min-height: var(--control-h);
+  padding: 5px 12px;
   font-size: 13px;
 }
 .meeting-notes-result > label {
@@ -174,8 +174,8 @@
 .meeting-notes-sources summary {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  font-size: 14px;
+  min-height: var(--control-h);
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--ink);
   text-decoration: underline;
