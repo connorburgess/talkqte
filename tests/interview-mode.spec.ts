@@ -5,8 +5,12 @@ test('session type is keyboard accessible, survives navigation, and resets on a 
   page,
 }, testInfo) => {
   await page.goto('/');
+  await page.locator('.focus-disclosure > summary').click();
   const mode = page.getByRole('combobox', { name: 'Session type' });
   await expect(mode).toHaveValue('meeting');
+  await expect(page.locator('.focus-disclosure')).toContainText(
+    'Session type stays selected until you quit.',
+  );
   await mode.focus();
   await mode.selectOption('interview');
   await expect(mode).toBeFocused();
@@ -61,6 +65,7 @@ test('session type is keyboard accessible, survives navigation, and resets on a 
     path: testInfo.outputPath('interview-preparation-narrow.png'),
   });
   await page.reload();
+  await page.locator('.focus-disclosure > summary').click();
   await expect(mode).toHaveValue('meeting');
 });
 
@@ -79,6 +84,7 @@ test('a failed mode change preserves Meeting and presents a recoverable error', 
     });
   });
   await page.goto('/?keys=set&reject-session-mode');
+  await page.locator('.focus-disclosure > summary').click();
   const mode = page.getByRole('combobox', { name: 'Session type' });
   await mode.selectOption('interview');
   await expect(
@@ -94,6 +100,7 @@ test('Interview stays locked during a live session and becomes editable after St
   page,
 }, testInfo) => {
   await standIn(page, '/?live');
+  await page.locator('.focus-disclosure > summary').click();
   const mode = page.getByRole('combobox', { name: 'Session type' });
   await mode.selectOption('interview');
   await expect(mode).toHaveValue('interview');

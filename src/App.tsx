@@ -1753,7 +1753,7 @@ function Notebook() {
             {view === 'notebook' && sessionLive && (
               <>
                 <ChevronRight size={14} />
-                <span>Live session</span>
+                <span>{isEnded ? 'Ended session' : 'Live session'}</span>
               </>
             )}
           </div>
@@ -2137,12 +2137,6 @@ function Notebook() {
               </div>
             </section>
 
-            <SessionMode
-              mode={state.sessionMode}
-              locked={live || simulated || preparing || finishing}
-              busy={busy || startPending}
-              onChange={(mode) => bridge.command('set_session_mode', { mode })}
-            />
             <div className="ended-outcomes">
               <MeetingNotes
                 snapshot={state}
@@ -2666,6 +2660,8 @@ function Notebook() {
                     <summary id="meeting-focus-title">
                       This meeting{' '}
                       <span>
+                        {state.sessionMode === 'interview' && 'Interview · '}
+
                         {suggesting
                           ? 'Asking Granola…'
                           : suggestions !== null
@@ -2675,6 +2671,14 @@ function Notebook() {
                               : 'Add focus · optional'}
                       </span>
                     </summary>
+                    <SessionMode
+                      mode={state.sessionMode}
+                      locked={live || simulated || preparing || finishing}
+                      busy={busy || startPending}
+                      onChange={(mode) =>
+                        bridge.command('set_session_mode', { mode })
+                      }
+                    />
                     <div className="meeting-focus-heading">
                       <div>
                         <p id="meeting-focus-help" className="small muted">

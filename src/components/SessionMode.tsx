@@ -52,7 +52,7 @@ export function SessionMode({
           : 'Context and clarifications for the conversation.'}
         {locked
           ? ' Stop the session to change its type.'
-          : ' Kept until you quit.'}
+          : ' Session type stays selected until you quit.'}
       </p>
       {mode === 'interview' && !locked && (
         <details className="interview-preparation">

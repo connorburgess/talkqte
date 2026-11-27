@@ -1,6 +1,6 @@
 # Interview mode
 
-Choose **Session type → Interview** in the Notebook before starting a live session. It works with the standard own-key cue providers for human or AI-led interviews. Session type cannot change during capture or while stopping. It carries into the next prepared session until you quit; a fresh app launch defaults to Meeting. Development CLI and lab routes do not support changing session type.
+Open **This meeting** in the Notebook and choose **Session type → Interview** before starting a live session. It works with the standard own-key cue providers for human or AI-led interviews. Session type cannot change during capture or while stopping. It carries into the next prepared session until you quit; a fresh app launch defaults to Meeting. Development CLI and lab routes do not support changing session type.
 
 Prepare one real example: the situation, your contribution, a trade-off and the result. The cue policy asks for a brief nudge only when the supplied conversation clearly supports an unanswered part of an explicit request and the response is wrapping up or moving away. An unfinished answer or newly asked question alone should stay quiet. This is a model instruction, not a guarantee of semantic accuracy or useful timing.
 
