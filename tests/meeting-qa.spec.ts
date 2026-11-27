@@ -227,3 +227,32 @@ test('explicit dock launcher opens notebook scope only; a main navigation event 
     ),
   ).toBe(0);
 });
+
+test('answers follow only while the history reader stays at the end', async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() =>
+    window.qaTest.answer({
+      answer: 'The fictional greenhouse team compared two options. '.repeat(36),
+      insufficient: false,
+      citations: ['qa-1'],
+    }),
+  );
+  await input(page).fill('Explain the options.');
+  await send(page).click();
+  const history = page.locator('.ask-history');
+  await expect
+    .poll(() => history.evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(0);
+  await page.evaluate(() => window.qaTest.hold());
+  await input(page).fill('What remains uncertain?');
+  await send(page).click();
+  await history.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await page.evaluate(() => window.qaTest.release());
+  await expect(page.locator('.ask-entry')).toHaveCount(2);
+  expect(await history.evaluate((el) => el.scrollTop)).toBeLessThan(2);
+});

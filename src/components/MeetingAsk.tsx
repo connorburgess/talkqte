@@ -19,6 +19,12 @@ export function MeetingAsk({
   const generation = useRef(0);
   const active = useRef<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const history = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    if (follow.current && history.current)
+      history.current.scrollTop = history.current.scrollHeight;
+  }, [entries]);
   const refresh = useCallback(async () => {
     const turn = generation.current;
     setPreparing(true);
@@ -102,7 +108,17 @@ export function MeetingAsk({
         Answers use a limited excerpt of this session, not the whole meeting.
         Model answers can be wrong; check the cited lines.
       </p>
-      <div className="ask-history" aria-label="Question and answer history">
+      <div
+        className="ask-history"
+        aria-label="Question and answer history"
+        ref={history}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          follow.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+            24;
+        }}
+      >
         {entries.length === 0 && (
           <p className="muted">
             Ask for a recap, an explanation or what the recent discussion
@@ -239,7 +255,12 @@ export function MeetingAsk({
         capture and automatic cues continue independently.
       </p>
       <div role="status" aria-live="polite">
-        {busy ? 'Waiting for a model answer. You can cancel.' : error}
+        {busy
+          ? 'Waiting for a model answer. You can cancel.'
+          : error ||
+            (entries.length
+              ? 'Answer ready. Check the model answer and its sources.'
+              : '')}
       </div>
     </section>
   );
