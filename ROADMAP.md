@@ -203,6 +203,11 @@ Capability review, 2026-11-08:
 
 Provider access and capabilities can change; recheck them when implementing each connection.
 
+## Explicit current-session questions
+
+- [x] Build bounded transcript-only Ask with explicit per-question Send, provider/scope disclosure, source links, cancellation and in-memory session history. Offline lifecycle and fictional browser checks are acceptance for these boundaries only; see [live questions](docs/live-questions.md).
+- [ ] Validate live grounded synthesis and honest insufficient evidence, native dock focus/keyboard/assistive access, measured cost/latency and whole-session retrieval before claiming dependable meeting Q&A. No saved-meeting or imported-note Q&A in this slice.
+
 ## Other later candidates
 
 - Broader archives, local search, and summaries only after the prompt experience is useful.

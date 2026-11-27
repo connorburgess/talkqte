@@ -96,13 +96,14 @@ for (const size of ['standard', 'large'] as const)
       expect((await status.boundingBox())!.width).toBeLessThanOrEqual(1);
       await expect(bar).toHaveText('Mic on · not transcribing yet');
 
-      // Three controls, each an icon with a name and the same tooltip.
+      // Four controls, including the explicit notebook launcher.
       const controls = bar.getByRole('button');
-      await expect(controls).toHaveCount(3);
+      await expect(controls).toHaveCount(4);
       for (const [name, title] of [
         ['Pause cues', 'Pause cues; microphone and transcript continue'],
         ['Stop live session', 'Stop live session'],
         ['Hide companion', 'Hide companion'],
+        ['Transcript and Ask', 'Open transcript and Ask in notebook'],
       ]) {
         const control = bar.getByRole('button', { name, exact: true });
         await expect(control).toBeInViewport({ ratio: 1 });
@@ -349,7 +350,7 @@ test('the dock offers Turn off processing while the model is on and Listening ·
     model: 'on',
   });
   await page.setViewportSize({ width: 320, height: 76 });
-  await expect(bar.getByRole('button')).toHaveCount(4);
+  await expect(bar.getByRole('button')).toHaveCount(5);
   const turnOff = bar.getByRole('button', {
     name: 'Turn off processing',
     exact: true,

@@ -61,7 +61,7 @@ test('companion stays compact between cues and returns to its bar after Dismiss'
   await expect(
     page.getByRole('button', { name: 'Pause cues', exact: true }),
   ).toHaveAttribute('title', 'Pause cues; microphone and transcript continue');
-  await expect(page.locator('header').getByRole('button')).toHaveCount(3);
+  await expect(page.locator('header').getByRole('button')).toHaveCount(4);
   for (const button of await page.getByRole('button').all()) {
     const bounds = await button.boundingBox();
     expect(bounds!.width).toBeGreaterThanOrEqual(44);

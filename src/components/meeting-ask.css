@@ -1,0 +1,99 @@
+.meeting-ask {
+  display: grid;
+  gap: var(--space-16);
+  padding: var(--space-16) 0;
+  min-width: 0;
+}
+.meeting-ask h2 {
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 650;
+}
+.meeting-ask h3 {
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.meeting-ask p {
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ask-history {
+  display: grid;
+  gap: var(--space-24);
+  max-height: 420px;
+  overflow: auto;
+  overflow-anchor: none;
+  scrollbar-color: var(--border) var(--band);
+}
+.ask-entry {
+  display: grid;
+  gap: var(--space-8);
+}
+.ask-answer-label {
+  color: var(--muted);
+  font-size: 12px !important;
+}
+.ask-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ask-citations,
+.ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  align-items: center;
+}
+.meeting-ask form {
+  display: grid;
+  gap: var(--space-12);
+}
+.meeting-ask textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-12);
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  caret-color: var(--ink);
+}
+.meeting-ask textarea::placeholder {
+  color: var(--muted);
+}
+.ask-scope {
+  display: grid;
+  gap: var(--space-8);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ask-scope summary {
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.meeting-ask :focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.transcript-segment:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .ask-history {
+    max-height: 340px;
+  }
+  .ask-actions button {
+    min-height: 44px;
+  }
+}
+.ask-citations .text-button,
+.ask-actions .text-button {
+  min-height: 44px;
+}

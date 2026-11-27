@@ -5,6 +5,7 @@ import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
 import * as providerKeysFixture from './native-provider-keys';
 import * as meetingNotesFixture from './native-meeting-notes';
+import * as meetingQaFixture from './native-meeting-qa';
 import * as historyFixture from './native-meeting-history';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
@@ -579,6 +580,8 @@ mockIPC(
       return permissionFixture.command(command, args);
     if (providerKeysFixture.commands.includes(command))
       return providerKeysFixture.command(command, args);
+    if (meetingQaFixture.commands.includes(command))
+      return meetingQaFixture.command(command, args, session);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
     if (historyFixture.commands.includes(command)) {

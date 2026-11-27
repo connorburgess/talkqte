@@ -438,6 +438,7 @@ impl Engine {
     /// Disable evaluated processing, release grant/cue copies and cancel work.
     /// Transcript capture and ordinary notebook contents are not stopped here.
     pub fn revoke_processing(&mut self) {
+        self.meeting_qa.cancel();
         if self.evaluation.is_none() {
             return;
         }

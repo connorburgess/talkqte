@@ -119,6 +119,11 @@
     "allow-update-status",
     "allow-set-check-for-updates-at-launch",
     "allow-check-for-updates",
-    "allow-download-and-install-update"
+    "allow-download-and-install-update",
+    "allow-open-meeting-panel",
+    "allow-question-scope",
+    "allow-ask-question",
+    "allow-cancel-question",
+    "allow-question-history"
   ]
 }

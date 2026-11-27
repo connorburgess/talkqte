@@ -88,6 +88,8 @@ pub mod meeting_history;
 mod meeting_history_commands;
 pub mod meeting_notes;
 mod meeting_notes_commands;
+mod meeting_qa;
+mod meeting_qa_commands;
 mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
@@ -2451,6 +2453,11 @@ pub fn run() {
             set_keep_meeting,
             resolve_echo_line,
             rename_speaker,
+            meeting_qa_commands::question_scope,
+            meeting_qa_commands::ask_question,
+            meeting_qa_commands::cancel_question,
+            meeting_qa_commands::question_history,
+            meeting_qa_commands::open_meeting_panel,
             meeting_notes_commands::meeting_notes_plan,
             meeting_notes_commands::write_meeting_notes,
             meeting_notes_commands::cancel_meeting_notes,
