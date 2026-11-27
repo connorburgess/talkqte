@@ -317,9 +317,30 @@
   max-width: none;
 }
 @media (max-width: 520px) {
+  .processing-panel.is-unified.is-unified-inline {
+    gap: 4px 8px;
+    padding-top: 2px;
+  }
+  .processing-panel.is-unified.is-unified-inline .processing-heading {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
   .processing-panel.is-unified.is-unified-inline .processing-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
     margin-left: 0;
     width: 100%;
+    gap: 6px;
+  }
+  .processing-panel.is-unified.is-unified-inline .processing-actions button {
+    flex: 1 1 136px;
+    min-height: 44px;
+  }
+  .processing-panel.is-unified.is-unified-inline > .processing-muted {
+    font-size: 11.5px;
+    line-height: 1.35;
   }
 }
 .notebook-processing .processing-panel.is-compact-live {

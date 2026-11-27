@@ -209,17 +209,11 @@
   flex-shrink: 0;
   align-items: center;
   gap: 4px 6px;
-  opacity: 0.52;
-  transition: opacity 120ms ease-out;
 }
 @media (max-width: 640px) {
   .history-row-tools {
     flex-wrap: wrap;
   }
-}
-.history-row:hover .history-row-tools,
-.history-row:focus-within .history-row-tools {
-  opacity: 1;
 }
 .history-row-folder,
 .history-folder-select {
@@ -229,15 +223,21 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--paper);
-  color: var(--ink);
+  color: var(--muted);
   font: inherit;
   font-size: 12px;
+}
+.history-row-folder:hover:not(:disabled),
+.history-row-folder:focus-visible {
+  border-color: var(--border);
+  color: var(--ink);
 }
 .history-folder-select {
   height: var(--control-h);
   min-height: var(--control-h);
   padding: 5px 10px;
   border-color: var(--border);
+  color: var(--ink);
   font-size: 13px;
 }
 .history-row-folder {
@@ -371,7 +371,8 @@
   text-decoration: none;
   align-self: center;
 }
-.text-button.history-archive-button:hover:not(:disabled) {
+.text-button.history-archive-button:hover:not(:disabled),
+.text-button.history-archive-button:focus-visible {
   color: var(--ink);
   text-decoration: underline;
 }
@@ -531,21 +532,25 @@
   }
 }
 
-/* Organization uses compact desktop icon controls that expand on touch/narrow viewports. */
+/* Organization uses compact desktop icon controls at full readable contrast
+   that expand to 44px on touch/narrow viewports. */
 .history-order-controls {
   display: flex;
   align-items: center;
   gap: 2px;
-  opacity: 0.72;
-  transition: opacity 120ms ease-out;
-}
-.history-row:hover .history-order-controls,
-.history-row:focus-within .history-order-controls {
-  opacity: 1;
 }
 .history-order-controls .icon-button {
   min-width: 28px;
   min-height: 28px;
+  color: var(--muted);
+}
+.history-order-controls .icon-button:hover:not(:disabled),
+.history-order-controls .icon-button:focus-visible {
+  color: var(--ink);
+  background: var(--hover);
+}
+.history-order-controls .icon-button:disabled {
+  opacity: 0.35;
 }
 .history-drag-handle {
   cursor: grab;

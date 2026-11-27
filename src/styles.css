@@ -687,10 +687,21 @@ svg {
     width: 100%;
   }
   .microphone-unified-bar {
-    justify-content: flex-start;
+    justify-content: space-between;
+    width: 100%;
   }
   .microphone-more.is-unified-details > summary {
     text-align: left;
+  }
+}
+@media (max-width: 520px) {
+  .live-header-shell {
+    padding: 8px 10px;
+    gap: 6px;
+    margin-top: var(--space-12);
+  }
+  .live-header-primary {
+    gap: 6px 10px;
   }
 }
 .session-strip.is-ended {

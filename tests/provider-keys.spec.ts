@@ -13,7 +13,7 @@ const GEMINI = 'AIzaFictionalGeminiKey0123456789abcdefXYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
 const ELEVENLABS = 'sk_fictional0123456789abcdef0123456789abcdef01234567';
 
-async function openNative(page: Page) {
+async function openNative(page: Page, path = '/') {
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
     const response = await route.fetch();
@@ -25,7 +25,7 @@ async function openNative(page: Page) {
       ),
     });
   });
-  await page.goto('/');
+  await page.goto(path);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
 }
 
@@ -521,4 +521,71 @@ test('browser preview fake: narrow 390px viewport fits all five providers and cu
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
   expect(overflow).toBe(false);
+});
+
+test('Settings category keyboard nav, hash deep link, and compact vs rejected/unreadable key auto-expand', async ({
+  page,
+}) => {
+  // Healthy saved keys stay compact by default.
+  await openNative(page, '/?keys=set');
+  const deepgram = row(page, 'Deepgram');
+  const anthropic = row(page, 'Anthropic');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(anthropic).toContainText('Saved · not checked yet');
+  await expect(
+    deepgram.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+  await expect(
+    anthropic.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+
+  // A rejected provider key auto-expands on reopen while healthy saved keys remain compact.
+  await anthropic
+    .getByRole('button', { name: 'Configure Anthropic key' })
+    .click();
+  await anthropic.getByRole('button', { name: 'Test key' }).click();
+  await expect(anthropic).toContainText(
+    'Rejected by Anthropic. Replace it with a new key.',
+  );
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toBeVisible();
+  await expect(
+    deepgram.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+
+  // Settings category keyboard navigation updates aria-current and visible panel.
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  const meetingsLink = nav.getByRole('link', {
+    name: 'Meetings & storage',
+    exact: true,
+  });
+  const providersLink = nav.getByRole('link', {
+    name: 'Providers & keys',
+    exact: true,
+  });
+  await expect(providersLink).toHaveAttribute('aria-current', 'page');
+  await meetingsLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(meetingsLink).toHaveAttribute('aria-current', 'page');
+  await expect(providersLink).not.toHaveAttribute('aria-current', 'page');
+  await expect(
+    page.getByRole('heading', { name: 'Meetings', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Your API keys', exact: true }),
+  ).toBeHidden();
+
+  // Hash deep-link opens the target Settings category directly.
+  await page.goto('/?keys=unreadable-one#settings-meetings');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(meetingsLink).toHaveAttribute('aria-current', 'page');
+  await expect(
+    page.getByRole('heading', { name: 'Meetings', exact: true }),
+  ).toBeVisible();
+
+  // Unreadable key auto-expands when switching back to Providers & keys.
+  await providersLink.click();
+  await expect(deepgram).toContainText('Could not be read from the Keychain');
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toBeVisible();
 });
