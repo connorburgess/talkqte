@@ -112,18 +112,15 @@ test('a delayed Dismiss acknowledgement still ends with focus on a companion con
 test('Home and End move between the notebook tabs', async ({ page }) => {
   await page.goto('/');
   const notes = page.getByRole('tab', { name: 'Notes' });
+  const ask = page.getByRole('tab', { name: 'Ask', exact: true });
   const transcript = page.getByRole('tab', { name: /Transcript/ });
   await notes.focus();
   await page.keyboard.press('End');
-  await expect(transcript).toBeFocused();
-  await expect(transcript).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tabpanel')).toHaveAttribute(
-    'id',
-    'transcript-panel',
-  );
-  // End on the last tab and Home on the first stay put.
+  await expect(ask).toBeFocused();
+  await expect(ask).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel')).toHaveAttribute('id', 'ask-panel');
   await page.keyboard.press('End');
-  await expect(transcript).toBeFocused();
+  await expect(ask).toBeFocused();
   await page.keyboard.press('Home');
   await expect(notes).toBeFocused();
   await expect(notes).toHaveAttribute('aria-selected', 'true');

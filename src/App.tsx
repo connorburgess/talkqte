@@ -45,6 +45,8 @@ import { MeetingHistory } from './components/MeetingHistory';
 import { SpeakerChip } from './components/SpeakerChip';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
+import { MeetingAsk } from './components/MeetingAsk';
+import { openMeetingPanel } from './lib/meetingQa';
 import type { HistoryStatus } from './lib/meetingHistory';
 import {
   PanelDivider,
@@ -460,6 +462,18 @@ function FloatingQuestion() {
                   <Square size={14} aria-hidden="true" />
                 </button>
               ) : null}
+              {state?.live && (
+                <button
+                  type="button"
+                  className="companion-control"
+                  aria-label="Transcript and Ask"
+                  title="Open transcript and Ask in notebook"
+                  disabled={busy}
+                  onClick={() => void run(() => openMeetingPanel('transcript'))}
+                >
+                  <BookOpen size={16} aria-hidden="true" />
+                </button>
+              )}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -783,6 +797,12 @@ function Notebook() {
     sub('meeting-history:changed', () => {
       setHistoryRevision((count) => count + 1);
     });
+    sub<string>('meeting:open-panel', (panel) => {
+      if (panel !== 'ask' && panel !== 'transcript') return;
+      setView('notebook');
+      setTab(panel);
+      setPanelFocus({ panel, seq: Date.now() });
+    });
     sub('end-prompt:write-notes', () => {
       setView('notebook');
       setNotesPlanTrigger((count) => count + 1);
@@ -818,7 +838,28 @@ function Notebook() {
     focusCancel.current = false;
     if (document.activeElement === document.body) cancelButton.current?.focus();
   }, [preparing, capture.state?.startup]);
-  const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
+  const [panelFocus, setPanelFocus] = useState<{
+    panel: 'ask' | 'transcript';
+    seq: number;
+  } | null>(null);
+  const [citation, setCitation] = useState<string | null>(null);
+  useEffect(() => {
+    if (!panelFocus && !citation) return;
+    const timer = setTimeout(() => {
+      const target = document.getElementById(
+        citation
+          ? `transcript-line-${citation}`
+          : panelFocus?.panel === 'ask'
+            ? 'ask-question'
+            : 'transcript-tab',
+      );
+      target?.focus();
+      target?.scrollIntoView({ block: 'nearest' });
+      setCitation(null);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [panelFocus, citation]);
+  const [tab, setTab] = useState<'notes' | 'transcript' | 'ask'>('notes');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
   const [nameError, setNameError] = useState('');
@@ -1547,7 +1588,10 @@ function Notebook() {
         (document.activeElement === actionFocus ||
           document.activeElement === document.body)
       ) {
-        (notesEditor.current ?? transcriptTab.current)?.focus();
+        (tab === 'ask'
+          ? document.getElementById('ask-question')
+          : (notesEditor.current ?? transcriptTab.current)
+        )?.focus();
       }
     });
   };
@@ -2071,16 +2115,17 @@ function Notebook() {
                   role="tablist"
                   aria-label="Meeting content"
                   onKeyDown={(e) => {
+                    const tabs = ['notes', 'transcript', 'ask'] as const;
                     const next =
                       e.key === 'Home'
-                        ? 'notes'
+                        ? tabs[0]
                         : e.key === 'End'
-                          ? 'transcript'
-                          : e.key === 'ArrowRight' || e.key === 'ArrowLeft'
-                            ? tab === 'notes'
-                              ? 'transcript'
-                              : 'notes'
-                            : null;
+                          ? tabs[2]
+                          : e.key === 'ArrowRight'
+                            ? tabs[(tabs.indexOf(tab) + 1) % 3]
+                            : e.key === 'ArrowLeft'
+                              ? tabs[(tabs.indexOf(tab) + 2) % 3]
+                              : null;
                     if (!next) return;
                     e.preventDefault();
                     setTab(next);
@@ -2115,8 +2160,29 @@ function Notebook() {
                       </span>
                     </span>
                   </button>
+                  <button
+                    role="tab"
+                    id="ask-tab"
+                    aria-controls="ask-panel"
+                    aria-selected={tab === 'ask'}
+                    tabIndex={tab === 'ask' ? 0 : -1}
+                    onClick={() => setTab('ask')}
+                  >
+                    <BookOpen size={16} aria-hidden="true" />
+                    <span className="tab-label">Ask</span>
+                  </button>
                 </div>
-                {tab === 'notes' ? (
+                {tab === 'ask' ? (
+                  <div id="ask-panel" role="tabpanel" aria-labelledby="ask-tab">
+                    <MeetingAsk
+                      snapshot={state}
+                      onCitation={(id) => {
+                        setTab('transcript');
+                        setCitation(id);
+                      }}
+                    />
+                  </div>
+                ) : tab === 'notes' ? (
                   <div
                     id="notes-panel"
                     role="tabpanel"
@@ -2217,6 +2283,26 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
+                    {state.transcript.length > 0 && (
+                      <button
+                        type="button"
+                        className="button subtle"
+                        onClick={() => {
+                          const latest = state.transcript.at(-1);
+                          const element =
+                            latest &&
+                            document.getElementById(
+                              `transcript-line-${latest.id}`,
+                            );
+                          if (element) {
+                            element.focus();
+                            element.scrollIntoView({ block: 'nearest' });
+                          }
+                        }}
+                      >
+                        Jump to latest line
+                      </button>
+                    )}
                     {(sessionLive || simulated) && (
                       <p className="muted small">
                         {sessionLive
@@ -2262,6 +2348,8 @@ function Notebook() {
                               <article
                                 className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
                                 key={segment.id}
+                                id={`transcript-line-${segment.id}`}
+                                tabIndex={-1}
                               >
                                 <div className="transcript-segment-head">
                                   {segment.speakerId !== undefined ? (

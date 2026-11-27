@@ -104,6 +104,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-review-processing-scope",
         "allow-approve-processing-scope",
         "allow-processing-snapshot",
+        "allow-question-scope",
+        "allow-ask-question",
+        "allow-cancel-question",
+        "allow-question-history",
         // The call-starting prompt's settings are the notebook's alone.
         "allow-call-prompt-settings",
         "allow-set-call-prompt",
@@ -195,6 +199,8 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-respond-to-calendar-prompt",
         "allow-respond-to-call-end-prompt",
         "allow-respond-to-end-prompt",
+        // Only opens/focuses one of two notebook panels; returns no transcript.
+        "allow-open-meeting-panel",
     ]);
     assert!(
         cue.is_subset(&companion),
