@@ -1259,3 +1259,96 @@ fn a_failed_directory_removal_discards_the_prepared_delete_index() {
     assert_eq!(fs::read_dir(folder.root()).unwrap().count(), 2);
     assert_eq!(fs::read(directory).unwrap(), b"fictional damaged directory");
 }
+
+#[test]
+fn deleting_after_a_failed_index_write_preserves_manual_order_and_hidden_meetings() {
+    let folder = Folder::new("ordered-delete-retry");
+    let store = folder.store();
+    store.create_folder("Orchard").unwrap();
+    store.create_folder("Empty garden").unwrap();
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let title = if n == 2 || n == 4 {
+            format!("Hidden fictional {n}")
+        } else {
+            format!("Visible fictional {n}")
+        };
+        let saved = store
+            .keep(&title, content(n * 1_000, "Fictional seed plan."))
+            .unwrap();
+        store.set_folder(&saved.id, Some("Orchard")).unwrap();
+        ids.push(saved.id);
+    }
+    store.set_archived(&ids[1], true).unwrap();
+    store
+        .position(&ids[4], Some("Orchard"), Some(&ids[2]), Placement::Before)
+        .unwrap();
+    let original = folder.store().list(None);
+    let listed_ids = |listing: Listing| {
+        listing
+            .meetings
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[2].clone(),
+        ids[3].clone(),
+    ];
+    assert_eq!(listed_ids(original.clone()), expected);
+    assert_eq!(
+        listed_ids(store.list(Some("Visible"))),
+        vec![ids[0].clone(), ids[4].clone(), ids[2].clone()]
+    );
+    let meetings_before = expected
+        .iter()
+        .map(|id| store.open_meeting(id).unwrap())
+        .collect::<Vec<_>>();
+    let committed_index = fs::read(folder.root().join(INDEX)).unwrap();
+    let blocked = folder
+        .root()
+        .join(format!(".{INDEX}.{}.tmp", std::process::id()));
+    fs::create_dir(&blocked).unwrap();
+
+    assert_eq!(store.delete(&ids[2]), Err(Error::Write));
+    assert_eq!(
+        fs::read(folder.root().join(INDEX)).unwrap(),
+        committed_index
+    );
+    let reopened = folder.store();
+    assert_eq!(reopened.list(None), original);
+    for meeting in &meetings_before {
+        assert_eq!(reopened.open_meeting(&meeting.id).unwrap(), *meeting);
+    }
+
+    fs::remove_dir(blocked).unwrap();
+    reopened.delete(&ids[2]).unwrap();
+    let final_store = folder.store();
+    let survivors = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[3].clone(),
+    ];
+    assert_eq!(listed_ids(final_store.list(None)), survivors);
+    assert_eq!(final_store.list(None).folders, original.folders);
+    assert_eq!(final_store.list(None).unreadable, 0);
+    assert_eq!(
+        listed_ids(final_store.list(Some("Visible"))),
+        vec![ids[0].clone(), ids[4].clone()]
+    );
+    let index: Value =
+        serde_json::from_slice(&fs::read(folder.root().join(INDEX)).unwrap()).unwrap();
+    assert_eq!(index["order"], serde_json::json!(survivors));
+    for meeting in meetings_before
+        .iter()
+        .filter(|meeting| meeting.id != ids[2])
+    {
+        assert_eq!(final_store.open_meeting(&meeting.id).unwrap(), *meeting);
+    }
+    assert!(!folder.root().join(&ids[2]).exists());
+    assert_eq!(final_store.open_meeting(&ids[2]), Err(Error::Missing));
+}
