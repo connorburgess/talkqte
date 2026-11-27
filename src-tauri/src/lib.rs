@@ -639,6 +639,17 @@ fn set_user_name(
     )
 }
 #[tauri::command]
+fn set_session_mode(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    mode: cue_evaluator::SessionMode,
+) -> Result<(), String> {
+    if settings::lab_run() || cfg!(feature = "claude-cli") {
+        return Err("Session types require the standard own-key cue provider.".into());
+    }
+    change(&app, &state, |e| e.set_session_mode(mode))
+}
+#[tauri::command]
 async fn set_focus(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -2449,6 +2460,7 @@ pub fn run() {
             set_sensitivity,
             set_user_name,
             set_focus,
+            set_session_mode,
             set_overlay,
             export_preview,
             export_markdown,

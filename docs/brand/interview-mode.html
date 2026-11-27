@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Interview mode · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/session-mode.css" />
+    <style>
+      body {
+        padding: var(--space-16);
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: var(--space-32);
+      }
+      article {
+        min-width: 0;
+      }
+      h2 {
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Session type · built states</h1>
+    <p>
+      Fictional UI specimens. These demonstrate controls, not observed model
+      usefulness. Keyboard focus and hover use shared app styles; preparation
+      can collapse.
+    </p>
+    <main>
+      <article>
+        <h2>Meeting · ready</h2>
+        <div class="session-mode">
+          <div class="session-mode-choice">
+            <label for="mode-0">Session type</label
+            ><select id="mode-0" aria-describedby="help-0">
+              <option value="meeting" selected>Meeting</option>
+              <option value="interview">Interview</option>
+            </select>
+          </div>
+          <p id="help-0" class="small muted">
+            Context and clarifications for the conversation. Kept until you
+            quit.
+          </p>
+        </div>
+      </article>
+      <article>
+        <h2>Interview · preparation</h2>
+        <div class="session-mode">
+          <div class="session-mode-choice">
+            <label for="mode-1">Session type</label
+            ><select id="mode-1" aria-describedby="help-1">
+              <option value="meeting">Meeting</option>
+              <option value="interview" selected>Interview</option>
+            </select>
+          </div>
+          <p id="help-1" class="small muted">
+            Brief, source-backed nudges about examples, reasoning and outcomes.
+            Use your own experience. Kept until you quit.
+          </p>
+          <details class="interview-preparation" open>
+            <summary>Prepare for your interview</summary>
+            <p class="small muted">
+              Have one concrete example ready: the situation, your contribution,
+              the trade-off, and the result. Use the same approach for a human
+              or AI interviewer.
+            </p>
+            <p class="small muted">
+              TalkQTE can miss context or offer an unhelpful nudge. Keep
+              listening, and use Pause cues whenever you want. Selecting
+              Interview does not add or share any past meetings.
+            </p>
+          </details>
+        </div>
+      </article>
+      <article>
+        <h2>Interview · capturing</h2>
+        <div class="session-mode">
+          <div class="session-mode-choice">
+            <label for="mode-2">Session type</label
+            ><select id="mode-2" aria-describedby="help-2" disabled>
+              <option value="meeting">Meeting</option>
+              <option value="interview" selected>Interview</option>
+            </select>
+          </div>
+          <p id="help-2" class="small muted">
+            Brief, source-backed nudges about examples, reasoning and outcomes.
+            Use your own experience. Stop the session to change its type.
+          </p>
+        </div>
+      </article>
+      <article>
+        <h2>Updating · pending</h2>
+        <div class="session-mode">
+          <div class="session-mode-choice">
+            <label for="mode-3">Session type</label
+            ><select id="mode-3" aria-describedby="help-3" disabled>
+              <option value="meeting" selected>Meeting</option>
+              <option value="interview">Interview</option></select
+            ><span role="status" class="small muted">Updating…</span>
+          </div>
+          <p id="help-3" class="small muted">
+            Context and clarifications for the conversation. Kept until you
+            quit.
+          </p>
+        </div>
+      </article>
+      <article>
+        <h2>Rejected · retry available</h2>
+        <div class="session-mode">
+          <div class="session-mode-choice">
+            <label for="mode-4">Session type</label
+            ><select id="mode-4" aria-describedby="help-4">
+              <option value="meeting" selected>Meeting</option>
+              <option value="interview">Interview</option>
+            </select>
+          </div>
+          <p id="help-4" class="small muted">
+            Context and clarifications for the conversation. Kept until you
+            quit.
+          </p>
+          <p role="alert" class="inline-error">
+            Session type could not be changed. Try again.
+          </p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

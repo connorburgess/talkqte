@@ -84,6 +84,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-update-notes",
         "allow-set-user-name",
         "allow-set-focus",
+        "allow-set-session-mode",
         "allow-start-microphone",
         "allow-note-dictation-snapshot",
         "allow-start-note-dictation",

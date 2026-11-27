@@ -1,0 +1,44 @@
+.session-mode {
+  margin-block: var(--space-16);
+}
+.session-mode-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+.session-mode-choice label {
+  font-weight: 600;
+}
+.session-mode-choice select {
+  min-height: 44px;
+  height: 44px;
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: var(--space-8) 28px var(--space-8) var(--space-12);
+  font-size: 15px;
+}
+.session-mode > p {
+  margin-block: var(--space-8) 0;
+  max-width: 68ch;
+}
+.interview-preparation {
+  margin-block-start: var(--space-12);
+  max-width: 68ch;
+}
+.interview-preparation summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: list-item;
+  align-content: center;
+}
+.interview-preparation p {
+  margin-block: var(--space-8);
+}
+
+.interview-preparation summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}

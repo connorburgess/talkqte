@@ -50,6 +50,7 @@ import { MeetingNotes } from './components/MeetingNotes';
 import { MeetingAsk } from './components/MeetingAsk';
 import { BuildVersion } from './components/BuildVersion';
 import { openMeetingPanel } from './lib/meetingQa';
+import { SessionMode } from './components/SessionMode';
 import type { HistoryStatus } from './lib/meetingHistory';
 import {
   PanelDivider,
@@ -2136,6 +2137,12 @@ function Notebook() {
               </div>
             </section>
 
+            <SessionMode
+              mode={state.sessionMode}
+              locked={live || simulated || preparing || finishing}
+              busy={busy || startPending}
+              onChange={(mode) => bridge.command('set_session_mode', { mode })}
+            />
             <div className="ended-outcomes">
               <MeetingNotes
                 snapshot={state}
