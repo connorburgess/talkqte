@@ -1416,6 +1416,7 @@ mod lab_tests;
 
 #[cfg(test)]
 mod tests {
+    mod boundary_tests;
     mod history_tests;
     mod usefulness_tests;
     use super::*;

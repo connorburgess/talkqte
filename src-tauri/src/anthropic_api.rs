@@ -560,6 +560,11 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         match reply.status {
             200 => {}
             401 | 403 => {
+                // Retired work cannot mark the key rejected for a resumed
+                // or replacement session.
+                if cancel.is_withdrawn() {
+                    return Err(Failure::Cancelled);
+                }
                 (self.on_rejected)();
                 return Err(Failure::SignIn);
             }
