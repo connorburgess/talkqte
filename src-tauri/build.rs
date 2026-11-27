@@ -1,3 +1,5 @@
+mod build_metadata;
+
 /// The application-audio command exists, and is allowed for the main window,
 /// only in a macOS build: ScreenCaptureKit is macOS's.
 fn with_development_commands(commands: &[&'static str]) -> &'static [&'static str] {
@@ -9,9 +11,11 @@ fn with_development_commands(commands: &[&'static str]) -> &'static [&'static st
 }
 
 fn main() {
+    build_metadata::emit();
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(with_development_commands(&[
             "snapshot",
+            "build_info",
             "processing_snapshot",
             "call_prompt_settings",
             "set_call_prompt",

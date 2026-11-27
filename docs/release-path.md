@@ -359,3 +359,51 @@ Gaps: 16 crates (`objc2` and its framework crates, `block2`, `dispatch2`, `dasp_
 3. Run the [clean-Mac checklist](#clean-mac-checklist) steps 5–6 and the session.
 4. Raise the version, make candidate B the same way, and run steps 7, 9 and 10 on the same Mac, keeping the data snapshot comparisons.
 5. Record the evidence here, measure the signed bundle and disk image for the [operating estimates](operating-estimates.md#follow-up), and only then review the roadmap item. End-to-end updater verification stays open until the minisign keypair and notarized candidates exist ([generating and configuring the minisign keypair](#generating-and-configuring-the-minisign-keypair)).
+
+## Build identity in development bundles
+
+The package version remains `0.1.0`; a new source build is not a new stable
+release. `build_info` reports the native crate's package version, full source
+commit (or `unknown`), dirty flag (or unknown), build profile and target. It is
+main-window-only and performs no runtime filesystem, credential or network
+inspection. The notebook's `BuildVersion` component is the insertion point for
+the footer; a browser preview explicitly says **Browser preview**, and an old
+native bundle without the command says **Build identity unavailable** rather
+than inventing a version. Expanding its keyboard-accessible disclosure shows
+the full identity. Integration into the notebook is a separate coordinated edit.
+
+`src-tauri/build_metadata.rs`, called by `build.rs`, collects these fields using
+Rust's standard library and Git; standalone Cargo needs no new Node prerequisite.
+The native version comes from `CARGO_PKG_VERSION`. Existing release preflight
+still checks agreement with the npm, lockfile and Tauri version entries; this
+change does not automatically rewrite those manifests. Git HEAD is preferred;
+an archive without Git can supply a validated full `TALKQTE_COMMIT`, otherwise
+source is unknown. Without Git the dirty flag is unknown. Paths, usernames,
+environment dumps and diff contents are never public build fields. Git metadata
+and tracked source files trigger Cargo rebuild checks, including worktree refs.
+
+A source date appears only when the builder explicitly supplies a valid
+`SOURCE_DATE_EPOCH`; no current wall clock is embedded automatically. This date
+is an input, not an installation timestamp. Commit/dirty/profile/target identifies
+the declared source configuration, not a unique executable or cryptographic
+attestation. In particular, two different dirty builds can share these fields.
+Keep executable SHA256 and an exact source/build receipt with any staged
+artifact; verify that hash again after installation before claiming what runs.
+No machine-specific receipt belongs in the public repository.
+
+A future release should use a coordinated SemVer prerelease such as
+`0.1.1-alpha.1` only after checking updater comparison, macOS bundle version
+mapping and Windows packaging. There is already a concrete compatibility gap:
+release preflight accepts a prerelease suffix, while `updates.rs::version`
+currently parses only numeric `MAJOR.MINOR.PATCH` and rejects that suffix. Do not offer `0.1.0-alpha.N` as an upgrade to an
+existing `0.1.0`: [SemVer](https://semver.org/#spec-item-11) orders that prerelease below the installed version.
+Commit/build metadata distinguishes source builds but does not create updater
+precedence. No version bump or update offer is introduced here.
+
+Next acceptance: integrate the component with all loading/preview/error/known/
+unknown/modified states in the shared specimen, run native unit/ACL checks on the
+reviewed head, then separately authorize a clean current-source bundle. Compare
+its disclosed identity and staged executable hash with the installed artifact,
+and capture the current UI. Existing screenshots or the old `0.1 alpha` footer
+cannot establish current-source installation. No restart, installation, signing
+or release acceptance follows from this metadata change alone.

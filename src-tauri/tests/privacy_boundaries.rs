@@ -78,6 +78,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     // What the notebook alone may do. Each must exist for the notebook, so a
     // renamed command cannot make this check pass by matching nothing.
     let notebook_only = set(&[
+        "allow-build-info",
         "allow-export-preview",
         "allow-export-markdown",
         "allow-update-notes",
