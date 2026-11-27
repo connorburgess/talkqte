@@ -71,6 +71,12 @@ test('Stop remains reachable in Settings while a note command is pending; acknow
   await open(page, '?live');
   await start(page).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settingsNav = page.getByRole('navigation', {
+    name: 'Settings sections',
+  });
+  await settingsNav
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   await page.evaluate(() => window.captureTest.holdName());
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Sam');
   await page.getByRole('textbox', { name: 'Name', exact: true }).press('Tab');
@@ -87,6 +93,9 @@ test('Stop remains reachable in Settings while a note command is pending; acknow
   await expect(stop(page)).toBeEnabled();
   expect(await page.evaluate(() => window.captureTest.targets)).toHaveLength(1);
   await page.evaluate(() => window.captureTest.finishStop());
+  await settingsNav
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
   await expect(stop(page)).toHaveCount(0);
   await page.evaluate(() => window.captureTest.releaseName());
@@ -180,12 +189,14 @@ test('narrow and desktop preparation controls fit, and cancellation does not tak
   await open(page);
   await start(page).click();
   await expect(cancel(page)).toBeEnabled();
+  const narrowBox = (await cancel(page).boundingBox())!;
+  expect(narrowBox.height).toBeGreaterThanOrEqual(44);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
   await page.setViewportSize({ width: 1320, height: 880 });
   const box = (await cancel(page).boundingBox())!;
-  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(32);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(1320);
   expect(
@@ -198,6 +209,10 @@ test('narrow and desktop preparation controls fit, and cancellation does not tak
   await expect(
     page.getByRole('button', { name: 'Settings', exact: true }),
   ).toBeFocused();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(
     mic(page).getByRole('button', { name: 'Start microphone', exact: true }),
   ).toBeEnabled();
@@ -246,6 +261,10 @@ test('independent microphone cleanup is not relabelled as a live session', async
 }) => {
   await open(page, '?live');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await page
     .getByRole('button', { name: 'Start microphone', exact: true })
     .click();

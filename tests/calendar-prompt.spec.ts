@@ -12,6 +12,10 @@ test('Settings → Calendar & call prompts is off by default and shows clear per
 }) => {
   await standIn(page, '/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const section = page.getByRole('region', {
     name: 'Calendar & call prompts',
   });
@@ -69,6 +73,10 @@ test('non-macOS platforms show Calendar prompts as not available yet', async ({
   ] as const) {
     await standIn(page, `/?platform=${os}&live`);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Settings sections' })
+      .getByRole('link', { name: 'Capture & prompts', exact: true })
+      .click();
     const section = page.getByRole('region', {
       name: 'Calendar & call prompts',
     });

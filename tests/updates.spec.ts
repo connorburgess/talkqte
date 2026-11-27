@@ -27,6 +27,10 @@ async function openUpdates(
   }, config);
   await standIn(page, path);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   return page.getByRole('region', { name: 'Updates' });
 }
 

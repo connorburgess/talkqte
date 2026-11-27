@@ -174,6 +174,7 @@ function conversationLabel(scope: ProcessingScope) {
 export function ProcessingControl({
   status,
   transcriptionProvider,
+  unified = false,
 }: {
   status?: {
     snapshot: ProcessingSnapshot | null;
@@ -181,6 +182,8 @@ export function ProcessingControl({
     refresh: () => Promise<ProcessingSnapshot>;
   };
   transcriptionProvider?: string;
+  /** Composed inside the unified Notebook live session header. */
+  unified?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState<ProcessingSnapshot | null>(null);
   const current = useRef<ProcessingSnapshot | null>(null);
@@ -482,11 +485,23 @@ export function ProcessingControl({
     !status.failed &&
     !showDevGroup &&
     !sourceOperation;
+  const unifiedQuiet =
+    unified &&
+    !!status &&
+    !editing &&
+    !review &&
+    !snapshot?.issue &&
+    !error &&
+    !status.failed &&
+    !showDevGroup &&
+    !sourceOperation &&
+    !canReview &&
+    (active || paused || (!snapshot?.processor && !!snapshot));
 
   return (
     <section
       ref={panel}
-      className={`processing-panel${compactLive ? ' is-compact-live' : ''}`}
+      className={`processing-panel${compactLive ? ' is-compact-live' : ''}${unified ? ' is-unified' : ''}${unifiedQuiet ? ' is-unified-inline' : ''}`}
       aria-labelledby="processing-title"
       onKeyDown={(event) => {
         if (event.key === 'Escape' && editing && busy !== 'approve') {

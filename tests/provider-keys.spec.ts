@@ -13,7 +13,7 @@ const GEMINI = 'AIzaFictionalGeminiKey0123456789abcdefXYZ';
 const DEEPGRAM = '0123456789abcdef0123456789abcdef01234567';
 const ELEVENLABS = 'sk_fictional0123456789abcdef0123456789abcdef01234567';
 
-async function openNative(page: Page) {
+async function openNative(page: Page, path = '/') {
   await page.route('**/*', async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
     const response = await route.fetch();
@@ -25,7 +25,7 @@ async function openNative(page: Page) {
       ),
     });
   });
-  await page.goto('/');
+  await page.goto(path);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
 }
 
@@ -44,6 +44,10 @@ test('browser preview fake: a new install shows both keys as not set, with what 
   await expect(keys).toContainText("kept in your Mac's Keychain");
   for (const name of ['Deepgram', 'ElevenLabs', 'Anthropic']) {
     await expect(row(page, name)).toContainText('Not set');
+    const toggle = row(page, name).getByRole('button', {
+      name: `Configure ${name} key`,
+    });
+    if (await toggle.isVisible()) await toggle.click();
     await expect(
       row(page, name).getByRole('button', { name: 'Test key' }),
     ).toBeDisabled();
@@ -327,6 +331,9 @@ test('native fixture: ElevenLabs key entry, test, removal, and Transcription pro
   await openNative(page);
   const elevenlabs = row(page, 'ElevenLabs');
   await expect(elevenlabs).toContainText('Not set');
+  await elevenlabs
+    .getByRole('button', { name: 'Configure ElevenLabs key' })
+    .click();
   await elevenlabs.getByLabel('ElevenLabs API key').fill('not-an-el-key');
   await elevenlabs.getByRole('button', { name: 'Save key' }).click();
   await expect(elevenlabs.getByRole('alert')).toContainText(
@@ -377,6 +384,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   const gemini = row(page, 'Gemini');
   await expect(openai).toContainText('Not set');
   await expect(gemini).toContainText('Not set');
+  await openai.getByRole('button', { name: 'Configure OpenAI key' }).click();
+  await gemini.getByRole('button', { name: 'Configure Gemini key' }).click();
 
   await openai.getByLabel('OpenAI API key').fill('sk-ant-not-openai-key');
   await openai.getByLabel('OpenAI API key').press('Enter');
@@ -429,6 +438,7 @@ test('native fixture: cue provider switching, custom model validation, and hones
   page,
 }) => {
   await openNative(page);
+  await page.getByText('Custom model ID & meeting notes model').click();
   const providerSelect = page.getByLabel('Cue & notes provider');
   const cueSelect = page.getByLabel('Cue model', { exact: true });
   const customCueInput = page.getByLabel('Custom cue model ID (optional)');
@@ -505,9 +515,77 @@ test('browser preview fake: narrow 390px viewport fits all five providers and cu
   }
   await expect(page.getByLabel('Transcription provider')).toBeVisible();
   await expect(page.getByLabel('Cue & notes provider')).toBeVisible();
+  await page.getByText('Custom model ID & meeting notes model').click();
   await expect(page.getByLabel('Custom cue model ID (optional)')).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
   expect(overflow).toBe(false);
+});
+
+test('Settings category keyboard nav, hash deep link, and compact vs rejected/unreadable key auto-expand', async ({
+  page,
+}) => {
+  // Healthy saved keys stay compact by default.
+  await openNative(page, '/?keys=set');
+  const deepgram = row(page, 'Deepgram');
+  const anthropic = row(page, 'Anthropic');
+  await expect(deepgram).toContainText('Saved · not checked yet');
+  await expect(anthropic).toContainText('Saved · not checked yet');
+  await expect(
+    deepgram.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+  await expect(
+    anthropic.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+
+  // A rejected provider key auto-expands on reopen while healthy saved keys remain compact.
+  await anthropic
+    .getByRole('button', { name: 'Configure Anthropic key' })
+    .click();
+  await anthropic.getByRole('button', { name: 'Test key' }).click();
+  await expect(anthropic).toContainText(
+    'Rejected by Anthropic. Replace it with a new key.',
+  );
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(anthropic.getByLabel('Replace Anthropic key')).toBeVisible();
+  await expect(
+    deepgram.getByRole('button', { name: 'Replace key' }),
+  ).toHaveCount(0);
+
+  // Settings category keyboard navigation updates aria-current and visible panel.
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  const meetingsLink = nav.getByRole('link', {
+    name: 'Meetings & storage',
+    exact: true,
+  });
+  const providersLink = nav.getByRole('link', {
+    name: 'Providers & keys',
+    exact: true,
+  });
+  await expect(providersLink).toHaveAttribute('aria-current', 'page');
+  await meetingsLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(meetingsLink).toHaveAttribute('aria-current', 'page');
+  await expect(providersLink).not.toHaveAttribute('aria-current', 'page');
+  await expect(
+    page.getByRole('heading', { name: 'Meetings', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Your API keys', exact: true }),
+  ).toBeHidden();
+
+  // Hash deep-link opens the target Settings category directly.
+  await page.goto('/?keys=unreadable-one#settings-meetings');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(meetingsLink).toHaveAttribute('aria-current', 'page');
+  await expect(
+    page.getByRole('heading', { name: 'Meetings', exact: true }),
+  ).toBeVisible();
+
+  // Unreadable key auto-expands when switching back to Providers & keys.
+  await providersLink.click();
+  await expect(deepgram).toContainText('Could not be read from the Keychain');
+  await expect(deepgram.getByLabel('Replace Deepgram key')).toBeVisible();
 });

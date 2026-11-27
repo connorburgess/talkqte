@@ -74,5 +74,17 @@
   --radius-dock: 18px;
   --radius-dock-card: 13px;
   --radius-dialog: 10px;
+  --control-h: 34px;
+  --control-h-lg: 38px;
+  --control-h-sm: 30px;
+  --icon-btn: 32px;
   color-scheme: light;
+}
+@media (pointer: coarse), (max-width: 520px) {
+  :root {
+    --control-h: 44px;
+    --control-h-lg: 44px;
+    --control-h-sm: 44px;
+    --icon-btn: 44px;
+  }
 }

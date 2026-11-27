@@ -42,6 +42,7 @@ export function MeetingAsk({
       if (turn === generation.current) setPreparing(false);
     }
   }, []);
+  const lineCount = snapshot.transcript.length;
   useEffect(() => {
     generation.current++;
     const turn = generation.current;
@@ -49,20 +50,29 @@ export function MeetingAsk({
     setQuestion('');
     setEntries([]);
     setScope(null);
+    setError('');
     void qa
       .questionHistory()
       .then((value) => {
         if (turn === generation.current) setEntries(value);
       })
       .catch(() => {});
-    void refresh();
     return () => {
       generation.current++;
       if (active.current)
         void qa.cancelQuestion(active.current).catch(() => {});
       active.current = null;
     };
-  }, [snapshot.session, snapshot.status, refresh]);
+  }, [snapshot.session, snapshot.status]);
+  const hasLines = lineCount > 0;
+  useEffect(() => {
+    if (!hasLines) {
+      setScope(null);
+      setPreparing(false);
+      return;
+    }
+    void refresh();
+  }, [hasLines, snapshot.session, snapshot.status, refresh]);
   async function send() {
     if (!scope || busy || !question.trim()) return;
     const turn = generation.current;
@@ -103,29 +113,43 @@ export function MeetingAsk({
   }
   const first = scope?.lines[0],
     last = scope?.lines.at(-1);
-  const lineCount = snapshot.transcript.length;
   const scopeCount = scope?.lines.length ?? 0;
-  const groundingSummary =
-    scope && scopeCount > 0
-      ? scope.omitted
-        ? `Recent excerpt: latest ${scopeCount} of ${lineCount} transcript lines (capped at 200 lines / 64 KiB; earlier lines excluded)`
-        : `Recent excerpt: ${scopeCount} ${scopeCount === 1 ? 'line' : 'lines'} in scope (capped at 200 lines / 64 KiB)`
-      : lineCount > 0
-        ? `Bounded recent excerpt (up to 200 lines / 64 KiB; ${lineCount} ${lineCount === 1 ? 'line' : 'lines'} in session)`
-        : 'No transcript lines yet — Ask sends only a bounded recent excerpt (up to 200 lines / 64 KiB) once lines arrive.';
+  const isLiveRunning = snapshot.live && snapshot.status === 'running';
+
+  if (lineCount === 0 && entries.length === 0) {
+    return (
+      <section className="meeting-ask is-empty" aria-labelledby="ask-heading">
+        <div className="ask-empty">
+          <h2 id="ask-heading">
+            {isLiveRunning
+              ? 'Waiting for transcript lines'
+              : 'Ask after the conversation starts'}
+          </h2>
+          <p className="muted">
+            Once transcript lines arrive, you can ask for a recap or check what
+            was just said. Opening Ask sends nothing.
+          </p>
+          {isLiveRunning && onViewTranscript && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={onViewTranscript}
+            >
+              View transcript
+            </button>
+          )}
+        </div>
+        <div role="status" aria-live="polite" className="visually-hidden">
+          {error}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="meeting-ask" aria-labelledby="ask-heading">
       <div className="ask-header">
-        <div>
-          <h2 id="ask-heading">Ask about recent discussion</h2>
-          <p className="muted">
-            Answers use a limited excerpt of this session, not the whole
-            meeting. Model answers can be wrong; check the cited lines.
-          </p>
-        </div>
-      </div>
-      <div className="ask-grounding">
-        <span>{groundingSummary}</span>
+        <h2 id="ask-heading">Ask about recent discussion</h2>
         {onViewTranscript && (
           <button
             type="button"
@@ -136,80 +160,83 @@ export function MeetingAsk({
           </button>
         )}
       </div>
-      <div
-        className="ask-history"
-        aria-label="Question and answer history"
-        ref={history}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          follow.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight <
-            24;
-        }}
-      >
-        {entries.length === 0 && (
-          <p className="muted">
-            Ask for a recap, an explanation or what the recent discussion
-            supports. Opening Ask sends nothing.
-          </p>
-        )}
-        {entries.map((entry, index) => (
-          <article className="ask-entry" key={`${entry.scope.ticket}-${index}`}>
-            <h3>{entry.question}</h3>
-            <p className="ask-answer-label">
-              Model answer
-              {entry.answer.insufficient ? ' · insufficient evidence' : ''}
-            </p>
-            <p className="ask-answer">{entry.answer.answer}</p>
-            <div
-              className="ask-citations"
-              role="group"
-              aria-label="Answer sources"
+      {entries.length > 0 && (
+        <div
+          className="ask-history"
+          aria-label="Question and answer history"
+          ref={history}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            follow.current =
+              element.scrollHeight - element.scrollTop - element.clientHeight <
+              24;
+          }}
+        >
+          {entries.map((entry, index) => (
+            <article
+              className="ask-entry"
+              key={`${entry.scope.ticket}-${index}`}
             >
-              {entry.answer.citations.map((id) => {
-                const line = entry.scope.lines.find((value) => value.id === id);
-                const available = snapshot.transcript.some(
-                  (value) => value.id === id,
-                );
-                return (
-                  line && (
-                    <button
-                      type="button"
-                      className="text-button"
-                      key={id}
-                      disabled={!available}
-                      title={
-                        available
-                          ? line.text
-                          : 'This line is no longer in the current transcript'
-                      }
-                      onClick={() => onCitation(id)}
-                    >
-                      Transcript {clockTime(line.atMs)}
-                      {!available && ' · unavailable'}
-                    </button>
-                  )
-                );
-              })}
-            </div>
-          </article>
-        ))}
-      </div>
+              <h3>{entry.question}</h3>
+              <p className="ask-answer-label">
+                Model answer
+                {entry.answer.insufficient ? ' · insufficient evidence' : ''}
+              </p>
+              <p className="ask-answer">{entry.answer.answer}</p>
+              <div
+                className="ask-citations"
+                role="group"
+                aria-label="Answer sources"
+              >
+                {entry.answer.citations.map((id) => {
+                  const line = entry.scope.lines.find(
+                    (value) => value.id === id,
+                  );
+                  const available = snapshot.transcript.some(
+                    (value) => value.id === id,
+                  );
+                  return (
+                    line && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        key={id}
+                        disabled={!available}
+                        title={
+                          available
+                            ? line.text
+                            : 'This line is no longer in the current transcript'
+                        }
+                        onClick={() => onCitation(id)}
+                      >
+                        Transcript {clockTime(line.atMs)}
+                        {!available && ' · unavailable'}
+                      </button>
+                    )
+                  );
+                })}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();
           void send();
         }}
       >
-        <label htmlFor="ask-question">Your question</label>
+        <label htmlFor="ask-question" className="visually-hidden">
+          Your question
+        </label>
         <textarea
           ref={input}
           id="ask-question"
           value={question}
           maxLength={1000}
-          rows={3}
+          rows={2}
           disabled={busy}
-          placeholder="What did we agree to do next?"
+          placeholder="Ask for a recap or check what was just said…"
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
             if (
@@ -222,31 +249,6 @@ export function MeetingAsk({
             }
           }}
         />
-        {scope && first && last && (
-          <div className="ask-scope" id="ask-scope">
-            <p>
-              Send to {scope.providerName} · {scope.model}. Uses the latest{' '}
-              {scope.lines.length} lines available at {clockTime(last.atMs)}.
-            </p>
-            <details>
-              <summary>Transcript scope and cost</summary>
-              <p>
-                {clockTime(first.atMs)}–{clockTime(last.atMs)} only. Older
-                discussion is excluded when outside this range.{' '}
-                {scope.omitted
-                  ? 'Earlier discussion is not included.'
-                  : 'Only the currently available transcript is included.'}{' '}
-                No saved notes, imported context or previous answers are sent.
-              </p>
-              <p>
-                Estimated maximum ${(scope.worstMicroUsd / 1000000).toFixed(3)}{' '}
-                for this question, not a billing guarantee. Provider retention
-                follows your provider account terms. Sending authorizes this
-                question and this excerpt separately from automatic cues.
-              </p>
-            </details>
-          </div>
-        )}
         <div className="ask-actions">
           <button
             className="primary-button"
@@ -271,18 +273,42 @@ export function MeetingAsk({
               disabled={preparing}
               onClick={() => void refresh()}
             >
-              {preparing ? 'Updating scope…' : 'Use latest transcript'}
+              {preparing ? 'Updating…' : 'Use latest transcript'}
             </button>
           )}
-          <span className="muted small">{question.length}/1,000</span>
+          <span className="muted ask-char-count">{question.length}/1,000</span>
         </div>
+        {scope && first && last && (
+          <div className="ask-scope" id="ask-scope">
+            <p>
+              Send to {scope.providerName} · {scope.model}. Uses the latest{' '}
+              {scopeCount} {scopeCount === 1 ? 'line' : 'lines'}
+              {scope.omitted ? ` of ${lineCount}` : ''} from this session. Model
+              answers can be wrong.
+            </p>
+            <details>
+              <summary>Transcript scope and cost</summary>
+              <p>
+                Recent excerpt covers {clockTime(first.atMs)}–
+                {clockTime(last.atMs)} (capped at 200 lines / 64 KiB).{' '}
+                {scope.omitted
+                  ? 'Earlier discussion is not included.'
+                  : 'Older discussion outside this recent window is excluded.'}{' '}
+                No saved notes, imported context or previous answers are sent.
+              </p>
+              <p>
+                Estimated maximum ${(scope.worstMicroUsd / 1000000).toFixed(3)}{' '}
+                for this question, not a billing guarantee. Provider retention
+                follows your provider account terms. Sending authorizes this
+                question and this excerpt separately from automatic cues.
+                Questions and answers stay in memory for this session and are
+                not added to the transcript, saved meetings or exports.
+              </p>
+            </details>
+          </div>
+        )}
       </form>
-      <p className="muted small">
-        Questions and answers stay in memory for this session. They are not
-        added to the transcript, saved meetings or exports. While running,
-        capture and automatic cues continue independently.
-      </p>
-      <div role="status" aria-live="polite">
+      <div role="status" aria-live="polite" className="ask-status">
         {busy
           ? 'Waiting for a model answer. You can cancel.'
           : error ||

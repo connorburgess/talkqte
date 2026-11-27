@@ -104,6 +104,10 @@ test('the Name field in Settings is reachable and fits at 480px', async ({
   await page
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .press('Enter');
   const name = page.getByRole('textbox', { name: 'Name' });
   await name.scrollIntoViewIfNeeded();
   await name.focus();

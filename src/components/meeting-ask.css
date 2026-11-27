@@ -1,59 +1,63 @@
 .meeting-ask {
   display: grid;
-  gap: var(--space-16);
-  padding: var(--space-16) 0;
+  gap: var(--space-12);
+  padding: var(--space-16) 0 var(--space-8);
   min-width: 0;
 }
-.ask-header {
+.ask-empty {
+  padding: var(--space-24) 0;
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-8);
+  justify-items: start;
+}
+.ask-empty h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.ask-empty p {
+  max-width: 52ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.ask-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
 }
 .meeting-ask h2 {
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1.35;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
 }
 .meeting-ask h3 {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.45;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .meeting-ask p {
-  max-width: 72ch;
-  font-size: 14px;
-  line-height: 1.55;
-}
-.ask-grounding {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-8) var(--space-12);
-  padding: var(--space-8) var(--space-12);
-  background: var(--band);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  font-size: 13px;
-  color: var(--muted);
-}
-.ask-grounding .text-button {
-  min-height: 44px;
-  font-size: 13px;
+  max-width: 68ch;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 .ask-history {
   display: grid;
-  gap: var(--space-12);
-  max-height: 420px;
+  gap: var(--space-8);
+  max-height: 360px;
   overflow: auto;
   overflow-anchor: none;
   scrollbar-color: var(--border) var(--band);
 }
 .ask-entry {
   display: grid;
-  gap: var(--space-8);
-  padding: var(--space-16);
+  gap: 6px;
+  padding: var(--space-12) var(--space-16);
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
@@ -61,7 +65,7 @@
 .ask-answer-label {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px !important;
+  font-size: 10.5px !important;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -69,6 +73,8 @@
 .ask-answer {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
 }
 .ask-citations,
 .ask-actions {
@@ -78,86 +84,95 @@
   align-items: center;
 }
 .ask-citations .text-button {
-  min-height: 44px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
+  min-height: var(--control-h-sm);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--band);
   color: var(--ink);
   text-decoration: none;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
 }
 .ask-citations .text-button:hover:not(:disabled) {
   background: var(--hover);
-  border-color: var(--ink);
+  border-color: var(--border);
 }
 .meeting-ask form {
   display: grid;
-  gap: var(--space-12);
-}
-.meeting-ask form > label {
-  font-size: 14px;
-  font-weight: 600;
+  gap: var(--space-8);
 }
 .meeting-ask textarea {
   width: 100%;
-  min-height: 88px;
+  min-height: 68px;
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  padding: var(--space-12);
+  padding: 9px var(--space-12);
   color: var(--ink);
   background: var(--paper);
-  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
   caret-color: var(--accent-ink);
 }
 .meeting-ask textarea::placeholder {
   color: var(--muted);
 }
+.ask-char-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .ask-scope {
   display: grid;
-  gap: var(--space-8);
-  padding: var(--space-12);
-  background: var(--band);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  gap: 4px;
+  padding: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12.5px;
   overflow-wrap: anywhere;
 }
 .ask-scope p {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.ask-scope details {
+  margin-top: 2px;
+}
+.ask-scope details > p {
+  margin-top: 6px;
 }
 .ask-scope summary {
   cursor: pointer;
-  min-height: 36px;
   display: inline-flex;
   align-items: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
+  min-height: 26px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-ink);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.ask-status {
+  font-size: 12.5px;
+  color: var(--muted);
+  min-height: 0;
+}
+.ask-status:empty {
+  display: none;
+}
 .meeting-ask :focus-visible {
   outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 .transcript-segment:focus {
   outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 @media (max-width: 480px) {
   .ask-history {
-    max-height: 340px;
+    max-height: 300px;
   }
-  .ask-actions button {
-    min-height: 44px;
-  }
-}
-.ask-actions .text-button {
-  min-height: 44px;
 }

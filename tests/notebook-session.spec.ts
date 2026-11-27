@@ -31,7 +31,7 @@ test('before a session, a build without live transcription says plainly that it 
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
   ).toContainText(
-    'Live cues are unavailable.Check Settings for provider status and live-session setup requirements.',
+    'Live cues are unavailable. Check Settings for provider status and live-session setup requirements.',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
@@ -84,6 +84,10 @@ test('before a session, the notebook never says nothing is captured while the mi
   );
   await expect(session(page)).not.toContainText('microphone check above is on');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(
     page
       .getByRole('region', { name: 'Microphone', exact: true })
@@ -260,11 +264,16 @@ for (const width of [320, 390, 880]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    const minHeight = width <= 520 ? 44 : 32;
     for (const name of ['Pause cues', 'Stop live session', 'Dismiss']) {
       const button = page.getByRole('button', { name, exact: true }).first();
       const bounds = await button.boundingBox();
-      expect(bounds!.width, name).toBeGreaterThanOrEqual(44);
-      expect(bounds!.height, name).toBeGreaterThanOrEqual(44);
+      expect(bounds!.width, name).toBeGreaterThanOrEqual(
+        name === 'Dismiss' ? 44 : 44,
+      );
+      expect(bounds!.height, name).toBeGreaterThanOrEqual(
+        name === 'Dismiss' ? 44 : minHeight,
+      );
       expect(
         await button.evaluate((el) => el.scrollWidth <= el.clientWidth),
         name,

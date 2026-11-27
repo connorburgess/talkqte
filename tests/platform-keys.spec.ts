@@ -37,6 +37,9 @@ test('Windows: keys are said to be kept in Windows Credential Manager, and remov
   );
   await expect(keys).not.toContainText('Keychain');
   await row(page, 'Deepgram')
+    .getByRole('button', { name: 'Configure Deepgram key' })
+    .click();
+  await row(page, 'Deepgram')
     .getByRole('button', { name: 'Remove key' })
     .click();
   await expect(row(page, 'Deepgram')).toContainText(
@@ -90,6 +93,10 @@ test('Linux without a keyring: setup step 2 says there is no keyring', async ({
 }) => {
   await openNative(page, '?store=none');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
   await page.getByRole('button', { name: 'Next: Your keys' }).click();
   const setup = page.getByRole('region', { name: 'Connect your service keys' });

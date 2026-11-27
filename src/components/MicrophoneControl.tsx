@@ -8,10 +8,40 @@ import {
   type MicrophoneSnapshot,
 } from '../lib/microphone';
 
-function MicrophoneInput({ state }: { state: MicrophoneSnapshot | null }) {
+function MicrophoneInput({
+  state,
+  inline = false,
+}: {
+  state: MicrophoneSnapshot | null;
+  /** Inside a unified disclosure, show input guidance flat without nested details. */
+  inline?: boolean;
+}) {
   const platform = usePlatform();
   if (!desktop || !state) return null;
   const opened = ['starting', 'listening', 'stopping'].includes(state.status);
+  const guidance =
+    platform?.os === 'windows' ? (
+      <p>
+        Stop the microphone or live session and wait for Off. After an error,
+        wait until Start is available. Choose an input in Windows Settings →
+        System → Sound → Input, then start again here. Each start uses the
+        Windows default input; TalkQTE does not switch devices automatically.
+      </p>
+    ) : platform?.os === 'linux' ? (
+      <p>
+        Stop the microphone or live session and wait for Off. After an error,
+        wait until Start is available. Choose an input in your desktop&apos;s
+        sound settings, then start again here. Each start uses the default
+        input; TalkQTE does not switch devices automatically.
+      </p>
+    ) : (
+      <p>
+        On macOS, stop the microphone or live session and wait for Off. After an
+        error, wait until Start is available. Choose an input in macOS System
+        Settings → Sound → Input, then start again here. Each start uses the
+        macOS default input; TalkQTE does not switch devices automatically.
+      </p>
+    );
   return (
     <div className="microphone-input">
       {opened && (state.deviceName || state.status === 'listening') && (
@@ -20,33 +50,16 @@ function MicrophoneInput({ state }: { state: MicrophoneSnapshot | null }) {
           <bdi>{state.deviceName || 'name unavailable'}</bdi>
         </p>
       )}
-      <details>
-        <summary>Change microphone</summary>
-        {platform?.os === 'windows' ? (
-          <p>
-            Stop the microphone or live session and wait for Off. After an
-            error, wait until Start is available. Choose an input in Windows
-            Settings → System → Sound → Input, then start again here. Each start
-            uses the Windows default input; TalkQTE does not switch devices
-            automatically.
-          </p>
-        ) : platform?.os === 'linux' ? (
-          <p>
-            Stop the microphone or live session and wait for Off. After an
-            error, wait until Start is available. Choose an input in your
-            desktop's sound settings, then start again here. Each start uses the
-            default input; TalkQTE does not switch devices automatically.
-          </p>
-        ) : (
-          <p>
-            On macOS, stop the microphone or live session and wait for Off.
-            After an error, wait until Start is available. Choose an input in
-            macOS System Settings → Sound → Input, then start again here. Each
-            start uses the macOS default input; TalkQTE does not switch devices
-            automatically.
-          </p>
-        )}
-      </details>
+      {inline ? (
+        <div className="microphone-input-guidance">
+          <strong>Change microphone:</strong> {guidance}
+        </div>
+      ) : (
+        <details>
+          <summary>Change microphone</summary>
+          {guidance}
+        </details>
+      )}
     </div>
   );
 }
@@ -58,6 +71,7 @@ export function MicrophoneControl({
   cancelling = false,
   compact = false,
   inSettings = false,
+  unified = false,
   stopActionRef,
   action,
   processingConfigured = false,
@@ -74,6 +88,8 @@ export function MicrophoneControl({
   compact?: boolean;
   /** Full microphone check inside Settings. */
   inSettings?: boolean;
+  /** Composed into the unified Notebook live session header. */
+  unified?: boolean;
   stopActionRef?: Ref<HTMLButtonElement>;
   action?: ReactNode;
   processingConfigured?: boolean;
@@ -89,7 +105,81 @@ export function MicrophoneControl({
   const { state, error, busy, active, start, stop } = microphone;
   // Every live session names its transcription service.
   const provider = transcription?.provider ?? 'the transcription service';
-  if (live || preparing)
+  if (live || preparing) {
+    const routingLine =
+      processingConfigured && !processingApproved
+        ? sourceSession
+          ? `Audio from ${sourceSession} is sent to ${provider} once cue processing is enabled; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+          : `Your microphone is sent to ${provider} once cue processing is enabled; until then nothing is transcribed. TalkQTE does not record audio.`
+        : sourceSession
+          ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
+          : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`;
+    const stopTail = sourceSession
+      ? ' Stop live session to end it.'
+      : ' Stop live session to release the microphone.';
+    const retentionText =
+      'Transcript saving follows Settings → Meetings, independently of cue processing. Save automatically requests a local save of non-empty sessions on stop. Ask each time waits for your choice; Don’t save leaves the session in memory. Check the status after Stop to confirm a save. Lab runs do not save meetings.';
+    if (unified)
+      return (
+        <section
+          className="microphone-panel is-live is-unified"
+          aria-label="Microphone"
+        >
+          <div className="microphone-unified-bar">
+            <div className="microphone-unified-status">
+              <span className="microphone-status" role="status">
+                {microphoneLabel(state)}
+              </span>
+              {state?.status === 'listening' && (
+                <>
+                  <span className="status-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span
+                    className={`microphone-activity${
+                      state.activity === 'active' ? ' is-active' : ''
+                    }`}
+                  >
+                    <span
+                      className={`status-dot ${state.activity}`}
+                      aria-hidden="true"
+                    />
+                    {state.activity === 'active'
+                      ? 'Signal detected'
+                      : 'Quiet input'}
+                  </span>
+                </>
+              )}
+            </div>
+            {action}
+          </div>
+          {preparing ? (
+            <p className="microphone-unified-prep" role="status">
+              {cancelling
+                ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+                : 'Starting the live session. Cancel start to prevent capture.'}
+            </p>
+          ) : (
+            <details className="microphone-more is-unified-details">
+              <summary>Routing, input &amp; transcript saving</summary>
+              <div className="microphone-disclosures">
+                <p>
+                  {routingLine}
+                  {stopTail}
+                </p>
+                <MicrophoneInput state={state} inline />
+                <p className="microphone-retention">{retentionText}</p>
+              </div>
+            </details>
+          )}
+          {preparing && <MicrophoneInput state={state} inline />}
+          {(error || state?.message) && (
+            <p className="microphone-message" role="alert">
+              {error || state?.message}
+            </p>
+          )}
+        </section>
+      );
     return (
       <section className="microphone-panel is-live" aria-label="Microphone">
         <div className="microphone-panel-body">
@@ -127,7 +217,6 @@ export function MicrophoneControl({
             </div>
             {action}
           </div>
-          <MicrophoneInput state={state} />
           <div className="microphone-disclosures">
             {preparing ? (
               <p role="status">
@@ -137,27 +226,16 @@ export function MicrophoneControl({
               </p>
             ) : (
               <p>
-                {processingConfigured && !processingApproved
-                  ? sourceSession
-                    ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                    : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
-                  : sourceSession
-                    ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
-                    : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
-                {processingConfigured && ' Cue processing controls are below.'}{' '}
-                {sourceSession
-                  ? 'Stop live session to end it.'
-                  : 'Stop live session to release the microphone.'}
+                {routingLine}
+                {stopTail}
               </p>
             )}
+            <MicrophoneInput state={state} />
             {!preparing && (
-              <p className="microphone-retention">
-                Transcript saving follows Settings → Meetings, independently of
-                cue processing. Save automatically requests a local save of
-                non-empty sessions on stop. Ask each time waits for your choice;
-                Don’t save leaves the session in memory. Check the status after
-                Stop to confirm a save. Lab runs do not save meetings.
-              </p>
+              <details className="microphone-more">
+                <summary>Transcript saving details</summary>
+                <p className="microphone-retention">{retentionText}</p>
+              </details>
             )}
           </div>
           {(error || state?.message) && (
@@ -168,6 +246,7 @@ export function MicrophoneControl({
         </div>
       </section>
     );
+  }
   const stopping =
     state?.status === 'stopping' ||
     (state?.status === 'error' && !state.canStart);

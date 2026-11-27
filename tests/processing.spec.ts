@@ -421,7 +421,7 @@ test('320px layout wraps long sources and keeps keyboard access to approval and 
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(320);
   for (const button of await page.getByRole('button').all())
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await page.keyboard.press('Enter');
   await expect(
     page.getByRole('button', { name: 'Stop capture' }),

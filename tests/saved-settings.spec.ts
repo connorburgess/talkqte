@@ -53,6 +53,10 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   await open(page, { panels: { sidebarWidth: 320, notesRatio: 0.6 } });
   await expect(sidebar(page)).toHaveAttribute('aria-valuenow', '320');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await nav
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   const section = page.getByRole('region', { name: 'Saved settings' });
   await expect(section).toContainText(
     'Keys stay in your Keychain, and nothing from a meeting is saved there.',
@@ -62,6 +66,9 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   await section.getByRole('button', { name: 'Keep them' }).click();
   expect((await saved(page)).resets).toBe(0);
 
+  await nav
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const callOffer = page.getByRole('checkbox', {
     name: 'Offer in the dock when a call seems to start',
   });
@@ -69,6 +76,9 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   await callOffer.uncheck();
   await expect(callOffer).not.toBeChecked();
 
+  await nav
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   await section.getByRole('button', { name: 'Reset settings…' }).click();
   await section
     .getByRole('button', { name: 'Reset settings', exact: true })
@@ -78,6 +88,9 @@ test('Settings says what is remembered, and Reset settings asks first and restor
   ).toBeAttached();
   expect((await saved(page)).resets).toBe(1);
   // The call-starting offer reads its setting again: back to its default (on).
+  await nav
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(callOffer).toBeChecked();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(sidebar(page)).not.toHaveAttribute('aria-valuenow', '320');
@@ -88,6 +101,10 @@ test('a lab run says its choices are not saved, keeps call offer off, and offers
 }) => {
   await open(page, { status: { saving: 'labRun' } });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await nav
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   const section = page.getByRole('region', { name: 'Saved settings' });
   await expect(section).toContainText(
     'This is a lab run: its choices are not saved, and your settings file is not read.',
@@ -95,6 +112,9 @@ test('a lab run says its choices are not saved, keeps call offer off, and offers
   await expect(
     section.getByRole('button', { name: 'Reset settings…' }),
   ).toBeDisabled();
+  await nav
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(
     page.getByRole('checkbox', {
       name: 'Offer in the dock when a call seems to start',
@@ -107,6 +127,10 @@ test('settings from a newer version are left as they are, and Reset is offered',
 }) => {
   await open(page, { status: { saving: 'newer' } });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   const section = page.getByRole('region', { name: 'Saved settings' });
   await expect(section).toContainText(
     'Your settings were saved by a newer version of TalkQTE.',
@@ -124,6 +148,10 @@ test('a failed save is reported', async ({ page }) => {
     },
   });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   await expect(
     page.getByRole('region', { name: 'Saved settings' }).getByRole('alert'),
   ).toHaveText(

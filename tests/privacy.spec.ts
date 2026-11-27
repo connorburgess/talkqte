@@ -45,6 +45,10 @@ test('notes, focus, name and an export review stay out of browser storage and of
   await page
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   const name = page.getByRole('textbox', { name: 'Name', exact: true });
   await name.fill('Marisol');
   await name.press('Enter');
@@ -73,6 +77,10 @@ test('notes, focus, name and an export review stay out of browser storage and of
   await page
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   await expect(
     page.getByRole('textbox', { name: 'Name', exact: true }),
   ).toHaveValue('');

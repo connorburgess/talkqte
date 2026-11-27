@@ -150,6 +150,10 @@ test('an active microphone check has no automated accessibility violations in Se
 }) => {
   await standIn(page, '/?live&keys=set');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   expect(await violations(page), 'settings idle mic').toEqual([]);
   await page
     .getByRole('button', { name: 'Start microphone', exact: true })

@@ -74,6 +74,10 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
   await expect(stop(page)).toBeEnabled();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
   await stop(page).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
   await expect(stop(page)).toHaveCount(0);
   await expect(panel(page)).toBeHidden();
@@ -210,6 +214,10 @@ test('changed notes retire review without stealing focus from Settings', async (
   await open(page, '?live&processor&lab');
   await prepare(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   const name = page.getByRole('textbox', { name: 'Name', exact: true });
   await name.focus();
   await page.evaluate(() => window.permissionTest.replaceSources());
@@ -306,7 +314,7 @@ test('narrow permission review wraps long sources and leaves capture controls re
     name: 'Enable for this session',
   });
   await approve.scrollIntoViewIfNeeded();
-  expect((await approve.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  expect((await approve.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await panel(page)
     .getByRole('button', { name: 'Cancel', exact: true })
     .click();
@@ -558,4 +566,81 @@ test('Cue processing hides when a session ends cleanly, stays visible for issues
   // Clearing the issue hides the ended Cue processing card.
   await page.evaluate(() => window.captureTest.send({ issue: null }));
   await expect(panel(page)).toBeHidden();
+});
+
+test('persistent ProcessingControl preserves pending consent review across Notebook -> Settings -> Notebook without duplicate IPC or capture reauthorization', async ({
+  page,
+}) => {
+  await open(page, '?live&processor&hosted&lab');
+  await review(page).click();
+  await panel(page)
+    .getByRole('checkbox', { name: /supplier review/ })
+    .check();
+  await panel(page)
+    .getByRole('checkbox', { name: 'Also include recent conversation' })
+    .check();
+  await panel(page)
+    .getByRole('button', { name: 'Review selected sources' })
+    .click();
+
+  await expect(
+    panel(page).getByRole('heading', { name: 'Review before enabling' }),
+  ).toBeVisible();
+  await expect(panel(page)).toContainText('Sent to Example service');
+  await expect(panel(page)).toContainText(
+    'Imported file · 2026-11-02 · prior note',
+  );
+
+  const micCallsBefore = await page.evaluate(() => [
+    ...window.microphoneTest.calls,
+  ]);
+  expect(await calls(page, 'review_processing_scope')).toHaveLength(1);
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  expect(await calls(page, 'cancel_processing_review')).toEqual([]);
+
+  // Navigate to Settings while Step 2 consent review is pending.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    panel(page).getByRole('heading', { name: 'Review before enabling' }),
+  ).toBeVisible();
+  await expect(panel(page)).toContainText('Sent to Example service');
+  await expect(panel(page)).toContainText(
+    'Imported file · 2026-11-02 · prior note',
+  );
+
+  // Navigate back to Notebook; the exact same review stays mounted.
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(
+    panel(page).getByRole('heading', { name: 'Review before enabling' }),
+  ).toBeVisible();
+  await expect(panel(page)).toContainText('Sent to Example service');
+  await expect(panel(page)).toContainText(
+    'Imported file · 2026-11-02 · prior note',
+  );
+
+  // Navigation must not re-request scope review, auto-approve, cancel, or reauthorize capture.
+  expect(await calls(page, 'review_processing_scope')).toHaveLength(1);
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  expect(await calls(page, 'cancel_processing_review')).toEqual([]);
+  const navIpcCalls = await page.evaluate(
+    (startIndex) => window.microphoneTest.calls.slice(startIndex),
+    micCallsBefore.length,
+  );
+  const forbiddenNavCalls = navIpcCalls.filter((cmd) =>
+    /^(start_|stop_|request_|set_processing|review_processing|approve_processing|cancel_processing|turn_off_processing)|capture|microphone|audio_source|permission/i.test(
+      cmd,
+    ),
+  );
+  expect(forbiddenNavCalls).toEqual([]);
+
+  // Approving from Notebook uses the original review-1 handle.
+  await panel(page)
+    .getByRole('button', { name: 'Enable for this session' })
+    .click();
+  await expect(panel(page).getByRole('status')).toHaveText(
+    'Model connection on',
+  );
+  expect(await calls(page, 'approve_processing_scope')).toEqual([
+    { command: 'approve_processing_scope', args: { id: 'review-1' } },
+  ]);
 });

@@ -15,6 +15,10 @@ test('focus is optional and your name can be set in Settings without losing note
   await page.locator('.focus-disclosure > summary').press('Enter');
   await expect(page.getByRole('textbox', { name: 'Focus' })).toHaveValue('');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   const name = page.getByRole('textbox', { name: 'Name' });
   await name.fill('Robin');
   await page.getByRole('combobox', { name: 'Question timing' }).focus();
@@ -81,6 +85,10 @@ test('the sidebar links to Meetings without an inline list or search, and Settin
     page.getByRole('heading', { name: 'Settings', level: 1 }),
   ).toBeVisible();
   await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
+  await page
     .getByRole('combobox', { name: 'Question timing' })
     .selectOption('quiet');
   await expect(
@@ -124,6 +132,10 @@ test('focus lines are written in the notebook, kept for the session, cleared in 
   await expect(box.getByRole('button', { name: 'Clear' })).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   await page
     .getByRole('combobox', { name: 'Question timing' })
     .selectOption('focused');

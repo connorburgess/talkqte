@@ -199,6 +199,10 @@ test('choosing Don’t keep in Settings stops auto-saving and offers; Delete all
     }),
   );
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   const section = page.getByRole('region', { name: 'Meetings' });
   await expect(section).toContainText('Stored unencrypted in');
   await expect(section).toContainText(
@@ -241,6 +245,10 @@ test('a lab run neither offers nor lists kept meetings', async ({ page }) => {
   await expect(page.getByText('Live session ended').first()).toBeVisible();
   await expect(offer(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   await expect(page.getByRole('region', { name: 'Meetings' })).toContainText(
     'Lab runs don’t read or save meetings.',
   );
@@ -930,6 +938,7 @@ test('auto-selects relevant recent meetings on launch and Focus match, respects 
   const list = page.getByRole('list', { name: 'Meetings' });
   await expect(list).not.toContainText('Orchard gate supplier');
   await expect(list).not.toContainText('Archived orchard notes');
+  await page.getByRole('button', { name: /^Filters/ }).click();
   const showArchived = page.getByRole('checkbox', {
     name: /Show archived \(2\)/,
   });
@@ -955,6 +964,10 @@ test('auto-selects relevant recent meetings on launch and Focus match, respects 
 
   // Turning the Settings toggle off clears auto-selected items; turning it back on restores them.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   const autoToggle = page
     .getByRole('region', { name: 'Meetings' })
     .getByRole('checkbox', {
@@ -967,6 +980,10 @@ test('auto-selects relevant recent meetings on launch and Focus match, respects 
   await expect(context.locator('summary')).toContainText('0 notes selected');
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   await autoToggle.check();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(context).toContainText('Orchard gate supplier');
@@ -1114,6 +1131,7 @@ test('folder keyboard controls and archive filtering preserve meetings when a fo
     .getByRole('button', { name: 'Archive Fictional gate review', exact: true })
     .click();
   await expect(section.locator('.history-item')).toHaveCount(0);
+  await page.getByRole('button', { name: /^Filters/ }).click();
   await page.getByRole('checkbox', { name: /Show archived/ }).check();
   await expect(section.locator('.history-item')).toContainText('Archived');
   await page.getByRole('checkbox', { name: /Show archived/ }).uncheck();

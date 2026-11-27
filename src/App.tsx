@@ -769,6 +769,30 @@ function Notebook() {
   const [view, setView] = useState<'notebook' | 'meetings' | 'settings'>(
     'notebook',
   );
+  const [settingsSection, setSettingsSection] = useState<
+    'providers' | 'cues' | 'capture' | 'meetings' | 'privacy'
+  >('providers');
+  const openSettingsSection = (
+    section:
+      'providers' | 'cues' | 'capture' | 'meetings' | 'privacy' = 'providers',
+  ) => {
+    setSettingsSection(section);
+    setView('settings');
+  };
+  useEffect(() => {
+    const applyHash = () => {
+      const hash = window.location.hash;
+      if (hash === '#settings-providers' || hash === '#live-transcription')
+        setSettingsSection('providers');
+      else if (hash === '#settings-cues') setSettingsSection('cues');
+      else if (hash === '#settings-capture') setSettingsSection('capture');
+      else if (hash === '#settings-meetings') setSettingsSection('meetings');
+      else if (hash === '#settings-privacy') setSettingsSection('privacy');
+    };
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, []);
   const [showEchoes, setShowEchoes] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [sessionHistory, setSessionHistory] = useState<HistoryStatus | null>(
@@ -1761,94 +1785,265 @@ function Notebook() {
             <span className="prototype-label">Browser preview</span>
           )}
         </header>
-        {(liveCaptureBar || micCheckBar) && (
-          <MicrophoneControl
-            microphone={microphone}
-            live={live || finishing}
-            preparing={preparing}
-            cancelling={cancelling}
-            compact={!liveCaptureBar}
-            stopActionRef={rememberStop}
-            processingConfigured={!!capture.state?.processor}
-            processingApproved={!!capture.state?.approved}
-            sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
-            sourceSession={sourceApp}
-            transcription={state?.transcription}
-            action={
-              preparing ? (
-                <button
-                  ref={rememberCancel}
-                  className="secondary-button"
-                  disabled={
-                    capture.busy ||
-                    cancelling ||
-                    capture.state?.startup !== 'loading'
+        {(() => {
+          const unifiedLiveHeader =
+            view === 'notebook' &&
+            !showOnboarding &&
+            (live || preparing || finishing);
+          const liveCaptureAction = preparing ? (
+            <button
+              ref={rememberCancel}
+              className="secondary-button"
+              disabled={
+                capture.busy ||
+                cancelling ||
+                capture.state?.startup !== 'loading'
+              }
+              onClick={() => {
+                restoreStartFocus.current =
+                  document.activeElement === cancelButton.current;
+                void capture.stop();
+              }}
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel start'}
+            </button>
+          ) : live || finishing ? (
+            <button
+              ref={rememberStop}
+              className="secondary-button"
+              disabled={capture.busy || !capture.state}
+              onClick={() => void capture.stop()}
+            >
+              <Square size={14} />
+              Stop live session
+            </button>
+          ) : undefined;
+          const showProcessingPanel =
+            bridge.desktop &&
+            view !== 'meetings' &&
+            (live ||
+              preparing ||
+              finishing ||
+              !!capture.state?.source?.mayBeCapturing ||
+              !!capture.state?.issue ||
+              !!capture.error ||
+              (capture.statusError && (live || preparing || finishing)));
+          return (
+            <div
+              className={unifiedLiveHeader ? 'live-header-shell' : undefined}
+            >
+              {unifiedLiveHeader ? (
+                <div className="live-header-primary">
+                  <section
+                    className={`session-strip ${notebookStateClass} is-unified`}
+                    aria-label="Session"
+                  >
+                    <div className="session-state">
+                      <span
+                        className={`status-dot ${
+                          preparing
+                            ? 'preparing'
+                            : state.cuesPaused
+                              ? 'paused'
+                              : state.status
+                        }`}
+                      />
+                      <div className="session-state-copy">
+                        <div className="session-heading-row">
+                          <h1 ref={sessionHeading} tabIndex={-1}>
+                            {preparing
+                              ? cancelling
+                                ? 'Cancelling start'
+                                : 'Preparing live session'
+                              : finishing
+                                ? 'Finishing live session'
+                                : state.cuesPaused
+                                  ? 'Cues paused · session continues'
+                                  : 'Live session in progress'}
+                          </h1>
+                          {(live || simulated) && !preparing && (
+                            <span className="session-clock">
+                              {clockTime(state.elapsedMs)}
+                            </span>
+                          )}
+                        </div>
+                        <p>
+                          {preparing
+                            ? 'Starting…'
+                            : finishing
+                              ? capture.state?.source?.mayBeCapturing &&
+                                microphoneNotCapturing(microphone.state)
+                                ? 'Ending live session. See Cue processing above.'
+                                : 'Releasing microphone and finishing transcription…'
+                              : state.cuesPaused
+                                ? sourceApp
+                                  ? 'App audio and transcript continue. Stop live session when done.'
+                                  : 'Microphone and transcript continue. Stop live session when done.'
+                                : sourceApp
+                                  ? `Audio from ${sourceApp} · audio not recorded`
+                                  : bothSources(state.sources) &&
+                                      !state.sources?.applicationEnded
+                                    ? 'Your microphone and system audio · audio not recorded'
+                                    : 'Your microphone · audio not recorded'}
+                        </p>
+                        {state.live && state.meetingTitle && !preparing && (
+                          <p className="session-hint">
+                            Meeting: {state.meetingTitle}
+                          </p>
+                        )}
+                        {transcriptionStopText(state.transcription) && (
+                          <div className="session-alert-row">
+                            <p role="alert">
+                              {transcriptionStopText(state.transcription)}
+                            </p>
+                            {(state.transcription?.stopped === 'auth' ||
+                              state.transcription?.stopped ===
+                                'key_unavailable') && (
+                              <button
+                                type="button"
+                                className="secondary-button session-recovery-button"
+                                onClick={() => openSettingsSection('providers')}
+                              >
+                                Open Settings
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {applicationEndedText(state.sources) && (
+                          <p role="alert">
+                            {applicationEndedText(state.sources)}
+                          </p>
+                        )}
+                        {echoText(state.sources) && (
+                          <p>{echoText(state.sources)}</p>
+                        )}
+                        {transcriptionDropText(state.transcription) && (
+                          <p role="status">
+                            {transcriptionDropText(state.transcription)}
+                          </p>
+                        )}
+                        {transcriptionLowText(state.transcription) && (
+                          <p>{transcriptionLowText(state.transcription)}</p>
+                        )}
+                        {transcriptionReconnectText(state.transcription) && (
+                          <p role="status">
+                            {transcriptionReconnectText(state.transcription)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {!preparing &&
+                      !finishing &&
+                      live &&
+                      !capture.state?.processor && (
+                        <div className="session-actions">
+                          <button
+                            className="secondary-button"
+                            disabled={busy}
+                            title={
+                              state.cuesPaused
+                                ? 'Only new speech can raise a cue after resuming.'
+                                : sourceApp
+                                  ? 'Clear the current cue; application audio and transcript continue.'
+                                  : 'Clear the current cue; microphone and transcript continue.'
+                            }
+                            onClick={toggleLiveCues}
+                          >
+                            {state.cuesPaused ? (
+                              <Play size={15} />
+                            ) : (
+                              <Pause size={15} />
+                            )}
+                            {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
+                          </button>
+                        </div>
+                      )}
+                  </section>
+                  {liveCaptureBar && (
+                    <MicrophoneControl
+                      microphone={microphone}
+                      live={live || finishing}
+                      preparing={preparing}
+                      cancelling={cancelling}
+                      unified
+                      stopActionRef={rememberStop}
+                      processingConfigured={!!capture.state?.processor}
+                      processingApproved={!!capture.state?.approved}
+                      sourceMayBeCapturing={
+                        !!capture.state?.source?.mayBeCapturing
+                      }
+                      sourceSession={sourceApp}
+                      transcription={state?.transcription}
+                      action={liveCaptureAction}
+                    />
+                  )}
+                </div>
+              ) : (
+                (liveCaptureBar || micCheckBar) && (
+                  <MicrophoneControl
+                    microphone={microphone}
+                    live={live || finishing}
+                    preparing={preparing}
+                    cancelling={cancelling}
+                    compact={!liveCaptureBar}
+                    stopActionRef={rememberStop}
+                    processingConfigured={!!capture.state?.processor}
+                    processingApproved={!!capture.state?.approved}
+                    sourceMayBeCapturing={
+                      !!capture.state?.source?.mayBeCapturing
+                    }
+                    sourceSession={sourceApp}
+                    transcription={state?.transcription}
+                    action={liveCaptureAction}
+                  />
+                )
+              )}
+              {(preparing || live || finishing || view === 'settings') &&
+                (capture.statusError || capture.error) && (
+                  <div
+                    className={`error-banner${unifiedLiveHeader ? ' is-inline-banner' : ''}`}
+                    role="alert"
+                  >
+                    <span>
+                      {capture.error ||
+                        'Capture status is unavailable. Refresh it to use Stop or Cancel start.'}
+                    </span>
+                    {capture.statusError && (
+                      <button
+                        className="secondary-button"
+                        onClick={capture.retryStatus}
+                      >
+                        Refresh capture status
+                      </button>
+                    )}
+                  </div>
+                )}
+              {bridge.desktop && (
+                <div
+                  className={
+                    unifiedLiveHeader
+                      ? 'live-header-processing'
+                      : 'notebook-processing'
                   }
-                  onClick={() => {
-                    restoreStartFocus.current =
-                      document.activeElement === cancelButton.current;
-                    void capture.stop();
-                  }}
+                  hidden={!showProcessingPanel}
                 >
-                  {cancelling ? 'Cancelling…' : 'Cancel start'}
-                </button>
-              ) : live || finishing ? (
-                <button
-                  ref={rememberStop}
-                  className="secondary-button"
-                  disabled={capture.busy || !capture.state}
-                  onClick={() => void capture.stop()}
-                >
-                  <Square size={14} />
-                  Stop live session
-                </button>
-              ) : undefined
-            }
-          />
-        )}
-        {(preparing || live || finishing || view === 'settings') &&
-          (capture.statusError || capture.error) && (
-            <div className="error-banner" role="alert">
-              <span>
-                {capture.error ||
-                  'Capture status is unavailable. Refresh it to use Stop or Cancel start.'}
-              </span>
-              {capture.statusError && (
-                <button
-                  className="secondary-button"
-                  onClick={capture.retryStatus}
-                >
-                  Refresh capture status
-                </button>
+                  <ProcessingControl
+                    unified={unifiedLiveHeader}
+                    transcriptionProvider={
+                      state?.transcription?.provider ??
+                      liveStatus?.transcription
+                    }
+                    status={{
+                      snapshot: capture.state,
+                      failed: capture.statusError,
+                      refresh: capture.refresh,
+                    }}
+                  />
+                </div>
               )}
             </div>
-          )}
-        {bridge.desktop && (
-          <div
-            className="notebook-processing"
-            hidden={
-              view === 'meetings' ||
-              (!live &&
-                !preparing &&
-                !finishing &&
-                !capture.state?.source?.mayBeCapturing &&
-                !capture.state?.issue &&
-                !capture.error &&
-                !(capture.statusError && (live || preparing || finishing)))
-            }
-          >
-            <ProcessingControl
-              transcriptionProvider={
-                state?.transcription?.provider ?? liveStatus?.transcription
-              }
-              status={{
-                snapshot: capture.state,
-                failed: capture.statusError,
-                refresh: capture.refresh,
-              }}
-            />
-          </div>
-        )}
+          );
+        })()}
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -1879,263 +2074,273 @@ function Notebook() {
 
         {view === 'notebook' && !showOnboarding && (
           <div className={`notebook-body ${notebookStateClass}`}>
-            <section
-              className={`session-strip ${notebookStateClass}`}
-              aria-label="Session"
-            >
-              <div className="session-state">
-                {/* A dot only while something runs; idle and ended have none. */}
-                {(live || simulated || preparing || finishing) && (
-                  <span
-                    className={`status-dot ${
-                      preparing
-                        ? 'preparing'
-                        : state.cuesPaused
-                          ? 'paused'
-                          : state.status
-                    }`}
-                  />
-                )}
-                <div className="session-state-copy">
-                  <div className="session-heading-row">
-                    <h1 ref={sessionHeading} tabIndex={-1}>
+            {!(live || preparing || finishing) && (
+              <section
+                className={`session-strip ${notebookStateClass}`}
+                aria-label="Session"
+              >
+                <div className="session-state">
+                  {/* A dot only while something runs; idle and ended have none. */}
+                  {(live || simulated || preparing || finishing) && (
+                    <span
+                      className={`status-dot ${
+                        preparing
+                          ? 'preparing'
+                          : state.cuesPaused
+                            ? 'paused'
+                            : state.status
+                      }`}
+                    />
+                  )}
+                  <div className="session-state-copy">
+                    <div className="session-heading-row">
+                      <h1 ref={sessionHeading} tabIndex={-1}>
+                        {preparing
+                          ? cancelling
+                            ? 'Cancelling start'
+                            : 'Preparing live session'
+                          : finishing
+                            ? 'Finishing live session'
+                            : sessionLive
+                              ? live
+                                ? state.cuesPaused
+                                  ? 'Cues paused · session continues'
+                                  : 'Live session in progress'
+                                : 'Live session ended'
+                              : simulated
+                                ? 'Simulated session'
+                                : liveStatus?.available && !micCheckActive
+                                  ? 'Ready for a meeting'
+                                  : 'No session yet'}
+                      </h1>
+                      {isEnded && (
+                        <span
+                          className={`session-badge${sessionHistory?.kept ? ' is-saved' : ''}`}
+                        >
+                          {sessionHistory?.kept
+                            ? 'Saved to Meetings'
+                            : 'In memory'}
+                        </span>
+                      )}
+                    </div>
+                    <p>
                       {preparing
-                        ? cancelling
-                          ? 'Cancelling start'
-                          : 'Preparing live session'
+                        ? 'Starting…'
                         : finishing
-                          ? 'Finishing live session'
+                          ? capture.state?.source?.mayBeCapturing &&
+                            microphoneNotCapturing(microphone.state)
+                            ? 'Ending live session. See Cue processing above.'
+                            : 'Releasing microphone and finishing transcription…'
                           : sessionLive
                             ? live
                               ? state.cuesPaused
-                                ? 'Cues paused · session continues'
-                                : 'Live session in progress'
-                              : 'Live session ended'
+                                ? sourceApp
+                                  ? 'App audio and transcript continue. Stop live session when done.'
+                                  : 'Microphone and transcript continue. Stop live session when done.'
+                                : sourceApp
+                                  ? `Audio from ${sourceApp} · audio not recorded`
+                                  : bothSources(state.sources) &&
+                                      !state.sources?.applicationEnded
+                                    ? 'Your microphone and system audio · audio not recorded'
+                                    : 'Your microphone · audio not recorded'
+                              : sessionHistory?.kept
+                                ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
+                                : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
                             : simulated
-                              ? 'Simulated session'
-                              : liveStatus?.available && !micCheckActive
-                                ? 'Ready for a meeting'
-                                : 'No session yet'}
-                    </h1>
-                    {isEnded && (
-                      <span
-                        className={`session-badge${sessionHistory?.kept ? ' is-saved' : ''}`}
-                      >
-                        {sessionHistory?.kept
-                          ? 'Saved to Meetings'
-                          : 'In memory'}
-                      </span>
-                    )}
-                  </div>
-                  <p>
-                    {preparing
-                      ? 'Starting…'
-                      : finishing
-                        ? capture.state?.source?.mayBeCapturing &&
-                          microphoneNotCapturing(microphone.state)
-                          ? 'Ending live session. See Cue processing above.'
-                          : 'Releasing microphone and finishing transcription…'
-                        : sessionLive
-                          ? live
-                            ? state.cuesPaused
-                              ? sourceApp
-                                ? 'App audio and transcript continue. Stop live session when done.'
-                                : 'Microphone and transcript continue. Stop live session when done.'
-                              : sourceApp
-                                ? `Audio from ${sourceApp} · audio not recorded`
-                                : bothSources(state.sources) &&
-                                    !state.sources?.applicationEnded
-                                  ? 'Your microphone and system audio · audio not recorded'
-                                  : 'Your microphone · audio not recorded'
-                            : sessionHistory?.kept
-                              ? 'Saved to Meetings. Notes stay here until you start another session or quit.'
-                              : 'Not saved. Transcript clears on next session or quit; notes stay until you quit.'
-                          : simulated
-                            ? 'Fictional replay · nothing is captured'
-                            : capture.state?.source?.mayBeCapturing
-                              ? 'No live session. Selected app audio may still be capturing; see Cue processing above.'
-                              : microphone.active &&
-                                  !microphoneNotCapturing(microphone.state)
-                                ? microphone.state?.status === 'error'
-                                  ? 'No live session. Releasing microphone; see above.'
-                                  : 'No live session. Mic check is on; nothing is recorded or transcribed.'
-                                : liveStatus?.available
-                                  ? 'Nothing is captured until you start a live session.'
-                                  : liveStatus?.reason
-                                    ? `Nothing is captured. ${liveStatus.reason}`
-                                    : 'Nothing is captured.'}
-                  </p>
-                  {capturesSystemAudio && liveStatus?.available && isReady && (
-                    <p className="session-hint">
-                      Use headphones if you can—speaker playback can echo into
-                      your mic and TalkQTE can’t catch every repeat.
+                              ? 'Fictional replay · nothing is captured'
+                              : capture.state?.source?.mayBeCapturing
+                                ? 'No live session. Selected app audio may still be capturing; see Cue processing above.'
+                                : microphone.active &&
+                                    !microphoneNotCapturing(microphone.state)
+                                  ? microphone.state?.status === 'error'
+                                    ? 'No live session. Releasing microphone; see above.'
+                                    : 'No live session. Mic check is on; nothing is recorded or transcribed.'
+                                  : liveStatus?.available
+                                    ? 'Nothing is captured until you start a live session.'
+                                    : liveStatus?.reason
+                                      ? `Nothing is captured. ${liveStatus.reason}`
+                                      : 'Nothing is captured.'}
                     </p>
-                  )}
-                  {notMacos(platform) && isReady && (
-                    <p className="session-hint">
-                      On {platformName(platform)}, live sessions hear your
-                      microphone only: with headphones, that is your side of a
-                      call. Hearing another application is not available on{' '}
-                      {platformName(platform)} yet.
-                    </p>
-                  )}
-                  {state.live && state.meetingTitle && !preparing && (
-                    <p className="session-hint">
-                      Meeting: {state.meetingTitle}
-                    </p>
-                  )}
-                  {!state.live &&
-                    !simulated &&
-                    !preparing &&
-                    !finishing &&
-                    meetingTitle !== null && (
-                      <div className="calendar-meeting-title">
-                        <label htmlFor="pre-call-title">Meeting title</label>
-                        <div className="calendar-meeting-title-row">
-                          <input
-                            id="pre-call-title"
-                            type="text"
-                            maxLength={120}
-                            value={meetingTitle}
-                            disabled={busy}
-                            onChange={(e) => setMeetingTitle(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            disabled={busy}
-                            onClick={() => setMeetingTitle('')}
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  {transcriptionStopText(state.transcription) && (
-                    <div className="session-alert-row">
-                      <p role="alert">
-                        {transcriptionStopText(state.transcription)}
+                    {capturesSystemAudio &&
+                      liveStatus?.available &&
+                      isReady && (
+                        <details className="session-tip">
+                          <summary>Audio &amp; headphones tip</summary>
+                          <p className="session-hint">
+                            Use headphones if you can—speaker playback can echo
+                            into your mic and TalkQTE can’t catch every repeat.
+                          </p>
+                        </details>
+                      )}
+                    {notMacos(platform) && isReady && (
+                      <p className="session-hint">
+                        On {platformName(platform)}, live sessions hear your
+                        microphone only: with headphones, that is your side of a
+                        call. Hearing another application is not available on{' '}
+                        {platformName(platform)} yet.
                       </p>
-                      {(state.transcription?.stopped === 'auth' ||
-                        state.transcription?.stopped === 'key_unavailable') && (
-                        <button
-                          type="button"
-                          className="secondary-button session-recovery-button"
-                          onClick={() => setView('settings')}
-                        >
-                          Open Settings
-                        </button>
+                    )}
+                    {state.live && state.meetingTitle && !preparing && (
+                      <p className="session-hint">
+                        Meeting: {state.meetingTitle}
+                      </p>
+                    )}
+                    {!state.live &&
+                      !simulated &&
+                      !preparing &&
+                      !finishing &&
+                      meetingTitle !== null && (
+                        <div className="calendar-meeting-title">
+                          <label htmlFor="pre-call-title">Meeting title</label>
+                          <div className="calendar-meeting-title-row">
+                            <input
+                              id="pre-call-title"
+                              type="text"
+                              maxLength={120}
+                              value={meetingTitle}
+                              disabled={busy}
+                              onChange={(e) => setMeetingTitle(e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={busy}
+                              onClick={() => setMeetingTitle('')}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
                       )}
-                    </div>
-                  )}
-                  {applicationEndedText(state.sources) && (
-                    <p role="alert">{applicationEndedText(state.sources)}</p>
-                  )}
-                  {/* Said once through the notice region; the count is
-                      not re-read as it grows. */}
-                  {echoText(state.sources) && <p>{echoText(state.sources)}</p>}
-                  {transcriptionDropText(state.transcription) && (
-                    <p role="status">
-                      {transcriptionDropText(state.transcription)}
-                    </p>
-                  )}
-                  {/* Changes each minute: said once, through the notice
-                      region, when it first appears. */}
-                  {transcriptionLowText(state.transcription) && (
-                    <p>{transcriptionLowText(state.transcription)}</p>
-                  )}
-                  {transcriptionReconnectText(state.transcription) && (
-                    <p role="status">
-                      {transcriptionReconnectText(state.transcription)}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="session-actions">
-                {(live || simulated) && !preparing && (
-                  <span className="session-clock">
-                    {clockTime(state.elapsedMs)}
-                  </span>
-                )}
-                {!preparing &&
-                  !finishing &&
-                  live &&
-                  !capture.state?.processor && (
-                    <button
-                      className="secondary-button"
-                      disabled={busy}
-                      title={
-                        state.cuesPaused
-                          ? 'Only new speech can raise a cue after resuming.'
-                          : sourceApp
-                            ? 'Clear the current cue; application audio and transcript continue.'
-                            : 'Clear the current cue; microphone and transcript continue.'
-                      }
-                      onClick={toggleLiveCues}
-                    >
-                      {state.cuesPaused ? (
-                        <Play size={15} />
-                      ) : (
-                        <Pause size={15} />
-                      )}
-                      {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
-                    </button>
-                  )}
-                {!preparing && !finishing && !live && !simulated && (
-                  <div className="session-start-group">
-                    <div className="session-start-buttons">
-                      {isEnded && showExport && (
-                        <button
-                          ref={exportButton}
-                          type="button"
-                          className="secondary-button export-button"
-                          onClick={prepareExport}
-                          disabled={!canExport}
-                        >
-                          <ArrowUpRight size={16} aria-hidden="true" />
-                          {exportLabel}
-                        </button>
-                      )}
-                      {liveStatus?.available ? (
-                        <button
-                          className="primary-button"
-                          ref={startButton}
-                          disabled={busy || startPending || micCheckActive}
-                          title={
-                            micCheckActive
-                              ? 'Stop the microphone check first.'
-                              : undefined
-                          }
-                          onClick={startLive}
-                        >
-                          <Play size={15} />
-                          Start live session
-                        </button>
-                      ) : (
-                        bridge.desktop &&
-                        isReady &&
-                        keysAvailable && (
+                    {transcriptionStopText(state.transcription) && (
+                      <div className="session-alert-row">
+                        <p role="alert">
+                          {transcriptionStopText(state.transcription)}
+                        </p>
+                        {(state.transcription?.stopped === 'auth' ||
+                          state.transcription?.stopped ===
+                            'key_unavailable') && (
                           <button
                             type="button"
-                            className="secondary-button"
+                            className="secondary-button session-recovery-button"
                             onClick={() => setView('settings')}
                           >
-                            <Settings size={15} aria-hidden="true" />
-                            Configure keys
+                            Open Settings
                           </button>
-                        )
-                      )}
-                    </div>
-                    {liveStatus?.available &&
-                      startDisclosure(capturesSystemAudio, liveStatus) && (
-                        <p className="session-start-disclosure">
-                          {startDisclosure(capturesSystemAudio, liveStatus)}
-                        </p>
-                      )}
+                        )}
+                      </div>
+                    )}
+                    {applicationEndedText(state.sources) && (
+                      <p role="alert">{applicationEndedText(state.sources)}</p>
+                    )}
+                    {/* Said once through the notice region; the count is
+                      not re-read as it grows. */}
+                    {echoText(state.sources) && (
+                      <p>{echoText(state.sources)}</p>
+                    )}
+                    {transcriptionDropText(state.transcription) && (
+                      <p role="status">
+                        {transcriptionDropText(state.transcription)}
+                      </p>
+                    )}
+                    {/* Changes each minute: said once, through the notice
+                      region, when it first appears. */}
+                    {transcriptionLowText(state.transcription) && (
+                      <p>{transcriptionLowText(state.transcription)}</p>
+                    )}
+                    {transcriptionReconnectText(state.transcription) && (
+                      <p role="status">
+                        {transcriptionReconnectText(state.transcription)}
+                      </p>
+                    )}
                   </div>
-                )}
-              </div>
-            </section>
+                </div>
+                <div className="session-actions">
+                  {(live || simulated) && !preparing && (
+                    <span className="session-clock">
+                      {clockTime(state.elapsedMs)}
+                    </span>
+                  )}
+                  {!preparing &&
+                    !finishing &&
+                    live &&
+                    !capture.state?.processor && (
+                      <button
+                        className="secondary-button"
+                        disabled={busy}
+                        title={
+                          state.cuesPaused
+                            ? 'Only new speech can raise a cue after resuming.'
+                            : sourceApp
+                              ? 'Clear the current cue; application audio and transcript continue.'
+                              : 'Clear the current cue; microphone and transcript continue.'
+                        }
+                        onClick={toggleLiveCues}
+                      >
+                        {state.cuesPaused ? (
+                          <Play size={15} />
+                        ) : (
+                          <Pause size={15} />
+                        )}
+                        {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
+                      </button>
+                    )}
+                  {!preparing && !finishing && !live && !simulated && (
+                    <div className="session-start-group">
+                      <div className="session-start-buttons">
+                        {isEnded && showExport && (
+                          <button
+                            ref={exportButton}
+                            type="button"
+                            className="secondary-button export-button"
+                            onClick={prepareExport}
+                            disabled={!canExport}
+                          >
+                            <ArrowUpRight size={16} aria-hidden="true" />
+                            {exportLabel}
+                          </button>
+                        )}
+                        {liveStatus?.available ? (
+                          <button
+                            className="primary-button"
+                            ref={startButton}
+                            disabled={busy || startPending || micCheckActive}
+                            title={
+                              micCheckActive
+                                ? 'Stop the microphone check first.'
+                                : undefined
+                            }
+                            onClick={startLive}
+                          >
+                            <Play size={15} />
+                            Start live session
+                          </button>
+                        ) : (
+                          bridge.desktop &&
+                          isReady &&
+                          keysAvailable && (
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => setView('settings')}
+                            >
+                              <Settings size={15} aria-hidden="true" />
+                              Configure keys
+                            </button>
+                          )
+                        )}
+                      </div>
+                      {liveStatus?.available &&
+                        startDisclosure(capturesSystemAudio, liveStatus) && (
+                          <p className="session-start-disclosure">
+                            {startDisclosure(capturesSystemAudio, liveStatus)}
+                          </p>
+                        )}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
 
             <div className="ended-outcomes">
               <MeetingNotes
@@ -2598,41 +2803,43 @@ function Notebook() {
                     <span className="companion-state-tag">Stopped</span>
                   )}
                 </div>
-                <CueCard
-                  cue={state.cue}
-                  size={state.questionSize}
-                  busy={busy}
-                  onDismiss={dismiss}
-                  onHold={holdCue}
-                  empty={
-                    <div className="question-idle">
-                      <h3>
-                        {state.cuesPaused
-                          ? 'Cues are paused.'
-                          : live || simulated
-                            ? 'A little room to think.'
-                            : sessionLive
-                              ? 'Cues have stopped.'
-                              : liveStatus?.available
-                                ? 'Cues follow the conversation.'
-                                : 'Live cues are unavailable.'}
-                      </h3>
-                      <p>
-                        {state.cuesPaused
-                          ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
-                          : live || simulated
-                            ? 'Cues pass quietly. Keep listening without needing to respond.'
-                            : sessionLive
-                              ? 'Start a new session for cues.'
-                              : liveStatus?.available
-                                ? liveStatus.cueProvider
-                                  ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue when there’s something useful to add. Silence is normal.`
-                                  : 'During a session, cues appear one at a time when available. You can use one or let it pass.'
-                                : 'Check Settings for provider status and live-session setup requirements.'}
-                      </p>
-                    </div>
-                  }
-                />
+                {(isReady || isEnded) && !state.cue ? (
+                  <p className="companion-ready-note">
+                    {isEnded
+                      ? 'Cues have stopped. Start a new session for cues.'
+                      : liveStatus?.available
+                        ? liveStatus.cueProvider
+                          ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue here when helpful. Silence is normal.`
+                          : 'During a session, cues appear one at a time when available.'
+                        : 'Live cues are unavailable. Check Settings for provider status and live-session setup requirements.'}
+                  </p>
+                ) : (
+                  <CueCard
+                    cue={state.cue}
+                    size={state.questionSize}
+                    busy={busy}
+                    onDismiss={dismiss}
+                    onHold={holdCue}
+                    empty={
+                      <div className="question-idle">
+                        <h3>
+                          {state.cuesPaused
+                            ? 'Cues are paused.'
+                            : live || simulated
+                              ? 'A little room to think.'
+                              : 'Cues have stopped.'}
+                        </h3>
+                        <p>
+                          {state.cuesPaused
+                            ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
+                            : live || simulated
+                              ? 'Cues pass quietly. Keep listening without needing to respond.'
+                              : 'Start a new session for cues.'}
+                        </p>
+                      </div>
+                    }
+                  />
+                )}
                 {(live || simulated) && (
                   <p className="companion-footnote">
                     {state.live && capture.state?.processor
@@ -2923,7 +3130,7 @@ function Notebook() {
                   onNotice={setNotice}
                   onGranola={granolaChanged}
                   onOpenMeetings={() => setView('meetings')}
-                  onOpenSettings={() => setView('settings')}
+                  onOpenSettings={() => openSettingsSection('meetings')}
                 />
               </div>
             </div>
@@ -2955,20 +3162,41 @@ function Notebook() {
           <div className="secondary-page settings-page">
             <div className="settings-page-head">
               <h1>Settings</h1>
-              <p className="page-description">
-                Persistent preferences for providers, cues, capture, saved
-                meetings, and diagnostics.
-              </p>
               <nav className="settings-nav" aria-label="Settings sections">
-                <a href="#settings-providers">Providers &amp; keys</a>
-                <a href="#settings-cues">Cues &amp; companion</a>
-                <a href="#settings-capture">Capture &amp; prompts</a>
-                <a href="#settings-meetings">Meetings &amp; storage</a>
-                <a href="#settings-privacy">Privacy &amp; setup</a>
+                {(
+                  [
+                    ['providers', 'Providers & keys'],
+                    ['cues', 'Cues & companion'],
+                    ['capture', 'Capture & prompts'],
+                    ['meetings', 'Meetings & storage'],
+                    ['privacy', 'Privacy & setup'],
+                  ] as const
+                ).map(([sectionId, label]) => (
+                  <a
+                    key={sectionId}
+                    href={`#settings-${sectionId}`}
+                    className={
+                      settingsSection === sectionId ? 'is-active' : undefined
+                    }
+                    aria-current={
+                      settingsSection === sectionId ? 'page' : undefined
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setSettingsSection(sectionId);
+                    }}
+                  >
+                    {label}
+                  </a>
+                ))}
               </nav>
             </div>
 
-            <div className="settings-group" id="settings-providers">
+            <div
+              className="settings-group"
+              id="settings-providers"
+              hidden={settingsSection !== 'providers'}
+            >
               <h2
                 id="settings-group-providers"
                 className="settings-group-heading"
@@ -3007,7 +3235,11 @@ function Notebook() {
               </section>
             </div>
 
-            <div className="settings-group" id="settings-cues">
+            <div
+              className="settings-group"
+              id="settings-cues"
+              hidden={settingsSection !== 'cues'}
+            >
               <h2 id="settings-group-cues" className="settings-group-heading">
                 Cues &amp; companion
               </h2>
@@ -3197,7 +3429,11 @@ function Notebook() {
               </section>
             </div>
 
-            <div className="settings-group" id="settings-capture">
+            <div
+              className="settings-group"
+              id="settings-capture"
+              hidden={settingsSection !== 'capture'}
+            >
               <h2
                 id="settings-group-capture"
                 className="settings-group-heading"
@@ -3216,7 +3452,11 @@ function Notebook() {
               <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             </div>
 
-            <div className="settings-group" id="settings-meetings">
+            <div
+              className="settings-group"
+              id="settings-meetings"
+              hidden={settingsSection !== 'meetings'}
+            >
               <h2
                 id="settings-group-meetings"
                 className="settings-group-heading"
@@ -3260,7 +3500,11 @@ function Notebook() {
               />
             </div>
 
-            <div className="settings-group" id="settings-privacy">
+            <div
+              className="settings-group"
+              id="settings-privacy"
+              hidden={settingsSection !== 'privacy'}
+            >
               <h2
                 id="settings-group-privacy"
                 className="settings-group-heading"

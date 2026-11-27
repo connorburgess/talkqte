@@ -41,6 +41,10 @@ test('browser preview never asks for microphone access or invents activity', asy
     page.getByRole('button', { name: 'Start microphone' }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('Available in the macOS app');
   await expect(
@@ -57,6 +61,10 @@ test('microphone requires explicit start and only native snapshots confirm activ
     page.getByRole('region', { name: 'Microphone', exact: true }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText('Off');
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
@@ -94,6 +102,10 @@ test('microphone requires explicit start and only native snapshots confirm activ
   await signal(page, { status: 'off', canStart: true });
   await expect(panel).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(panel.getByRole('status')).toHaveText('Off');
   await expect(
     panel.getByRole('button', { name: 'Start microphone' }),
@@ -105,6 +117,10 @@ test('permission errors remain visible and retry waits for device cleanup', asyn
 }) => {
   await nativePage(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await panel.getByRole('button', { name: 'Start microphone' }).click();
   await signal(page, {
@@ -130,6 +146,10 @@ test('a failed stop command never reports the microphone as off', async ({
 }) => {
   await nativePage(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText('Off');
   await signal(page, { status: 'listening', canStart: false });
@@ -152,6 +172,10 @@ test('a queued stop acknowledges the request without claiming native cleanup has
 }) => {
   await nativePage(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await panel.getByRole('button', { name: 'Start microphone' }).click();
   await page.evaluate(() => window.microphoneTest.holdNextStop());
@@ -174,6 +198,10 @@ test('a delayed initial snapshot and older events cannot overwrite the microphon
     page.getByRole('region', { name: 'Microphone', exact: true }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel.getByRole('status')).toHaveText(
     'Checking microphone status…',
@@ -473,11 +501,15 @@ test('your name is applied when you leave the field, and a rejected name explain
 }) => {
   await nativePage(page, '?live');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   const name = page.getByRole('textbox', { name: 'Name' });
-  // Wide and tall enough to read and tap, not a checkbox-sized box.
+  // Wide and comfortably sized for desktop reading and editing.
   const box = (await name.boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(160);
-  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(32);
   await name.fill('  Sam ');
   await name.press('Enter');
   await expect(name).toHaveValue('Sam');
@@ -496,6 +528,10 @@ test('input label follows ordered capture state through stop, failure and explic
 }) => {
   await nativePage(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).not.toContainText('Input:');
   const help = panel.locator('summary', { hasText: 'Change microphone' });
@@ -557,13 +593,14 @@ test('live input name and change instructions remain reachable in Settings witho
   await expect(panel).toContainText('Input: Garden USB microphone');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(panel).toContainText('Input: Garden USB microphone');
-  await panel.locator('summary').focus();
+  const changeMic = panel.locator('summary', { hasText: 'Change microphone' });
+  await changeMic.focus();
   await page.keyboard.press('Enter');
   await expect(panel).toContainText('System Settings → Sound → Input');
   await expect(
     panel.getByRole('button', { name: 'Stop live session' }),
   ).toBeEnabled();
-  await expect(panel.locator('summary')).toBeFocused();
+  await expect(changeMic).toBeFocused();
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
     'stop_microphone',
   );
@@ -575,6 +612,10 @@ test('unknown and long input names do not hide narrow-window controls', async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await nativePage(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await signal(page, { status: 'listening', deviceName: null });
   const panel = page.getByRole('region', { name: 'Microphone', exact: true });
   await expect(panel).toContainText('Input: name unavailable');
