@@ -117,7 +117,11 @@ export function MeetingAsk({
               {entry.answer.insufficient ? ' · insufficient evidence' : ''}
             </p>
             <p className="ask-answer">{entry.answer.answer}</p>
-            <div className="ask-citations" aria-label="Answer sources">
+            <div
+              className="ask-citations"
+              role="group"
+              aria-label="Answer sources"
+            >
               {entry.answer.citations.map((id) => {
                 const line = entry.scope.lines.find((value) => value.id === id);
                 const available = snapshot.transcript.some(

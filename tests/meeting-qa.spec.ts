@@ -93,6 +93,10 @@ test('bounded scope explicitly excludes beginning and authored insufficient answ
   await expect(page.getByRole('button', { name: /Transcript \d/ })).toHaveCount(
     0,
   );
+  const audit = await new AxeBuilder({ page })
+    .include('.meeting-ask')
+    .analyze();
+  expect(audit.violations).toEqual([]);
 });
 test('held answer can be cancelled; errors retain the question for retry', async ({
   page,
