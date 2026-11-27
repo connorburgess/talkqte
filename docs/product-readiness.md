@@ -30,6 +30,30 @@ Pending at this checkpoint: [PR469](https://github.com/connorburgess/talkqte/pul
 
 No roadmap item is completed here. The next technical acceptance is one separately authorized fictional two-sided call on an exact build: verify the disclosed source, transcription/cue latency, Off, Stop/release and recovery against the [budgets](budgets.md). Native VoiceOver/focus/Spaces/sharing, representative sustained cost, human participation/listening comparisons and signed/notarized clean installation/upgrade remain independent gates. [Operating estimates](operating-estimates.md) supplies current pricing assumptions without converting a short lab sample into an hourly measurement.
 
+## Combined integration candidate — 27 November 2026
+
+The integration candidate combines the notebook redesign with meeting organization,
+saved-note availability, Interview mode, bounded live Ask, accurate retention
+copy and native build identity. It also includes prepare-before-delete recovery
+and rejection of delayed authentication errors from retired cue requests. These
+are source capabilities in the candidate, not a claim that a release has shipped
+or that an installed app contains them. The preceding `a26d6ff` checkpoint is a
+historical main-branch inventory.
+
+The merge preserves manual meeting order when preparing an index for deletion,
+retains the organization and write-failure regressions, and preserves the separate
+Ask and cue-processing lifecycles. The combined frontend builds; 50 focused
+Chromium/WebKit checks cover interview selection, notebook readiness, saved
+meetings and build identity. Combined native and full browser validation remain
+pending. Earlier per-branch results do not substitute for these combined checks.
+
+Next acceptance: complete the combined regression suites, review the rendered
+ready/live/ended states, and verify the exact installed build identity and native
+Start/Stop, persistence, dock navigation and recovery. Published fictional QA
+captures keep their actual source revisions. Native accessibility, live answer
+and cue usefulness, signed distribution and upgrade recovery remain open even
+if the candidate passes automated checks. No readiness gate is closed here.
+
 ## Technical proof priorities and ownership
 
 The [roadmap's current focus](../ROADMAP.md#current-focus) carries forward the prepared-take and adaptive-speech priorities. These are acceptance requirements, not claims that an open branch, offline module or fictional showcase is a run-ready integration. Preserve the selected cloud direction and per-session review above; exact compatible native/JS packages, source scope and runtime evidence must be reviewed together before any separately authorized run.

@@ -37,7 +37,7 @@ The [proof priorities and ownership](docs/product-readiness.md#technical-proof-p
 
 **Keeping documents current.** `npm run check:docs` runs in CI on every pull request. It fails on a broken relative link or heading anchor in any Markdown file, and when a number a document quotes from the source (cue lifetimes, companion window sizes) no longer matches the source. It also posts a reminder when app source changes and no document does. It cannot judge whether prose is still true, so the review above still applies.
 
-The [27 November evidence checkpoint](docs/product-readiness.md#current-capability-checkpoint--27-november-2026) separates merged main from pending PR469–472. No native/manual/human gate is checked off by this documentation reconciliation.
+The [27 November evidence checkpoint](docs/product-readiness.md#current-capability-checkpoint--27-november-2026) preserves the historical main inventory. The [combined integration candidate](docs/product-readiness.md#combined-integration-candidate--27-november-2026) records the later source combination and its pending acceptance. Neither record establishes installed or released behavior; no native/manual/human gate is checked off.
 
 ## Development milestones
 
