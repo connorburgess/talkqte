@@ -131,7 +131,7 @@ export function MeetingAsk({
                   line && (
                     <button
                       type="button"
-                      className="button subtle"
+                      className="text-button"
                       key={id}
                       disabled={!available}
                       title={
@@ -205,7 +205,7 @@ export function MeetingAsk({
         )}
         <div className="ask-actions">
           <button
-            className="button primary"
+            className="primary-button"
             type="submit"
             disabled={!scope || preparing || busy || !question.trim()}
             aria-describedby={scope ? 'ask-scope' : undefined}
@@ -214,7 +214,7 @@ export function MeetingAsk({
           </button>
           {busy ? (
             <button
-              className="button secondary"
+              className="secondary-button"
               type="button"
               onClick={() => void cancel()}
             >
@@ -222,7 +222,7 @@ export function MeetingAsk({
             </button>
           ) : (
             <button
-              className="button subtle"
+              className="text-button"
               type="button"
               disabled={preparing}
               onClick={() => void refresh()}
@@ -235,8 +235,8 @@ export function MeetingAsk({
       </form>
       <p className="muted small">
         Questions and answers stay in memory for this session. They are not
-        added to the transcript, saved meetings or exports. Capture and
-        automatic cues continue independently.
+        added to the transcript, saved meetings or exports. While running,
+        capture and automatic cues continue independently.
       </p>
       <div role="status" aria-live="polite">
         {busy ? 'Waiting for a model answer. You can cancel.' : error}

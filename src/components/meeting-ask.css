@@ -89,7 +89,7 @@
   .ask-history {
     max-height: 340px;
   }
-  .ask-actions .button {
+  .ask-actions button {
     min-height: 44px;
   }
 }

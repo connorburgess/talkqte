@@ -2286,7 +2286,7 @@ function Notebook() {
                     {state.transcript.length > 0 && (
                       <button
                         type="button"
-                        className="button subtle"
+                        className="text-button"
                         onClick={() => {
                           const latest = state.transcript.at(-1);
                           const element =
