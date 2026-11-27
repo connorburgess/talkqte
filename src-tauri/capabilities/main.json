@@ -7,6 +7,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snapshot",
+    "allow-build-info",
     "allow-processing-snapshot",
     "allow-stop-capture",
     "allow-review-processing-scope",
@@ -24,6 +25,7 @@
     "allow-set-sensitivity",
     "allow-set-user-name",
     "allow-set-focus",
+    "allow-set-session-mode",
     "allow-set-overlay",
     "allow-export-markdown",
     "allow-export-preview",
@@ -51,6 +53,7 @@
     "allow-rename-meeting-folder",
     "allow-delete-meeting-folder",
     "allow-set-kept-meeting-folder",
+    "allow-position-kept-meeting",
     "allow-kept-meeting-export-preview",
     "allow-export-kept-meeting",
     "allow-list-kept-meetings-for-context",
@@ -118,6 +121,11 @@
     "allow-update-status",
     "allow-set-check-for-updates-at-launch",
     "allow-check-for-updates",
-    "allow-download-and-install-update"
+    "allow-download-and-install-update",
+    "allow-open-meeting-panel",
+    "allow-question-scope",
+    "allow-ask-question",
+    "allow-cancel-question",
+    "allow-question-history"
   ]
 }

@@ -258,6 +258,45 @@
   max-width: none;
   border-bottom: 1px solid var(--line);
 }
+.notebook-processing .processing-panel.is-compact-live {
+  padding: var(--space-12) 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+}
+.notebook-processing .processing-panel.is-compact-live .processing-heading {
+  gap: var(--space-8);
+}
+.notebook-processing .processing-panel.is-compact-live .processing-heading h2 {
+  font-size: 15px;
+}
+.notebook-processing .processing-panel.is-compact-live > p {
+  margin-top: 0;
+  font-size: 13px;
+}
+.notebook-processing .processing-panel.is-compact-live .processing-approved {
+  margin-top: 0;
+  font-size: 13px;
+}
+.notebook-processing .processing-panel.is-compact-live .processing-actions {
+  margin-top: 0;
+  margin-left: auto;
+}
+.notebook-processing
+  .processing-panel.is-compact-live
+  .processing-actions
+  button {
+  min-height: 44px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.notebook-processing .processing-panel.is-compact-live > .processing-muted {
+  flex: 1 1 100%;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: none;
+}
 @media (max-width: 1200px) {
   .notebook-processing {
     padding-inline: var(--space-24);

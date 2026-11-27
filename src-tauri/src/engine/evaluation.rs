@@ -540,6 +540,7 @@ impl Engine {
                 sources,
                 existing.clone(),
             )?
+            .with_session_mode(self.state.session_mode)?
             .with_listener(self.state.user_name.clone(), state.earlier.clone())
         };
         let mut request = make_request(sources)?;
@@ -1416,6 +1417,7 @@ mod lab_tests;
 
 #[cfg(test)]
 mod tests {
+    mod boundary_tests;
     mod history_tests;
     mod usefulness_tests;
     use super::*;

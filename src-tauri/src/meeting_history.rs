@@ -284,6 +284,9 @@ pub struct Summary {
     /// Whether the meeting holds kept meeting notes.
     #[serde(default)]
     pub has_meeting_notes: bool,
+    /// Nonblank user notes or kept model notes, never transcript/cues.
+    #[serde(default)]
+    pub has_notes: bool,
     /// Optional folder name; `None` means unfiled at the top.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
@@ -302,6 +305,12 @@ impl Meeting {
             duration_ms: self.content.duration_ms,
             sources: self.content.sources,
             has_meeting_notes: self.content.meeting_notes.is_some(),
+            has_notes: !self.content.notes.trim().is_empty()
+                || self
+                    .content
+                    .meeting_notes
+                    .as_deref()
+                    .is_some_and(|notes| !notes.trim().is_empty()),
             folder: self.folder.clone(),
             archived: self.archived,
         }
@@ -718,6 +727,13 @@ impl Content {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Placement {
+    Before,
+    After,
+}
+
 /// Why a change to the history was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -787,6 +803,9 @@ pub struct Listing {
 struct IndexFile {
     version: u64,
     meetings: Vec<Summary>,
+    /// Absent in older files: migrate their date ordering on read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    order: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     folders: Vec<String>,
 }
@@ -866,18 +885,37 @@ fn owner_only_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
-/// Replaces `path` with `bytes` atomically, owner-only.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("no folder"))?;
-    owner_only_dir(directory)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| std::io::Error::other("no file name"))?
-        .to_string_lossy();
-    let temporary = directory.join(format!(".{name}.{}.tmp", std::process::id()));
-    let result = (|| {
+/// An owner-only replacement, fully written and synced but not published.
+/// Dropping it after any failure leaves the destination untouched.
+struct PreparedWrite {
+    destination: PathBuf,
+    temporary: PathBuf,
+}
+
+impl PreparedWrite {
+    fn new(path: &Path, bytes: &[u8]) -> std::io::Result<Self> {
+        Self::with_writer(path, |file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+    }
+
+    fn with_writer(
+        path: &Path,
+        write: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+    ) -> std::io::Result<Self> {
+        let directory = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("no folder"))?;
+        owner_only_dir(directory)?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("no file name"))?
+            .to_string_lossy();
+        let prepared = Self {
+            destination: path.to_path_buf(),
+            temporary: directory.join(format!(".{name}.{}.tmp", std::process::id())),
+        };
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
@@ -885,20 +923,30 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut file = options.open(&temporary)?;
+        let mut file = options.open(&prepared.temporary)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        write(&mut file)?;
+        Ok(prepared)
     }
-    result
+
+    fn commit(self) -> std::io::Result<()> {
+        fs::rename(&self.temporary, &self.destination)
+    }
+}
+
+impl Drop for PreparedWrite {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.temporary);
+    }
+}
+
+/// Replaces `path` with `bytes` atomically, owner-only.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    PreparedWrite::new(path, bytes)?.commit()
 }
 
 fn render<T: Serialize>(value: &T) -> Vec<u8> {
@@ -983,7 +1031,7 @@ impl Store {
         let index: IndexFile =
             serde_json::from_value(value).map_err(|_| Availability::Unavailable)?;
         let mut seen = std::collections::HashSet::new();
-        let meetings = index
+        let mut meetings: Vec<Summary> = index
             .meetings
             .into_iter()
             .filter(|entry| valid_id(&entry.id) && seen.insert(entry.id.clone()))
@@ -997,6 +1045,20 @@ impl Store {
             })
             .take(MAX_MEETINGS)
             .collect();
+        meetings.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
+        let ranks: std::collections::HashMap<&str, usize> = index
+            .order
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(rank, id)| (id.as_str(), rank))
+            .collect();
+        meetings.sort_by_key(|meeting| {
+            ranks
+                .get(meeting.id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         let mut seen_folders = std::collections::HashSet::new();
         let folders = index
             .folders
@@ -1027,18 +1089,27 @@ impl Store {
         }
     }
 
-    fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
-        let mut entries = entries.to_vec();
-        entries.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
-        write_atomic(
+    fn prepare_index(
+        root: &Path,
+        entries: &[Summary],
+        folders: &[String],
+    ) -> Result<PreparedWrite, Error> {
+        PreparedWrite::new(
             &Self::index_path(root),
             &render(&IndexFile {
                 version: VERSION,
-                meetings: entries,
+                meetings: entries.to_vec(),
+                order: entries.iter().map(|entry| entry.id.clone()).collect(),
                 folders: folders.to_vec(),
             }),
         )
         .map_err(|_| Error::Write)
+    }
+
+    fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
+        Self::prepare_index(root, entries, folders)?
+            .commit()
+            .map_err(|_| Error::Write)
     }
 
     fn write_meeting(root: &Path, meeting: &Meeting) -> Result<(), Error> {
@@ -1104,7 +1175,6 @@ impl Store {
                 Found::Newer | Found::Unreadable => unreadable += 1,
             }
         }
-        meetings.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms).then(a.id.cmp(&b.id)));
         Listing {
             availability: Availability::On,
             meetings,
@@ -1162,7 +1232,7 @@ impl Store {
             content,
         };
         Self::write_meeting(&root, &meeting)?;
-        entries.push(meeting.summary());
+        entries.insert(0, meeting.summary());
         if let Err(error) = Self::write_index(&root, &entries, &folders) {
             let _ = fs::remove_dir_all(root.join(&meeting.id));
             return Err(error);
@@ -1258,25 +1328,70 @@ impl Store {
     /// Assigns a kept meeting to an existing folder, or `None` to unfile it
     /// back to the top.
     pub fn set_folder(&self, id: &str, folder: Option<&str>) -> Result<Summary, Error> {
-        let target = match folder {
-            Some(name) => Some(valid_folder_name(name)?),
-            None => None,
+        self.position(id, folder, None, Placement::Before)
+    }
+
+    /// Move only this meeting. Hidden/archived entries and every other pair
+    /// retain relative order. `None` anchor appends to the destination group.
+    pub fn position(
+        &self,
+        id: &str,
+        folder: Option<&str>,
+        anchor_id: Option<&str>,
+        placement: Placement,
+    ) -> Result<Summary, Error> {
+        if !valid_id(id) || anchor_id.is_some_and(|anchor| !valid_id(anchor) || anchor == id) {
+            return Err(Error::Missing);
+        }
+        let _guard = self.lock.lock();
+        let (root, mut entries, folders) = self.writable()?;
+        let target = folder
+            .map(|name| {
+                let clean = valid_folder_name(name)?;
+                folders
+                    .iter()
+                    .find(|existing| existing.to_lowercase() == clean.to_lowercase())
+                    .cloned()
+                    .ok_or(Error::FolderMissing)
+            })
+            .transpose()?;
+        let position = entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .ok_or(Error::Missing)?;
+        if let Some(anchor) = anchor_id {
+            if !entries
+                .iter()
+                .any(|entry| entry.id == anchor && entry.folder == target)
+            {
+                return Err(Error::Missing);
+            }
+        }
+        let mut meeting = match read_meeting(&Self::meeting_path(&root, id), id) {
+            Found::Meeting(meeting) => *meeting,
+            Found::Newer => return Err(Error::Newer),
+            Found::Unreadable => return Err(Error::Unreadable),
         };
-        self.change(id, |meeting, folders| {
-            let resolved = match target {
-                Some(name) => {
-                    let canonical = folders
-                        .iter()
-                        .find(|existing| existing.to_lowercase() == name.to_lowercase())
-                        .cloned()
-                        .ok_or(Error::FolderMissing)?;
-                    Some(canonical)
-                }
-                None => None,
-            };
-            meeting.folder = resolved;
-            Ok(())
-        })
+        meeting.folder = target.clone();
+        meeting.revision += 1;
+        entries.remove(position);
+        let insert = if let Some(anchor) = anchor_id {
+            let index = entries
+                .iter()
+                .position(|entry| entry.id == anchor)
+                .ok_or(Error::Missing)?;
+            index + usize::from(placement == Placement::After)
+        } else {
+            entries
+                .iter()
+                .rposition(|entry| entry.folder == target)
+                .map_or(entries.len(), |index| index + 1)
+        };
+        let summary = meeting.summary();
+        entries.insert(insert, summary.clone());
+        Self::write_meeting(&root, &meeting)?;
+        Self::write_index(&root, &entries, &folders)?;
+        Ok(summary)
     }
 
     /// Marks a kept meeting as archived (permanently excluded from automatic
@@ -1516,8 +1631,9 @@ impl Store {
             .collect())
     }
 
-    /// Deletes one kept meeting for good: its folder is removed, then the
-    /// list. A folder that cannot be removed leaves the meeting listed.
+    /// Prepares and syncs the replacement index before deleting any content.
+    /// An index write failure leaves the saved meeting intact and retryable.
+    /// The directory removal and final index rename are not one transaction.
     pub fn delete(&self, id: &str) -> Result<(), Error> {
         if !valid_id(id) {
             return Err(Error::Missing);
@@ -1527,12 +1643,13 @@ impl Store {
         let Some(position) = entries.iter().position(|entry| entry.id == id) else {
             return Err(Error::Missing);
         };
+        entries.remove(position);
+        let prepared = Self::prepare_index(&root, &entries, &folders)?;
         let folder = root.join(id);
         if folder.exists() {
             fs::remove_dir_all(&folder).map_err(|_| Error::Write)?;
         }
-        entries.remove(position);
-        Self::write_index(&root, &entries, &folders)
+        prepared.commit().map_err(|_| Error::Write)
     }
 
     /// Deletes every kept meeting, including any that could not be read or

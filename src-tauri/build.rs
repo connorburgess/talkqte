@@ -1,3 +1,5 @@
+mod build_metadata;
+
 /// The application-audio command exists, and is allowed for the main window,
 /// only in a macOS build: ScreenCaptureKit is macOS's.
 fn with_development_commands(commands: &[&'static str]) -> &'static [&'static str] {
@@ -9,9 +11,11 @@ fn with_development_commands(commands: &[&'static str]) -> &'static [&'static st
 }
 
 fn main() {
+    build_metadata::emit();
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(with_development_commands(&[
             "snapshot",
+            "build_info",
             "processing_snapshot",
             "call_prompt_settings",
             "set_call_prompt",
@@ -38,12 +42,18 @@ fn main() {
             "set_sensitivity",
             "set_user_name",
             "set_focus",
+            "set_session_mode",
             "set_overlay",
             "export_markdown",
             "export_preview",
             "set_keep_meeting",
             "resolve_echo_line",
             "rename_speaker",
+            "question_scope",
+            "ask_question",
+            "cancel_question",
+            "question_history",
+            "open_meeting_panel",
             "meeting_notes_plan",
             "write_meeting_notes",
             "cancel_meeting_notes",
@@ -66,6 +76,7 @@ fn main() {
             "rename_meeting_folder",
             "delete_meeting_folder",
             "set_kept_meeting_folder",
+            "position_kept_meeting",
             "kept_meeting_export_preview",
             "export_kept_meeting",
             "list_kept_meetings_for_context",

@@ -8,10 +8,12 @@ import {
   Cloud,
   CloudOff,
   CloudUpload,
+  CornerUpLeft,
   EyeOff,
   FileText,
   History,
   MessageCircle,
+  MessageSquareText,
   Mic,
   Pause,
   Play,
@@ -45,6 +47,10 @@ import { MeetingHistory } from './components/MeetingHistory';
 import { SpeakerChip } from './components/SpeakerChip';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
+import { MeetingAsk } from './components/MeetingAsk';
+import { BuildVersion } from './components/BuildVersion';
+import { openMeetingPanel } from './lib/meetingQa';
+import { SessionMode } from './components/SessionMode';
 import type { HistoryStatus } from './lib/meetingHistory';
 import {
   PanelDivider,
@@ -460,6 +466,18 @@ function FloatingQuestion() {
                   <Square size={14} aria-hidden="true" />
                 </button>
               ) : null}
+              {state?.live && (
+                <button
+                  type="button"
+                  className="companion-control"
+                  aria-label="Transcript and Ask"
+                  title="Open transcript and Ask in notebook"
+                  disabled={busy}
+                  onClick={() => void run(() => openMeetingPanel('transcript'))}
+                >
+                  <BookOpen size={16} aria-hidden="true" />
+                </button>
+              )}
               <button
                 className="companion-control"
                 aria-label="Hide companion"
@@ -783,6 +801,12 @@ function Notebook() {
     sub('meeting-history:changed', () => {
       setHistoryRevision((count) => count + 1);
     });
+    sub<string>('meeting:open-panel', (panel) => {
+      if (panel !== 'ask' && panel !== 'transcript') return;
+      setView('notebook');
+      setTab(panel);
+      setPanelFocus({ panel, seq: Date.now() });
+    });
     sub('end-prompt:write-notes', () => {
       setView('notebook');
       setNotesPlanTrigger((count) => count + 1);
@@ -818,7 +842,29 @@ function Notebook() {
     focusCancel.current = false;
     if (document.activeElement === document.body) cancelButton.current?.focus();
   }, [preparing, capture.state?.startup]);
-  const [tab, setTab] = useState<'notes' | 'transcript'>('notes');
+  const [panelFocus, setPanelFocus] = useState<{
+    panel: 'ask' | 'transcript';
+    seq: number;
+  } | null>(null);
+  const [citation, setCitation] = useState<string | null>(null);
+  const [citedLine, setCitedLine] = useState<string | null>(null);
+  useEffect(() => {
+    if (!panelFocus && !citation) return;
+    const timer = setTimeout(() => {
+      const target = document.getElementById(
+        citation
+          ? `transcript-line-${citation}`
+          : panelFocus?.panel === 'ask'
+            ? 'ask-question'
+            : 'transcript-tab',
+      );
+      target?.focus();
+      target?.scrollIntoView({ block: 'nearest' });
+      setCitation(null);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [panelFocus, citation]);
+  const [tab, setTab] = useState<'notes' | 'transcript' | 'ask'>('notes');
   const [notes, setNotes] = useState('');
   const [userName, setUserName] = useState('');
   const [nameError, setNameError] = useState('');
@@ -1040,14 +1086,9 @@ function Notebook() {
   useEffect(() => {
     if (focusError || suggestionError) setFocusExpanded(true);
   }, [focusError, suggestionError]);
-  const pendingFocus = useRef<'appearance' | null>(null);
   useEffect(() => {
-    if (!pendingFocus.current) return;
-    pendingFocus.current = null;
-    const element = document.getElementById('question-size');
-    element?.scrollIntoView({ block: 'center' });
-    element?.focus();
-  }, [view, tab]);
+    setCitedLine(null);
+  }, [state?.session]);
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
@@ -1547,7 +1588,10 @@ function Notebook() {
         (document.activeElement === actionFocus ||
           document.activeElement === document.body)
       ) {
-        (notesEditor.current ?? transcriptTab.current)?.focus();
+        (tab === 'ask'
+          ? document.getElementById('ask-question')
+          : (notesEditor.current ?? transcriptTab.current)
+        )?.focus();
       }
     });
   };
@@ -1607,6 +1651,22 @@ function Notebook() {
       setPreview(await bridge.exportPreview());
     });
 
+  const isActive = live || simulated || preparing || finishing;
+  const isEnded = sessionLive && !live && !preparing && !finishing;
+  const isReady = !isActive && !isEnded;
+  const hasExportableContent =
+    notes.trim().length > 0 ||
+    state.transcript.length > 0 ||
+    state.meetingNotes === 'kept';
+  const showExport = !live && !preparing && !finishing && hasExportableContent;
+  const canExport = !busy && showExport;
+  const exportLabel = 'Export Markdown…';
+  const notebookStateClass = isActive
+    ? 'is-live'
+    : isEnded
+      ? 'is-ended'
+      : 'is-ready notebook-idle';
+
   return (
     <div className="app-shell" ref={measureShell}>
       <aside
@@ -1655,9 +1715,7 @@ function Notebook() {
               <Settings size={19} />
               Settings
             </button>
-            <div className="version">
-              TalkQTE <span>0.1 · alpha</span>
-            </div>
+            <BuildVersion />
           </div>
         </div>
         {view === 'notebook' && listResizable && (
@@ -1695,7 +1753,7 @@ function Notebook() {
             {view === 'notebook' && sessionLive && (
               <>
                 <ChevronRight size={14} />
-                <span>Live session</span>
+                <span>{isEnded ? 'Ended session' : 'Live session'}</span>
               </>
             )}
           </div>
@@ -1820,8 +1878,11 @@ function Notebook() {
         )}
 
         {view === 'notebook' && !showOnboarding && (
-          <div className="notebook-body">
-            <section className="session-strip" aria-label="Session">
+          <div className={`notebook-body ${notebookStateClass}`}>
+            <section
+              className={`session-strip ${notebookStateClass}`}
+              aria-label="Session"
+            >
               <div className="session-state">
                 {/* A dot only while something runs; idle and ended have none. */}
                 {(live || simulated || preparing || finishing) && (
@@ -1835,24 +1896,37 @@ function Notebook() {
                     }`}
                   />
                 )}
-                <div>
-                  <h1 ref={sessionHeading} tabIndex={-1}>
-                    {preparing
-                      ? cancelling
-                        ? 'Cancelling start'
-                        : 'Preparing live session'
-                      : finishing
-                        ? 'Finishing live session'
-                        : sessionLive
-                          ? live
-                            ? state.cuesPaused
-                              ? 'Cues paused · session continues'
-                              : 'Live session in progress'
-                            : 'Live session ended'
-                          : simulated
-                            ? 'Simulated session'
-                            : 'No session yet'}
-                  </h1>
+                <div className="session-state-copy">
+                  <div className="session-heading-row">
+                    <h1 ref={sessionHeading} tabIndex={-1}>
+                      {preparing
+                        ? cancelling
+                          ? 'Cancelling start'
+                          : 'Preparing live session'
+                        : finishing
+                          ? 'Finishing live session'
+                          : sessionLive
+                            ? live
+                              ? state.cuesPaused
+                                ? 'Cues paused · session continues'
+                                : 'Live session in progress'
+                              : 'Live session ended'
+                            : simulated
+                              ? 'Simulated session'
+                              : liveStatus?.available && !micCheckActive
+                                ? 'Ready for a meeting'
+                                : 'No session yet'}
+                    </h1>
+                    {isEnded && (
+                      <span
+                        className={`session-badge${sessionHistory?.kept ? ' is-saved' : ''}`}
+                      >
+                        {sessionHistory?.kept
+                          ? 'Saved to Meetings'
+                          : 'In memory'}
+                      </span>
+                    )}
+                  </div>
                   <p>
                     {preparing
                       ? 'Starting…'
@@ -1891,31 +1965,24 @@ function Notebook() {
                                     ? `Nothing is captured. ${liveStatus.reason}`
                                     : 'Nothing is captured.'}
                   </p>
-                  {capturesSystemAudio &&
-                    liveStatus?.available &&
-                    !sessionLive &&
-                    !simulated &&
-                    !preparing &&
-                    !finishing && (
-                      <p className="small muted">
-                        Use headphones if you can—speaker playback can echo into
-                        your mic and TalkQTE can’t catch every repeat.
-                      </p>
-                    )}
-                  {notMacos(platform) &&
-                    !sessionLive &&
-                    !simulated &&
-                    !preparing &&
-                    !finishing && (
-                      <p className="small muted">
-                        On {platformName(platform)}, live sessions hear your
-                        microphone only: with headphones, that is your side of a
-                        call. Hearing another application is not available on{' '}
-                        {platformName(platform)} yet.
-                      </p>
-                    )}
+                  {capturesSystemAudio && liveStatus?.available && isReady && (
+                    <p className="session-hint">
+                      Use headphones if you can—speaker playback can echo into
+                      your mic and TalkQTE can’t catch every repeat.
+                    </p>
+                  )}
+                  {notMacos(platform) && isReady && (
+                    <p className="session-hint">
+                      On {platformName(platform)}, live sessions hear your
+                      microphone only: with headphones, that is your side of a
+                      call. Hearing another application is not available on{' '}
+                      {platformName(platform)} yet.
+                    </p>
+                  )}
                   {state.live && state.meetingTitle && !preparing && (
-                    <p className="small muted">Meeting: {state.meetingTitle}</p>
+                    <p className="session-hint">
+                      Meeting: {state.meetingTitle}
+                    </p>
                   )}
                   {!state.live &&
                     !simulated &&
@@ -1945,9 +2012,21 @@ function Notebook() {
                       </div>
                     )}
                   {transcriptionStopText(state.transcription) && (
-                    <p role="alert">
-                      {transcriptionStopText(state.transcription)}
-                    </p>
+                    <div className="session-alert-row">
+                      <p role="alert">
+                        {transcriptionStopText(state.transcription)}
+                      </p>
+                      {(state.transcription?.stopped === 'auth' ||
+                        state.transcription?.stopped === 'key_unavailable') && (
+                        <button
+                          type="button"
+                          className="secondary-button session-recovery-button"
+                          onClick={() => setView('settings')}
+                        >
+                          Open Settings
+                        </button>
+                      )}
+                    </div>
                   )}
                   {applicationEndedText(state.sources) && (
                     <p role="alert">{applicationEndedText(state.sources)}</p>
@@ -2002,24 +2081,22 @@ function Notebook() {
                       {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
                     </button>
                   )}
-                <button
-                  ref={exportButton}
-                  className="secondary-button export-button"
-                  onClick={prepareExport}
-                  disabled={busy || live || preparing || finishing}
-                  title={
-                    live || finishing
-                      ? 'Stop the live session to export your notes. The transcript is never exported.'
-                      : undefined
-                  }
-                >
-                  <ArrowUpRight size={16} />
-                  Export
-                </button>
                 {!preparing && !finishing && !live && !simulated && (
                   <div className="session-start-group">
-                    {liveStatus?.available && (
-                      <>
+                    <div className="session-start-buttons">
+                      {isEnded && showExport && (
+                        <button
+                          ref={exportButton}
+                          type="button"
+                          className="secondary-button export-button"
+                          onClick={prepareExport}
+                          disabled={!canExport}
+                        >
+                          <ArrowUpRight size={16} aria-hidden="true" />
+                          {exportLabel}
+                        </button>
+                      )}
+                      {liveStatus?.available ? (
                         <button
                           className="primary-button"
                           ref={startButton}
@@ -2034,28 +2111,47 @@ function Notebook() {
                           <Play size={15} />
                           Start live session
                         </button>
-                        {startDisclosure(capturesSystemAudio, liveStatus) && (
-                          <p className="session-start-disclosure">
-                            {startDisclosure(capturesSystemAudio, liveStatus)}
-                          </p>
-                        )}
-                      </>
-                    )}
+                      ) : (
+                        bridge.desktop &&
+                        isReady &&
+                        keysAvailable && (
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => setView('settings')}
+                          >
+                            <Settings size={15} aria-hidden="true" />
+                            Configure keys
+                          </button>
+                        )
+                      )}
+                    </div>
+                    {liveStatus?.available &&
+                      startDisclosure(capturesSystemAudio, liveStatus) && (
+                        <p className="session-start-disclosure">
+                          {startDisclosure(capturesSystemAudio, liveStatus)}
+                        </p>
+                      )}
                   </div>
                 )}
               </div>
             </section>
 
-            <MeetingNotes snapshot={state} openPlanTrigger={notesPlanTrigger} />
-            <KeepInHistory
-              snapshot={state}
-              historyRevision={historyRevision}
-              onKept={() => setHistoryRevision((r) => r + 1)}
-              onStatus={setSessionHistory}
-            />
+            <div className="ended-outcomes">
+              <MeetingNotes
+                snapshot={state}
+                openPlanTrigger={notesPlanTrigger}
+              />
+              <KeepInHistory
+                snapshot={state}
+                historyRevision={historyRevision}
+                onKept={() => setHistoryRevision((r) => r + 1)}
+                onStatus={setSessionHistory}
+              />
+            </div>
 
             <div
-              className={`notebook-grid${splitContent ? ' is-split' : ''}`}
+              className={`notebook-grid${splitContent ? ' is-split' : ''}${isReady ? ' is-ready-grid' : isEnded ? ' is-ended-grid' : ' is-live-grid'}`}
               ref={measureGrid}
               style={
                 splitContent
@@ -2066,57 +2162,89 @@ function Notebook() {
               }
             >
               <section className="editor-section" id="meeting-editor">
-                <div
-                  className="tabs"
-                  role="tablist"
-                  aria-label="Meeting content"
-                  onKeyDown={(e) => {
-                    const next =
-                      e.key === 'Home'
-                        ? 'notes'
-                        : e.key === 'End'
-                          ? 'transcript'
-                          : e.key === 'ArrowRight' || e.key === 'ArrowLeft'
-                            ? tab === 'notes'
-                              ? 'transcript'
-                              : 'notes'
-                            : null;
-                    if (!next) return;
-                    e.preventDefault();
-                    setTab(next);
-                    document.getElementById(`${next}-tab`)?.focus();
-                  }}
-                >
-                  <button
-                    role="tab"
-                    aria-selected={tab === 'notes'}
-                    aria-controls="notes-panel"
-                    id="notes-tab"
-                    tabIndex={tab === 'notes' ? 0 : -1}
-                    onClick={() => setTab('notes')}
+                <div className="editor-heading">
+                  <div
+                    className="tabs"
+                    role="tablist"
+                    aria-label="Meeting content"
+                    onKeyDown={(e) => {
+                      const tabs = ['notes', 'transcript', 'ask'] as const;
+                      const next =
+                        e.key === 'Home'
+                          ? tabs[0]
+                          : e.key === 'End'
+                            ? tabs[2]
+                            : e.key === 'ArrowRight'
+                              ? tabs[(tabs.indexOf(tab) + 1) % 3]
+                              : e.key === 'ArrowLeft'
+                                ? tabs[(tabs.indexOf(tab) + 2) % 3]
+                                : null;
+                      if (!next) return;
+                      e.preventDefault();
+                      setTab(next);
+                      document.getElementById(`${next}-tab`)?.focus();
+                    }}
                   >
-                    <FileText size={16} />
-                    <span className="tab-label">Notes</span>
-                  </button>
-                  <button
-                    ref={transcriptTab}
-                    role="tab"
-                    aria-selected={tab === 'transcript'}
-                    aria-controls="transcript-panel"
-                    id="transcript-tab"
-                    tabIndex={tab === 'transcript' ? 0 : -1}
-                    onClick={() => setTab('transcript')}
-                  >
-                    <MessageCircle size={16} />
-                    <span className="tab-label">
-                      Transcript{' '}
-                      <span className="tab-count">
-                        {state.transcript.length}
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'notes'}
+                      aria-controls="notes-panel"
+                      id="notes-tab"
+                      tabIndex={tab === 'notes' ? 0 : -1}
+                      onClick={() => setTab('notes')}
+                    >
+                      <FileText size={16} aria-hidden="true" />
+                      <span className="tab-label">Notes</span>
+                    </button>
+                    <button
+                      ref={transcriptTab}
+                      role="tab"
+                      aria-selected={tab === 'transcript'}
+                      aria-controls="transcript-panel"
+                      id="transcript-tab"
+                      tabIndex={tab === 'transcript' ? 0 : -1}
+                      onClick={() => setTab('transcript')}
+                    >
+                      <MessageCircle size={16} aria-hidden="true" />
+                      <span className="tab-label">
+                        Transcript{' '}
+                        <span className="tab-count">
+                          {state.transcript.length}
+                        </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                    <button
+                      role="tab"
+                      id="ask-tab"
+                      aria-controls="ask-panel"
+                      aria-selected={tab === 'ask'}
+                      tabIndex={tab === 'ask' ? 0 : -1}
+                      onClick={() => {
+                        setCitedLine(null);
+                        setTab('ask');
+                      }}
+                    >
+                      <MessageSquareText size={16} aria-hidden="true" />
+                      <span className="tab-label">Ask</span>
+                    </button>
+                  </div>
                 </div>
-                {tab === 'notes' ? (
+                {tab === 'ask' ? (
+                  <div id="ask-panel" role="tabpanel" aria-labelledby="ask-tab">
+                    <MeetingAsk
+                      snapshot={state}
+                      onCitation={(id) => {
+                        setCitedLine(id);
+                        setTab('transcript');
+                        setCitation(id);
+                      }}
+                      onViewTranscript={() => {
+                        setTab('transcript');
+                        setPanelFocus({ panel: 'transcript', seq: Date.now() });
+                      }}
+                    />
+                  </div>
+                ) : tab === 'notes' ? (
                   <div
                     id="notes-panel"
                     role="tabpanel"
@@ -2142,9 +2270,21 @@ function Notebook() {
                       }}
                     />
                     <div className="editor-footer">
-                      <span>In memory for this session</span>
+                      <span>Working copy</span>
                       <div className="editor-footer-actions">
                         <span>{notes.length.toLocaleString()} / 20,000</span>
+                        {!isEnded && showExport && (
+                          <button
+                            ref={exportButton}
+                            type="button"
+                            className="secondary-button notebook-export"
+                            onClick={prepareExport}
+                            disabled={!canExport}
+                          >
+                            <ArrowUpRight size={15} aria-hidden="true" />
+                            {exportLabel}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={`dictation-button${notesDictating ? ' is-listening' : ''}`}
@@ -2217,21 +2357,82 @@ function Notebook() {
                     aria-labelledby="transcript-tab"
                     className="transcript"
                   >
-                    {(sessionLive || simulated) && (
-                      <p className="muted small">
-                        {sessionLive
-                          ? (sourcesHeading(
-                              state.sources,
-                              state.transcription,
-                              state.transcript.some(
-                                (segment) => segment.speakerId !== undefined,
-                              ),
-                            ) ??
-                            (sourceApp
-                              ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
-                              : `Your microphone · ${transcribedWhere(state.transcription)}`))
-                          : 'Fictional replay · not from microphone audio'}
-                      </p>
+                    {(state.transcript.length > 0 ||
+                      sessionLive ||
+                      simulated) && (
+                      <div className="transcript-toolbar">
+                        {(sessionLive || simulated) && (
+                          <p className="muted small">
+                            {sessionLive
+                              ? (sourcesHeading(
+                                  state.sources,
+                                  state.transcription,
+                                  state.transcript.some(
+                                    (segment) =>
+                                      segment.speakerId !== undefined,
+                                  ),
+                                ) ??
+                                (sourceApp
+                                  ? `Audio from ${sourceApp} · ${transcribedWhere(state.transcription)}`
+                                  : `Your microphone · ${transcribedWhere(state.transcription)}`))
+                              : 'Fictional replay · not from microphone audio'}
+                          </p>
+                        )}
+                        {state.transcript.length > 0 && (
+                          <div className="transcript-toolbar-actions">
+                            {citedLine && (
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() => {
+                                  setCitedLine(null);
+                                  setTab('ask');
+                                  setPanelFocus({
+                                    panel: 'ask',
+                                    seq: Date.now(),
+                                  });
+                                }}
+                              >
+                                <CornerUpLeft size={14} aria-hidden="true" />
+                                Back to Ask
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => {
+                                const latest = state.transcript.at(-1);
+                                const element =
+                                  latest &&
+                                  document.getElementById(
+                                    `transcript-line-${latest.id}`,
+                                  );
+                                if (element) {
+                                  element.focus();
+                                  element.scrollIntoView({ block: 'nearest' });
+                                }
+                              }}
+                            >
+                              Jump to latest line
+                            </button>
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => {
+                                setCitedLine(null);
+                                setTab('ask');
+                                setPanelFocus({
+                                  panel: 'ask',
+                                  seq: Date.now(),
+                                });
+                              }}
+                            >
+                              <MessageSquareText size={14} aria-hidden="true" />
+                              Ask about transcript
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                     {(() => {
                       const allLines = transcriptLines(state);
@@ -2260,8 +2461,10 @@ function Notebook() {
                           {visibleLines.length ? (
                             visibleLines.map(({ segment, echo }) => (
                               <article
-                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}`}
+                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}${citedLine === segment.id ? ' is-cited' : ''}`}
                                 key={segment.id}
+                                id={`transcript-line-${segment.id}`}
+                                tabIndex={-1}
                               >
                                 <div className="transcript-segment-head">
                                   {segment.speakerId !== undefined ? (
@@ -2380,9 +2583,20 @@ function Notebook() {
                   onChange={resizeNotes}
                 />
               )}
-              <aside className="companion" aria-label="Question companion">
+              <aside
+                className={`companion${isReady ? ' is-standby' : isEnded ? ' is-ended-standby' : ''}`}
+                aria-label="Question companion"
+              >
                 <div className="companion-heading">
                   <h2>Cues</h2>
+                  {isReady && (
+                    <span className="companion-state-tag">
+                      {liveStatus?.available ? 'Standby' : 'Unavailable'}
+                    </span>
+                  )}
+                  {isEnded && (
+                    <span className="companion-state-tag">Stopped</span>
+                  )}
                 </div>
                 <CueCard
                   cue={state.cue}
@@ -2399,7 +2613,9 @@ function Notebook() {
                             ? 'A little room to think.'
                             : sessionLive
                               ? 'Cues have stopped.'
-                              : 'No cue yet.'}
+                              : liveStatus?.available
+                                ? 'Cues follow the conversation.'
+                                : 'Live cues are unavailable.'}
                       </h3>
                       <p>
                         {state.cuesPaused
@@ -2408,7 +2624,11 @@ function Notebook() {
                             ? 'Cues pass quietly. Keep listening without needing to respond.'
                             : sessionLive
                               ? 'Start a new session for cues.'
-                              : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
+                              : liveStatus?.available
+                                ? liveStatus.cueProvider
+                                  ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue when there’s something useful to add. Silence is normal.`
+                                  : 'During a session, cues appear one at a time when available. You can use one or let it pass.'
+                                : 'Check Settings for provider status and live-session setup requirements.'}
                       </p>
                     </div>
                   }
@@ -2424,277 +2644,289 @@ function Notebook() {
                         : 'Fictional replay with pre-authored cues.'}
                   </p>
                 )}
-                <button
-                  className="text-button companion-settings"
-                  onClick={() => {
-                    pendingFocus.current = 'appearance';
-                    setView('settings');
-                  }}
-                >
-                  <Settings size={14} />
-                  Cue appearance and timing
-                </button>
               </aside>
-            </div>
-            <section
-              className="meeting-focus"
-              aria-labelledby="meeting-focus-title"
-            >
-              <details
-                className="focus-disclosure"
-                open={focusExpanded}
-                onToggle={(event) => setFocusExpanded(event.currentTarget.open)}
-              >
-                <summary id="meeting-focus-title">
-                  This meeting{' '}
-                  <span>
-                    {suggesting
-                      ? 'Asking Granola…'
-                      : suggestions !== null
-                        ? 'Suggestions ready'
-                        : focus.trim()
-                          ? 'Edit focus'
-                          : 'Add focus · optional'}
-                  </span>
-                </summary>
-                <div className="meeting-focus-heading">
-                  <div>
-                    <p id="meeting-focus-help" className="small muted">
-                      Up to 5 short topics you want to cover, word-matched for
-                      this session until you quit.
-                    </p>
-                  </div>
-                  {focus.trim().length > 0 && (
-                    <button
-                      ref={clearButton}
-                      type="button"
-                      className="text-button"
-                      disabled={busy}
-                      onClick={clearFocus}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                {endedFocus !== null &&
-                  endedFocus.length > 0 &&
-                  endedFocus === focus.trim() && (
-                    <p className="small muted" role="status">
-                      Kept from the session that just ended.
-                    </p>
-                  )}
-                <div className="setting-control">
-                  <label htmlFor="meeting-focus">
-                    Focus <span className="muted small">· optional</span>
-                  </label>
-                  <div className="focus-input-row">
-                    <textarea
-                      id="meeting-focus"
-                      ref={focusField}
-                      aria-describedby={
-                        focusError
-                          ? 'meeting-focus-help meeting-focus-error'
-                          : 'meeting-focus-help'
-                      }
-                      value={focus}
-                      rows={3}
-                      spellCheck={false}
-                      onChange={(e) => {
-                        focusEdit.current++;
-                        setFocus(e.target.value);
-                      }}
-                      onBlur={(e) => {
-                        if (skipFocusBlur.current) {
-                          skipFocusBlur.current = false;
-                          return;
-                        }
-                        if (
-                          !clearButton.current ||
-                          e.relatedTarget !== clearButton.current
-                        )
-                          saveFocus();
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className={`dictation-button${focusDictating ? ' is-listening' : ''}`}
-                      aria-label={
-                        focusDictating ? 'Stop dictating' : 'Dictate focus'
-                      }
-                      aria-pressed={focusDictating}
-                      aria-describedby={
-                        focusDictationBlock?.visibleHint
-                          ? 'focus-dictation-hint'
-                          : undefined
-                      }
-                      disabled={
-                        focusDictating ? dictation.busy : !!focusDictationBlock
-                      }
-                      title={
-                        focusDictating
-                          ? 'Stop dictating'
-                          : (focusDictationBlock?.reason ?? 'Dictate focus')
-                      }
-                      onMouseDown={() => {
-                        if (!focusDictating && !focusDictationBlock) {
-                          skipFocusBlur.current = true;
-                        }
-                      }}
-                      onClick={() => {
-                        skipFocusBlur.current = false;
-                        toggleDictation('focus');
-                      }}
-                    >
-                      {focusDictating ? (
-                        <Square size={14} aria-hidden="true" />
-                      ) : (
-                        <Mic size={16} aria-hidden="true" />
-                      )}
-                    </button>
-                  </div>
-                  {focusDictationFeedback && (
-                    <p
-                      className={
-                        focusDictationFeedback.kind === 'error'
-                          ? 'dictation-error'
-                          : 'dictation-status'
-                      }
-                      role={
-                        focusDictationFeedback.kind === 'error'
-                          ? 'alert'
-                          : 'status'
-                      }
-                    >
-                      {focusDictationFeedback.kind === 'status' &&
-                        focusDictating && (
-                          <span className="dictation-dot" aria-hidden="true" />
-                        )}
-                      {focusDictationFeedback.text}
-                    </p>
-                  )}
-                  {!focusDictationFeedback &&
-                    focusDictationBlock?.visibleHint && (
-                      <p
-                        id="focus-dictation-hint"
-                        className="small muted dictation-hint"
-                      >
-                        {focusDictationBlock.reason}
-                      </p>
-                    )}
-                  {focusError && (
-                    <p id="meeting-focus-error" role="alert">
-                      Focus wasn't applied. {focusError} Edit the lines and
-                      leave the field to try again, or Clear.
-                    </p>
-                  )}
-                  {canSuggest && suggestions === null && (
-                    <div className="suggest-focus">
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        ref={suggestionButton}
-                        disabled={busy}
-                        // Keep keyboard focus while waiting; the handler guards repeats.
-                        aria-disabled={suggesting || undefined}
-                        onClick={() => void suggestFocus()}
-                      >
+              <div className="meeting-prep-group">
+                <section
+                  className="meeting-focus"
+                  aria-labelledby="meeting-focus-title"
+                >
+                  <details
+                    className="focus-disclosure"
+                    open={focusExpanded}
+                    onToggle={(event) =>
+                      setFocusExpanded(event.currentTarget.open)
+                    }
+                  >
+                    <summary id="meeting-focus-title">
+                      This meeting{' '}
+                      <span>
+                        {state.sessionMode === 'interview' && 'Interview · '}
+
                         {suggesting
                           ? 'Asking Granola…'
-                          : 'Suggest from Granola'}
-                      </button>
-                      {suggesting && (
-                        <p className="small muted" role="status">
-                          Waiting for suggestions. You can keep working or
-                          disconnect in Prior context.
+                          : suggestions !== null
+                            ? 'Suggestions ready'
+                            : focus.trim()
+                              ? 'Edit focus'
+                              : 'Add focus · optional'}
+                      </span>
+                    </summary>
+                    <SessionMode
+                      mode={state.sessionMode}
+                      locked={live || simulated || preparing || finishing}
+                      busy={busy || startPending}
+                      onChange={(mode) =>
+                        bridge.command('set_session_mode', { mode })
+                      }
+                    />
+                    <div className="meeting-focus-heading">
+                      <div>
+                        <p id="meeting-focus-help" className="small muted">
+                          Up to 5 short topics you want to cover, word-matched
+                          for this session until you quit.
                         </p>
-                      )}
-                      {suggestionError && (
-                        <p role="alert">
-                          {suggestionError} Ask again, or type your own focus.
-                        </p>
-                      )}
-                      <p className="small muted">
-                        Asks Granola’s assistant once about your last 30 days of
-                        notes. Nothing else leaves{' '}
-                        {notMacos(platform) ? 'this computer' : 'this Mac'}.
-                      </p>
-                    </div>
-                  )}
-                  {suggestions !== null && (
-                    <fieldset
-                      className="suggest-focus"
-                      ref={suggestionList}
-                      tabIndex={-1}
-                    >
-                      <legend>
-                        Granola suggests
-                        {roomForSuggestions < suggestions.length && (
-                          <span className="muted small">
-                            {' '}
-                            · room for {roomForSuggestions} more{' '}
-                            {roomForSuggestions === 1 ? 'line' : 'lines'}
-                          </span>
-                        )}
-                      </legend>
-                      {suggestions.length === 0 && (
-                        <p className="small muted">
-                          Nothing came back. Type what matters instead.
-                        </p>
-                      )}
-                      {suggestions.map((line) => (
-                        <label key={line} className="suggest-line">
-                          <input
-                            type="checkbox"
-                            checked={ticked.includes(line)}
-                            disabled={
-                              !ticked.includes(line) &&
-                              ticked.length >= roomForSuggestions
-                            }
-                            onChange={(e) =>
-                              setTicked((current) =>
-                                e.target.checked
-                                  ? [...current, line]
-                                  : current.filter((seen) => seen !== line),
-                              )
-                            }
-                          />
-                          <span>{line}</span>
-                        </label>
-                      ))}
-                      <div className="dialog-actions">
+                      </div>
+                      {focus.trim().length > 0 && (
                         <button
+                          ref={clearButton}
                           type="button"
-                          className="secondary-button"
+                          className="text-button"
                           disabled={busy}
-                          onClick={closeSuggestions}
+                          onClick={clearFocus}
                         >
-                          Dismiss
+                          Clear
                         </button>
+                      )}
+                    </div>
+                    {endedFocus !== null &&
+                      endedFocus.length > 0 &&
+                      endedFocus === focus.trim() && (
+                        <p className="small muted" role="status">
+                          Kept from the session that just ended.
+                        </p>
+                      )}
+                    <div className="setting-control">
+                      <label htmlFor="meeting-focus">
+                        Focus <span className="muted small">· optional</span>
+                      </label>
+                      <div className="focus-input-row">
+                        <textarea
+                          id="meeting-focus"
+                          ref={focusField}
+                          aria-describedby={
+                            focusError
+                              ? 'meeting-focus-help meeting-focus-error'
+                              : 'meeting-focus-help'
+                          }
+                          value={focus}
+                          rows={3}
+                          spellCheck={false}
+                          onChange={(e) => {
+                            focusEdit.current++;
+                            setFocus(e.target.value);
+                          }}
+                          onBlur={(e) => {
+                            if (skipFocusBlur.current) {
+                              skipFocusBlur.current = false;
+                              return;
+                            }
+                            if (
+                              !clearButton.current ||
+                              e.relatedTarget !== clearButton.current
+                            )
+                              saveFocus();
+                          }}
+                        />
                         <button
                           type="button"
-                          className="primary-button"
-                          disabled={busy || ticked.length === 0}
-                          onClick={acceptSuggestions}
+                          className={`dictation-button${focusDictating ? ' is-listening' : ''}`}
+                          aria-label={
+                            focusDictating ? 'Stop dictating' : 'Dictate focus'
+                          }
+                          aria-pressed={focusDictating}
+                          aria-describedby={
+                            focusDictationBlock?.visibleHint
+                              ? 'focus-dictation-hint'
+                              : undefined
+                          }
+                          disabled={
+                            focusDictating
+                              ? dictation.busy
+                              : !!focusDictationBlock
+                          }
+                          title={
+                            focusDictating
+                              ? 'Stop dictating'
+                              : (focusDictationBlock?.reason ?? 'Dictate focus')
+                          }
+                          onMouseDown={() => {
+                            if (!focusDictating && !focusDictationBlock) {
+                              skipFocusBlur.current = true;
+                            }
+                          }}
+                          onClick={() => {
+                            skipFocusBlur.current = false;
+                            toggleDictation('focus');
+                          }}
                         >
-                          Add {ticked.length || ''} to the focus
+                          {focusDictating ? (
+                            <Square size={14} aria-hidden="true" />
+                          ) : (
+                            <Mic size={16} aria-hidden="true" />
+                          )}
                         </button>
                       </div>
-                      <p className="small muted">
-                        Suggestions come from Granola; only ticked lines are
-                        added.
-                      </p>
-                    </fieldset>
-                  )}
-                </div>
-              </details>
-            </section>
-            <ContextNotes
-              items={contextItems}
-              busy={busy}
-              onError={setError}
-              onNotice={setNotice}
-              onGranola={granolaChanged}
-            />
+                      {focusDictationFeedback && (
+                        <p
+                          className={
+                            focusDictationFeedback.kind === 'error'
+                              ? 'dictation-error'
+                              : 'dictation-status'
+                          }
+                          role={
+                            focusDictationFeedback.kind === 'error'
+                              ? 'alert'
+                              : 'status'
+                          }
+                        >
+                          {focusDictationFeedback.kind === 'status' &&
+                            focusDictating && (
+                              <span
+                                className="dictation-dot"
+                                aria-hidden="true"
+                              />
+                            )}
+                          {focusDictationFeedback.text}
+                        </p>
+                      )}
+                      {!focusDictationFeedback &&
+                        focusDictationBlock?.visibleHint && (
+                          <p
+                            id="focus-dictation-hint"
+                            className="small muted dictation-hint"
+                          >
+                            {focusDictationBlock.reason}
+                          </p>
+                        )}
+                      {focusError && (
+                        <p id="meeting-focus-error" role="alert">
+                          Focus wasn't applied. {focusError} Edit the lines and
+                          leave the field to try again, or Clear.
+                        </p>
+                      )}
+                      {canSuggest && suggestions === null && (
+                        <div className="suggest-focus">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            ref={suggestionButton}
+                            disabled={busy}
+                            // Keep keyboard focus while waiting; the handler guards repeats.
+                            aria-disabled={suggesting || undefined}
+                            onClick={() => void suggestFocus()}
+                          >
+                            {suggesting
+                              ? 'Asking Granola…'
+                              : 'Suggest from Granola'}
+                          </button>
+                          {suggesting && (
+                            <p className="small muted" role="status">
+                              Waiting for suggestions. You can keep working or
+                              disconnect in Prior context.
+                            </p>
+                          )}
+                          {suggestionError && (
+                            <p role="alert">
+                              {suggestionError} Ask again, or type your own
+                              focus.
+                            </p>
+                          )}
+                          <p className="small muted">
+                            Asks Granola’s assistant once about your last 30
+                            days of notes. Nothing else leaves{' '}
+                            {notMacos(platform) ? 'this computer' : 'this Mac'}.
+                          </p>
+                        </div>
+                      )}
+                      {suggestions !== null && (
+                        <fieldset
+                          className="suggest-focus"
+                          ref={suggestionList}
+                          tabIndex={-1}
+                        >
+                          <legend>
+                            Granola suggests
+                            {roomForSuggestions < suggestions.length && (
+                              <span className="muted small">
+                                {' '}
+                                · room for {roomForSuggestions} more{' '}
+                                {roomForSuggestions === 1 ? 'line' : 'lines'}
+                              </span>
+                            )}
+                          </legend>
+                          {suggestions.length === 0 && (
+                            <p className="small muted">
+                              Nothing came back. Type what matters instead.
+                            </p>
+                          )}
+                          {suggestions.map((line) => (
+                            <label key={line} className="suggest-line">
+                              <input
+                                type="checkbox"
+                                checked={ticked.includes(line)}
+                                disabled={
+                                  !ticked.includes(line) &&
+                                  ticked.length >= roomForSuggestions
+                                }
+                                onChange={(e) =>
+                                  setTicked((current) =>
+                                    e.target.checked
+                                      ? [...current, line]
+                                      : current.filter((seen) => seen !== line),
+                                  )
+                                }
+                              />
+                              <span>{line}</span>
+                            </label>
+                          ))}
+                          <div className="dialog-actions">
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={busy}
+                              onClick={closeSuggestions}
+                            >
+                              Dismiss
+                            </button>
+                            <button
+                              type="button"
+                              className="primary-button"
+                              disabled={busy || ticked.length === 0}
+                              onClick={acceptSuggestions}
+                            >
+                              Add {ticked.length || ''} to the focus
+                            </button>
+                          </div>
+                          <p className="small muted">
+                            Suggestions come from Granola; only ticked lines are
+                            added.
+                          </p>
+                        </fieldset>
+                      )}
+                    </div>
+                  </details>
+                </section>
+                <ContextNotes
+                  items={contextItems}
+                  busy={busy}
+                  onError={setError}
+                  onNotice={setNotice}
+                  onGranola={granolaChanged}
+                  onOpenMeetings={() => setView('meetings')}
+                  onOpenSettings={() => setView('settings')}
+                />
+              </div>
+            </div>
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
               <p>
@@ -2702,9 +2934,9 @@ function Notebook() {
                   ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
                   : sessionLive
                     ? sessionHistory?.kept
-                      ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
+                      ? 'Saved to Meetings on this computer until you delete it. Exports and backups have their own lifecycle.'
                       : 'In memory until you quit or start another session, unless you save or export it.'
-                    : 'Notes stay in memory until you quit. Export before closing to keep them.'}
+                    : 'Working notes stay here until you quit. Live meetings save locally on Stop by default; change this in Settings.'}
               </p>
             </footer>
           </div>
@@ -2721,308 +2953,362 @@ function Notebook() {
 
         {view === 'settings' && (
           <div className="secondary-page settings-page">
-            <h1>Settings</h1>
-            <p className="page-description">
-              Keys, providers, cues, and storage.
-            </p>
-            <ProviderKeys
-              key={settingsEpoch}
-              onPreferencesChange={refreshLiveStatus}
-              onKeysChanged={refreshLiveStatus}
-            />
-            {keysAvailable && (
+            <div className="settings-page-head">
+              <h1>Settings</h1>
+              <p className="page-description">
+                Persistent preferences for providers, cues, capture, saved
+                meetings, and diagnostics.
+              </p>
+              <nav className="settings-nav" aria-label="Settings sections">
+                <a href="#settings-providers">Providers &amp; keys</a>
+                <a href="#settings-cues">Cues &amp; companion</a>
+                <a href="#settings-capture">Capture &amp; prompts</a>
+                <a href="#settings-meetings">Meetings &amp; storage</a>
+                <a href="#settings-privacy">Privacy &amp; setup</a>
+              </nav>
+            </div>
+
+            <div className="settings-group" id="settings-providers">
+              <h2
+                id="settings-group-providers"
+                className="settings-group-heading"
+              >
+                Providers &amp; keys
+              </h2>
+              <ProviderKeys
+                key={settingsEpoch}
+                onPreferencesChange={refreshLiveStatus}
+                onKeysChanged={refreshLiveStatus}
+              />
               <section className="setting">
                 <div>
-                  <h2>Setup walkthrough</h2>
+                  <h2 id="live-transcription" tabIndex={-1}>
+                    Live transcription
+                  </h2>
                   <p>
-                    Review keys, permissions, and how live sessions start and
-                    stop.
+                    TalkQTE does not transcribe on this device. Pressing Start
+                    live session sends audio (from your mic and, on macOS 14.2+,
+                    system audio) to{' '}
+                    {liveStatus?.transcription ??
+                      'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
+                    and recent lines to{' '}
+                    {liveStatus?.cueProvider ?? 'your chosen cue provider'} with
+                    your keys until you stop or turn off processing. Audio is
+                    never written to disk.
+                  </p>
+                  <p className="small muted" role="status">
+                    {!liveStatus
+                      ? 'Checking…'
+                      : liveStatus.available
+                        ? `Ready. Pressing Start live session sends audio to ${liveStatus.transcription ?? 'the transcription service'}${liveStatus.cueProvider ? ` and recent lines to ${liveStatus.cueProvider}` : ''} until you stop.`
+                        : liveStatus.reason}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={reopenOnboarding}
-                >
-                  Set up TalkQTE again
-                </button>
               </section>
-            )}
-            <section className="setting">
-              <div>
-                <h2>Your name</h2>
-                <p id="user-name-help">
-                  Highlights questions asked of you by name as Asked you so they
-                  stay while you answer. Saved on{' '}
-                  {notMacos(platform) ? 'this computer' : 'this Mac'}.
-                </p>
-              </div>
-              <div className="setting-control">
-                <label htmlFor="user-name">Name</label>
-                <input
-                  id="user-name"
-                  aria-describedby={
-                    nameError
-                      ? 'user-name-help user-name-error'
-                      : 'user-name-help'
-                  }
-                  type="text"
-                  value={userName}
-                  maxLength={40}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(e) => {
-                    nameEdit.current++;
-                    setUserName(e.target.value);
-                  }}
-                  onBlur={saveName}
-                  onKeyDown={(e) => {
-                    // Enter that confirms an input-method composition is not
-                    // a submission. Safari reports it as keyCode 229 after
-                    // compositionend.
-                    if (
-                      e.key === 'Enter' &&
-                      !e.nativeEvent.isComposing &&
-                      e.keyCode !== 229
-                    )
-                      saveName();
-                  }}
-                />
-                {nameError && (
-                  <p
-                    id="user-name-error"
-                    className="setting-error"
-                    role="alert"
-                  >
-                    Name wasn't changed. {nameError} Edit the name to try again.
+            </div>
+
+            <div className="settings-group" id="settings-cues">
+              <h2 id="settings-group-cues" className="settings-group-heading">
+                Cues &amp; companion
+              </h2>
+              <section className="setting">
+                <div>
+                  <h2>Your name</h2>
+                  <p id="user-name-help">
+                    Highlights questions asked of you by name as Asked you so
+                    they stay while you answer. Saved on{' '}
+                    {notMacos(platform) ? 'this computer' : 'this Mac'}.
                   </p>
-                )}
-              </div>
-            </section>
-            <section className="setting">
-              <div>
-                <h2>Glance view</h2>
-                <p>
-                  One cue with its source. Hold keeps a cue until dismissed.
-                </p>
-                <p
-                  className={`appearance-example question-${state.questionSize}`}
-                >
-                  Who will take the first draft?
-                </p>
-              </div>
-              <div className="setting-control">
-                <label htmlFor="question-size">Question text</label>
-                <select
-                  id="question-size"
-                  value={state.questionSize}
-                  disabled={busy}
-                  onChange={(e) =>
-                    void run(() =>
-                      bridge.command('set_question_size', {
-                        value: e.target.value as Snapshot['questionSize'],
-                      }),
-                    )
-                  }
-                >
-                  <option value="standard">Standard</option>
-                  <option value="large">Larger</option>
-                </select>
-              </div>
-            </section>
-            <section className="setting">
-              <div>
-                <h2>Companion position</h2>
-                <p>
-                  Where the floating companion sits on the notebook’s display.
-                  Dragging moves it for this session; your selection here is
-                  saved. No camera access or video changes.
-                  {!bridge.desktop && ' Applies in the desktop app.'}
-                </p>
-              </div>
-              <div className="setting-control">
-                <label htmlFor="companion-position">Position</label>
-                <select
-                  id="companion-position"
-                  value={state.companionPosition}
-                  disabled={busy}
-                  onChange={(e) =>
-                    void run(() =>
-                      bridge.command('set_companion_position', {
-                        value: e.target.value as Snapshot['companionPosition'],
-                      }),
-                    )
-                  }
-                >
-                  <option value="bottomRight">Bottom right</option>
-                  <option value="topCenter">Top center · near camera</option>
-                  <option value="topLeft">Top left</option>
-                  <option value="topRight">Top right</option>
-                </select>
-                {bridge.desktop && (
-                  <button
-                    type="button"
-                    className="secondary-button"
+                </div>
+                <div className="setting-control">
+                  <label htmlFor="user-name">Name</label>
+                  <input
+                    id="user-name"
+                    aria-describedby={
+                      nameError
+                        ? 'user-name-help user-name-error'
+                        : 'user-name-help'
+                    }
+                    type="text"
+                    value={userName}
+                    maxLength={40}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      nameEdit.current++;
+                      setUserName(e.target.value);
+                    }}
+                    onBlur={saveName}
+                    onKeyDown={(e) => {
+                      // Enter that confirms an input-method composition is not
+                      // a submission. Safari reports it as keyCode 229 after
+                      // compositionend.
+                      if (
+                        e.key === 'Enter' &&
+                        !e.nativeEvent.isComposing &&
+                        e.keyCode !== 229
+                      )
+                        saveName();
+                    }}
+                  />
+                  {nameError && (
+                    <p
+                      id="user-name-error"
+                      className="setting-error"
+                      role="alert"
+                    >
+                      Name wasn't changed. {nameError} Edit the name to try
+                      again.
+                    </p>
+                  )}
+                </div>
+              </section>
+              <section className="setting">
+                <div>
+                  <h2>Glance view</h2>
+                  <p>
+                    One cue with its source. Hold keeps a cue until dismissed.
+                  </p>
+                  <p
+                    className={`appearance-example question-${state.questionSize}`}
+                  >
+                    Who will take the first draft?
+                  </p>
+                </div>
+                <div className="setting-control">
+                  <label htmlFor="question-size">Question text</label>
+                  <select
+                    id="question-size"
+                    value={state.questionSize}
                     disabled={busy}
-                    onClick={() =>
+                    onChange={(e) =>
                       void run(() =>
-                        bridge.command('set_companion_position', {
-                          value: state.companionPosition,
+                        bridge.command('set_question_size', {
+                          value: e.target.value as Snapshot['questionSize'],
                         }),
                       )
                     }
                   >
-                    Move back here
-                  </button>
-                )}
-              </div>
-            </section>
-            <section className="setting">
-              <div>
-                <h2>Question timing</h2>
-                <p>
-                  Balanced waits 10s between cues; Quiet waits 30s. Focused
-                  shows only cues matching your Focus lines, your name, or prior
-                  notes.
-                </p>
-              </div>
-              <label className="visually-hidden" htmlFor="sensitivity">
-                Question timing
-              </label>
-              <select
-                id="sensitivity"
-                value={state.sensitivity}
-                onChange={(e) =>
-                  void run(() =>
-                    bridge.command('set_sensitivity', {
-                      value: e.target.value as Snapshot['sensitivity'],
-                    }),
-                  )
-                }
+                    <option value="standard">Standard</option>
+                    <option value="large">Larger</option>
+                  </select>
+                </div>
+              </section>
+              <section className="setting">
+                <div>
+                  <h2>Question timing</h2>
+                  <p>
+                    Balanced waits 10s between cues; Quiet waits 30s. Focused
+                    shows only cues matching your Focus lines, your name, or
+                    prior notes.
+                  </p>
+                </div>
+                <label className="visually-hidden" htmlFor="sensitivity">
+                  Question timing
+                </label>
+                <select
+                  id="sensitivity"
+                  value={state.sensitivity}
+                  onChange={(e) =>
+                    void run(() =>
+                      bridge.command('set_sensitivity', {
+                        value: e.target.value as Snapshot['sensitivity'],
+                      }),
+                    )
+                  }
+                >
+                  <option value="balanced">Balanced</option>
+                  <option value="focused">Focused · only what matters</option>
+                  <option value="quiet">Quiet</option>
+                </select>
+              </section>
+              <section className="setting">
+                <div>
+                  <h2>Floating question window</h2>
+                  <p>
+                    {bridge.desktop
+                      ? 'Shows the compact companion window during a live session or mic check. Hiding it doesn’t stop the mic.'
+                      : 'Available in the desktop app. The browser preview shows cues inside the notebook.'}
+                  </p>
+                  <p className="small">May appear when sharing your screen.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="Floating question window"
+                  checked={state.overlayEnabled}
+                  disabled={!bridge.desktop || busy}
+                  onChange={(e) =>
+                    void run(() =>
+                      bridge.command('set_overlay', {
+                        enabled: e.target.checked,
+                      }),
+                    )
+                  }
+                />
+              </section>
+              <section className="setting">
+                <div>
+                  <h2>Companion position</h2>
+                  <p>
+                    Where the floating companion sits on the notebook’s display.
+                    Dragging moves it for this session; your selection here is
+                    saved. No camera access or video changes.
+                    {!bridge.desktop && ' Applies in the desktop app.'}
+                  </p>
+                </div>
+                <div className="setting-control">
+                  <label htmlFor="companion-position">Position</label>
+                  <select
+                    id="companion-position"
+                    value={state.companionPosition}
+                    disabled={busy}
+                    onChange={(e) =>
+                      void run(() =>
+                        bridge.command('set_companion_position', {
+                          value: e.target
+                            .value as Snapshot['companionPosition'],
+                        }),
+                      )
+                    }
+                  >
+                    <option value="bottomRight">Bottom right</option>
+                    <option value="topCenter">Top center · near camera</option>
+                    <option value="topLeft">Top left</option>
+                    <option value="topRight">Top right</option>
+                  </select>
+                  {bridge.desktop && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() =>
+                          bridge.command('set_companion_position', {
+                            value: state.companionPosition,
+                          }),
+                        )
+                      }
+                    >
+                      Move back here
+                    </button>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <div className="settings-group" id="settings-capture">
+              <h2
+                id="settings-group-capture"
+                className="settings-group-heading"
               >
-                <option value="balanced">Balanced</option>
-                <option value="focused">Focused · only what matters</option>
-                <option value="quiet">Quiet</option>
-              </select>
-            </section>
-            <section className="setting">
-              <div>
-                <h2>Floating question window</h2>
-                <p>
-                  {bridge.desktop
-                    ? 'Shows the compact companion window during a live session or mic check. Hiding it doesn’t stop the mic.'
-                    : 'Available in the desktop app. The browser preview shows cues inside the notebook.'}
-                </p>
-                <p className="small">May appear when sharing your screen.</p>
-              </div>
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label="Floating question window"
-                checked={state.overlayEnabled}
-                disabled={!bridge.desktop || busy}
-                onChange={(e) =>
-                  void run(() =>
-                    bridge.command('set_overlay', {
-                      enabled: e.target.checked,
-                    }),
-                  )
-                }
+                Capture &amp; prompts
+              </h2>
+              {!liveCaptureBar && (
+                <MicrophoneControl
+                  microphone={microphone}
+                  inSettings
+                  sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
+                />
+              )}
+              <CallPromptSetting key={settingsEpoch} />
+              <CalendarSettings key={`calendar-${settingsEpoch}`} />
+              <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
+            </div>
+
+            <div className="settings-group" id="settings-meetings">
+              <h2
+                id="settings-group-meetings"
+                className="settings-group-heading"
+              >
+                Meetings &amp; storage
+              </h2>
+              <MeetingHistorySettings
+                key={`history-${settingsEpoch}`}
+                onDeleted={() => setHistoryRevision((r) => r + 1)}
               />
-            </section>
-            <section className="setting">
-              <div>
-                <h2>Panel sizes</h2>
-                <p>Drag the dividers in the notebook to resize panels.</p>
-              </div>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={
-                  preferredListWidth === null &&
-                  notesRatio === defaultNotesRatio
-                }
-                onClick={() => {
+              <section className="setting">
+                <div>
+                  <h2>Panel sizes</h2>
+                  <p>Drag the dividers in the notebook to resize panels.</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={
+                    preferredListWidth === null &&
+                    notesRatio === defaultNotesRatio
+                  }
+                  onClick={() => {
+                    setPreferredListWidth(null);
+                    setNotesRatio(defaultNotesRatio);
+                    setNotice('Panel sizes reset.');
+                  }}
+                >
+                  Reset panel sizes
+                </button>
+              </section>
+              <SavedSettings
+                onReset={() => {
                   setPreferredListWidth(null);
                   setNotesRatio(defaultNotesRatio);
-                  setNotice('Panel sizes reset.');
+                  setUserName('');
+                  confirmedName.current = '';
+                  setNameError('');
+                  setSettingsEpoch((epoch) => epoch + 1);
                 }}
-              >
-                Reset panel sizes
-              </button>
-            </section>
-            <CallPromptSetting key={settingsEpoch} />
-            <CalendarSettings key={`calendar-${settingsEpoch}`} />
-            <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
-            {!liveCaptureBar && (
-              <MicrophoneControl
-                microphone={microphone}
-                inSettings
-                sourceMayBeCapturing={!!capture.state?.source?.mayBeCapturing}
               />
-            )}
-            <section className="setting">
-              <div>
-                <h2 id="live-transcription" tabIndex={-1}>
-                  Live transcription
-                </h2>
-                <p>
-                  TalkQTE does not transcribe on this device. Pressing Start
-                  live session sends audio (from your mic and, on macOS 14.2+,
-                  system audio) to{' '}
-                  {liveStatus?.transcription ??
-                    'your chosen transcription provider (Deepgram or ElevenLabs)'}{' '}
-                  and recent lines to{' '}
-                  {liveStatus?.cueProvider ?? 'your chosen cue provider'} with
-                  your keys until you stop or turn off processing. Audio is
-                  never written to disk.
-                </p>
-                <p className="small muted" role="status">
-                  {!liveStatus
-                    ? 'Checking…'
-                    : liveStatus.available
-                      ? `Ready. Pressing Start live session sends audio to ${liveStatus.transcription ?? 'the transcription service'}${liveStatus.cueProvider ? ` and recent lines to ${liveStatus.cueProvider}` : ''} until you stop.`
-                      : liveStatus.reason}
-                </p>
-              </div>
-            </section>
-            <MeetingHistorySettings
-              key={`history-${settingsEpoch}`}
-              onDeleted={() => setHistoryRevision((r) => r + 1)}
-            />
-            <UpdateSettings key={`updates-${settingsEpoch}`} />
-            <SavedSettings
-              onReset={() => {
-                setPreferredListWidth(null);
-                setNotesRatio(defaultNotesRatio);
-                setUserName('');
-                confirmedName.current = '';
-                setNameError('');
-                setSettingsEpoch((epoch) => epoch + 1);
-              }}
-            />
-            <section className="setting">
-              <div>
-                <h2>Your data</h2>
-                <p>
-                  Mic check keeps no audio and never transcribes. During a live
-                  session, audio and recent lines go only to your chosen
-                  providers until you stop. Transcripts and notes stay in memory
-                  unless saved to Meetings or exported. Exports contain only the
-                  text you review.
-                </p>
-              </div>
-              <ShieldCheck size={24} />
-            </section>
-            <Diagnostics
-              current={() => ({
-                desktop: bridge.desktop,
-                session: state,
-                processing: capture.state ?? null,
-                microphone: microphone.state,
-                liveAvailable: liveStatus?.available ?? null,
-              })}
-            />
+            </div>
+
+            <div className="settings-group" id="settings-privacy">
+              <h2
+                id="settings-group-privacy"
+                className="settings-group-heading"
+              >
+                Privacy &amp; setup
+              </h2>
+              <section className="setting">
+                <div>
+                  <h2>Your data</h2>
+                  <p>
+                    Mic check keeps no audio and never transcribes. During a
+                    live session, audio and recent lines go only to your chosen
+                    providers until you stop. Transcripts and notes stay in
+                    memory unless saved to Meetings or exported. Exports contain
+                    only the text you review.
+                  </p>
+                </div>
+                <ShieldCheck size={24} />
+              </section>
+              {keysAvailable && (
+                <section className="setting">
+                  <div>
+                    <h2>Setup walkthrough</h2>
+                    <p>
+                      Review keys, permissions, and how live sessions start and
+                      stop.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={reopenOnboarding}
+                  >
+                    Set up TalkQTE again
+                  </button>
+                </section>
+              )}
+              <UpdateSettings key={`updates-${settingsEpoch}`} />
+              <Diagnostics
+                current={() => ({
+                  desktop: bridge.desktop,
+                  session: state,
+                  processing: capture.state ?? null,
+                  microphone: microphone.state,
+                  liveAvailable: liveStatus?.available ?? null,
+                })}
+              />
+            </div>
           </div>
         )}
         <div className="visually-hidden" role="status">

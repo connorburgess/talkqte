@@ -31,14 +31,14 @@ test('before a session, a build without live transcription says plainly that it 
   await expect(
     page.getByRole('complementary', { name: 'Question companion' }),
   ).toContainText(
-    'No cue yet.One cue at a time appears here during a live session (phrase rules only in this build).',
+    'Live cues are unavailable.Check Settings for provider status and live-session setup requirements.',
   );
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tabpanel')).toContainText(
     'No transcript yet.Lines appear here during a live session.',
   );
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'Notes stay in memory until you quit. Export before closing to keep them.',
+    'Working notes stay here until you quit. Live meetings save locally on Stop by default; change this in Settings.',
   );
   // No session clock and nothing fictional: this is the person's own notebook.
   await expect(page.locator('.session-clock')).toHaveCount(0);
@@ -150,8 +150,8 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     session(page).getByRole('button', { name: 'Start live session' }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Export Markdown…', exact: true }),
+  ).toHaveCount(0);
   await page.evaluate(
     ([text, question]) => window.liveTest.say(text, question),
     [firstLine, firstCue],
@@ -187,7 +187,9 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     page.getByRole('textbox', { name: 'Meeting notes' }),
   ).toHaveValue('Fictional note: ask about the welcome guide.');
   // After Stop the notes can be exported; the transcript never is.
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const review = page.getByRole('dialog', { name: 'Review your export' });
   await expect(review.locator('pre')).toHaveText(
     '# TalkQTE notes\n\nFictional note: ask about the welcome guide.\n',
@@ -196,7 +198,7 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
   await expect(review).not.toContainText('first draft');
   await page.keyboard.press('Escape');
   await expect(page.locator('.notebook-footer')).toHaveText(
-    'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.',
+    'Saved to Meetings on this computer until you delete it. Exports and backups have their own lifecycle.',
   );
   // A new session can be started.
   await expect(
@@ -258,12 +260,7 @@ for (const width of [320, 390, 880]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    for (const name of [
-      'Export',
-      'Pause cues',
-      'Stop live session',
-      'Dismiss',
-    ]) {
+    for (const name of ['Pause cues', 'Stop live session', 'Dismiss']) {
       const button = page.getByRole('button', { name, exact: true }).first();
       const bounds = await button.boundingBox();
       expect(bounds!.width, name).toBeGreaterThanOrEqual(44);
@@ -555,7 +552,7 @@ test('a live session ending with no transcript lines and empty notes returns cle
     .first()
     .click();
   await page.evaluate(() => window.captureTest.finishStop());
-  await expect(title(page)).toHaveText('No session yet');
+  await expect(title(page)).toHaveText('Ready for a meeting');
   await expect(session(page)).toContainText(
     'Nothing is captured until you start a live session.',
   );
@@ -569,7 +566,7 @@ test('a live session ending with no transcript lines and empty notes returns cle
   await page
     .getByRole('textbox', { name: 'Meeting notes' })
     .fill('Fictional follow-up note.');
-  await expect(title(page)).toHaveText('No session yet');
+  await expect(title(page)).toHaveText('Ready for a meeting');
 
   // Stopping a session that has notes (even with 0 transcript lines) shows Live session ended without the timer.
   await session(page)

@@ -128,29 +128,38 @@ export function MicrophoneControl({
             {action}
           </div>
           <MicrophoneInput state={state} />
-          {preparing ? (
-            <p role="status">
-              {cancelling
-                ? 'Start cancelled. Waiting for the start to finish before you can start again.'
-                : 'Starting the live session. Cancel start to prevent capture.'}
-            </p>
-          ) : (
-            <p>
-              {processingConfigured && !processingApproved
-                ? sourceSession
-                  ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                  : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
-                : sourceSession
-                  ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
-                  : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
-              {processingConfigured
-                ? ' Cue processing controls are below.'
-                : ' TalkQTE does not save the transcript.'}{' '}
-              {sourceSession
-                ? 'Stop live session to end it.'
-                : 'Stop live session to release the microphone.'}
-            </p>
-          )}
+          <div className="microphone-disclosures">
+            {preparing ? (
+              <p role="status">
+                {cancelling
+                  ? 'Start cancelled. Waiting for the start to finish before you can start again.'
+                  : 'Starting the live session. Cancel start to prevent capture.'}
+              </p>
+            ) : (
+              <p>
+                {processingConfigured && !processingApproved
+                  ? sourceSession
+                    ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+                    : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
+                  : sourceSession
+                    ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
+                    : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
+                {processingConfigured && ' Cue processing controls are below.'}{' '}
+                {sourceSession
+                  ? 'Stop live session to end it.'
+                  : 'Stop live session to release the microphone.'}
+              </p>
+            )}
+            {!preparing && (
+              <p className="microphone-retention">
+                Transcript saving follows Settings → Meetings, independently of
+                cue processing. Save automatically requests a local save of
+                non-empty sessions on stop. Ask each time waits for your choice;
+                Don’t save leaves the session in memory. Check the status after
+                Stop to confirm a save. Lab runs do not save meetings.
+              </p>
+            )}
+          </div>
           {(error || state?.message) && (
             <p className="microphone-message" role="alert">
               {error || state?.message}

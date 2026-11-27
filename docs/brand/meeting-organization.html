@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meeting organization · built states</title>
+    <link rel="stylesheet" href="../../src/tokens.css" />
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-history.css" />
+    <style>
+      body {
+        padding: var(--space-16);
+        background: var(--paper);
+      }
+      main {
+        display: grid;
+        gap: var(--space-32);
+        max-width: 1000px;
+        margin: auto;
+      }
+      article {
+        display: grid;
+        gap: var(--space-12);
+        min-width: 0;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      h2 {
+        font-size: 18px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Meeting organization · built states</h1>
+      <p>
+        Fictional content. Shared Direction C tokens and actual component
+        styles. Static specimens: controls illustrate states; the app supplies
+        the interactions. Keyboard focus/hover use the app styles. Native drag
+        and VoiceOver remain unverified.
+      </p>
+      <article class="history">
+        <h2>Drag and non-drag controls · ready</h2>
+        <p>
+          Drag handle; Move up/down buttons; folder picker. Tab and Enter/Space
+          work without a drag gesture.
+        </p>
+        <ul class="history-list">
+          <li class="history-row">
+            <div
+              class="history-order-controls"
+              role="group"
+              aria-label="Organize Fictional orchard review"
+            >
+              <button
+                class="icon-button history-drag-handle"
+                aria-label="Drag Fictional orchard review"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="5" r="1" />
+                  <circle cx="9" cy="12" r="1" />
+                  <circle cx="9" cy="19" r="1" />
+                  <circle cx="15" cy="5" r="1" />
+                  <circle cx="15" cy="12" r="1" />
+                  <circle cx="15" cy="19" r="1" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional orchard review up"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6-6 6 6M12 6v14" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional orchard review down"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6 6 6-6M12 4v14" />
+                </svg>
+              </button>
+            </div>
+            <button class="history-item">
+              <span class="history-item-title">Fictional orchard review</span
+              ><span class="history-meta"
+                >15 Jan 2026 · Microphone
+                <span class="history-tag">Meeting notes</span></span
+              ></button
+            ><button class="secondary-button history-archive-button">
+              Archive</button
+            ><select
+              class="history-row-folder"
+              aria-label="Folder for Fictional orchard review"
+            >
+              <option>Orchard</option>
+              <option>Unfiled / Top</option>
+            </select>
+          </li>
+        </ul>
+      </article>
+      <article class="history">
+        <h2>Drop before a meeting · active target</h2>
+        <p>
+          Uniform amber outline and warm surface indicate the destination; the
+          row keeps its full border.
+        </p>
+        <ul class="history-list">
+          <li class="history-row is-drop-target">
+            <div
+              class="history-order-controls"
+              role="group"
+              aria-label="Organize Fictional garden handoff"
+            >
+              <button
+                class="icon-button history-drag-handle"
+                aria-label="Drag Fictional garden handoff"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="5" r="1" />
+                  <circle cx="9" cy="12" r="1" />
+                  <circle cx="9" cy="19" r="1" />
+                  <circle cx="15" cy="5" r="1" />
+                  <circle cx="15" cy="12" r="1" />
+                  <circle cx="15" cy="19" r="1" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional garden handoff up"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6-6 6 6M12 6v14" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional garden handoff down"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6 6 6-6M12 4v14" />
+                </svg>
+              </button>
+            </div>
+            <button class="history-item">
+              <span class="history-item-title">Fictional garden handoff</span
+              ><span class="history-meta"
+                >15 Jan 2026 · Microphone
+                <span class="history-tag">Meeting notes</span></span
+              ></button
+            ><button class="secondary-button history-archive-button">
+              Archive</button
+            ><select
+              class="history-row-folder"
+              aria-label="Folder for Fictional garden handoff"
+            >
+              <option>Orchard</option>
+              <option>Unfiled / Top</option>
+            </select>
+          </li>
+        </ul>
+      </article>
+      <article class="history">
+        <h2>Saving position · busy</h2>
+        <p role="status">
+          Meeting position is being saved. Other actions are disabled until it
+          finishes.
+        </p>
+        <ul class="history-list">
+          <li class="history-row">
+            <div
+              class="history-order-controls"
+              role="group"
+              aria-label="Organize Fictional supplier review"
+            >
+              <button
+                class="icon-button history-drag-handle"
+                aria-label="Drag Fictional supplier review"
+                disabled
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="5" r="1" />
+                  <circle cx="9" cy="12" r="1" />
+                  <circle cx="9" cy="19" r="1" />
+                  <circle cx="15" cy="5" r="1" />
+                  <circle cx="15" cy="12" r="1" />
+                  <circle cx="15" cy="19" r="1" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional supplier review up"
+                disabled
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6-6 6 6M12 6v14" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional supplier review down"
+                disabled
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6 6 6-6M12 4v14" />
+                </svg>
+              </button>
+            </div>
+            <button class="history-item" disabled>
+              <span class="history-item-title">Fictional supplier review</span
+              ><span class="history-meta"
+                >15 Jan 2026 · Microphone
+                <span class="history-tag">Meeting notes</span></span
+              ></button
+            ><button class="secondary-button history-archive-button" disabled>
+              Archive</button
+            ><select
+              class="history-row-folder"
+              aria-label="Folder for Fictional supplier review"
+              disabled
+            >
+              <option>Orchard</option>
+              <option>Unfiled / Top</option>
+            </select>
+          </li>
+        </ul>
+      </article>
+      <article class="history">
+        <h2>Move failed · retry available</h2>
+        <p role="alert">The meeting could not be moved. Try again.</p>
+        <ul class="history-list">
+          <li class="history-row">
+            <div
+              class="history-order-controls"
+              role="group"
+              aria-label="Organize Fictional orchard review"
+            >
+              <button
+                class="icon-button history-drag-handle"
+                aria-label="Drag Fictional orchard review"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="5" r="1" />
+                  <circle cx="9" cy="12" r="1" />
+                  <circle cx="9" cy="19" r="1" />
+                  <circle cx="15" cy="5" r="1" />
+                  <circle cx="15" cy="12" r="1" />
+                  <circle cx="15" cy="19" r="1" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional orchard review up"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6-6 6 6M12 6v14" />
+                </svg></button
+              ><button
+                class="icon-button"
+                aria-label="Move Fictional orchard review down"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="m6 12 6 6 6-6M12 4v14" />
+                </svg>
+              </button>
+            </div>
+            <button class="history-item">
+              <span class="history-item-title">Fictional orchard review</span
+              ><span class="history-meta"
+                >15 Jan 2026 · Microphone
+                <span class="history-tag">Meeting notes</span></span
+              ></button
+            ><button class="secondary-button history-archive-button">
+              Archive</button
+            ><select
+              class="history-row-folder"
+              aria-label="Folder for Fictional orchard review"
+            >
+              <option>Orchard</option>
+              <option>Unfiled / Top</option>
+            </select>
+          </li>
+        </ul>
+      </article>
+      <article class="history">
+        <h2>Filters · invalid range and empty</h2>
+        <div
+          class="history-filter-row"
+          role="group"
+          aria-label="Filter meetings"
+        >
+          <label class="history-field"
+            >From date<input type="date" value="2026-01-12" /></label
+          ><label class="history-field"
+            >To date<input type="date" value="2026-01-01" /></label
+          ><label class="history-check"
+            ><input type="checkbox" checked />Has notes</label
+          ><button class="secondary-button">Clear filters</button>
+        </div>
+        <label class="history-check"
+          ><input type="checkbox" checked />Show archived (1)</label
+        >
+        <div class="history-empty">
+          <p>No meetings match these filters and search.</p>
+          <button class="secondary-button">Clear filters</button>
+        </div>
+        <p role="alert">From date must be on or before To date.</p>
+      </article>
+      <article class="history">
+        <h2>Collapsed destination and empty Unfiled</h2>
+        <div class="history-folder-group is-drop-target">
+          <details class="history-folder">
+            <summary class="history-folder-summary">Orchard · 3</summary>
+          </details>
+        </div>
+        <section class="history-unfiled">
+          <h3 class="history-group-title">Unfiled</h3>
+          <p class="history-help">
+            Drop a meeting here to move it out of a folder.
+          </p>
+        </section>
+      </article>
+      <article class="history">
+        <h2>Narrow viewport review</h2>
+        <p>
+          Open this sheet at 390px to review the actual responsive component
+          styles: reorder controls share a row with Archive; title and folder
+          picker retain the full width. Each built state above adapts at the
+          same breakpoint as the app.
+        </p>
+      </article>
+    </main>
+  </body>
+</html>

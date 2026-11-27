@@ -507,6 +507,7 @@ pub struct Snapshot {
     /// the end. Never saved; the companion sees a line only inside that
     /// Still open list.
     pub focus: Vec<String>,
+    pub session_mode: crate::cue_evaluator::SessionMode,
     /// The provider this live session's audio goes to after its review is
     /// approved, and the fixed code that ended it, if it ended. Every live
     /// session has one, since a launch without cloud transcription cannot
@@ -679,6 +680,7 @@ pub struct Engine {
     last_recorded_cue: Option<String>,
     /// This session's model-written meeting notes, if the person asked.
     meeting_notes: crate::meeting_notes::Record,
+    pub(crate) meeting_qa: crate::meeting_qa::Record,
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
@@ -790,6 +792,7 @@ impl Engine {
                 cues_paused: false,
                 user_name: None,
                 focus: vec![],
+                session_mode: crate::cue_evaluator::SessionMode::Meeting,
                 transcription: None,
                 sources: None,
                 keep_meeting: false,
@@ -807,6 +810,7 @@ impl Engine {
             started_at_ms: 0,
             last_recorded_cue: None,
             meeting_notes: Default::default(),
+            meeting_qa: Default::default(),
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
@@ -833,6 +837,16 @@ impl Engine {
             withheld_notes: vec![],
             unshown: None,
         }
+    }
+
+    pub(crate) fn question_scope(&mut self) -> Result<crate::meeting_qa::Scope, String> {
+        if !self.state.live || self.live_stopping || self.state.status == Status::Ready {
+            return Err("Start a live session and wait for transcript lines before asking.".into());
+        }
+        self.meeting_qa.prepare(
+            &self.state.transcript,
+            crate::llm_provider::resolved_cue_model(),
+        )
     }
 
     pub fn cue_snapshot(&self) -> CueSnapshot {
@@ -933,6 +947,7 @@ impl Engine {
         // is dropped.
         self.meeting_notes.cancel();
         self.meeting_notes = Default::default();
+        self.meeting_qa = Default::default();
         self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
         self.generation += 1;
@@ -2220,6 +2235,7 @@ impl Engine {
     pub fn copy_focus_from(&mut self, previous: &Engine) {
         self.focus_terms = previous.focus_terms.clone();
         self.state.focus = previous.state.focus.clone();
+        self.state.session_mode = previous.state.session_mode;
         self.focus_touched = vec![false; self.state.focus.len()];
     }
 
@@ -2322,6 +2338,22 @@ impl Engine {
         self.focus_terms = terms;
         self.state.focus = lines;
         self.changed();
+        Ok(())
+    }
+
+    /// Intent is chosen before capture, never changed under an approved request.
+    pub fn set_session_mode(
+        &mut self,
+        mode: crate::cue_evaluator::SessionMode,
+    ) -> Result<(), String> {
+        if matches!(self.state.status, Status::Running | Status::Paused) || self.live_stopping {
+            return Err("Stop the session before changing its mode.".into());
+        }
+        if self.state.session_mode != mode {
+            self.invalidate_evaluation();
+            self.state.session_mode = mode;
+            self.changed();
+        }
         Ok(())
     }
 
@@ -5453,6 +5485,27 @@ mod tests {
         );
         e.set_focus(vec!["   ".into()]).unwrap();
         assert!(e.state.focus.is_empty());
+    }
+
+    #[test]
+    fn session_mode_is_fixed_during_capture_and_retained_for_the_next_session_only() {
+        use crate::cue_evaluator::SessionMode;
+        let mut e = Engine::fictional();
+        assert_eq!(e.state.session_mode, SessionMode::Meeting);
+        e.set_session_mode(SessionMode::Interview).unwrap();
+        e.start().unwrap();
+        assert!(e.set_session_mode(SessionMode::Meeting).is_err());
+        e.pause().unwrap();
+        assert!(e.set_session_mode(SessionMode::Meeting).is_err());
+        e.end();
+        let mut next = Engine::fictional();
+        next.copy_focus_from(&e);
+        assert_eq!(next.state.session_mode, SessionMode::Interview);
+        next.live_stopping = true;
+        assert!(next.set_session_mode(SessionMode::Meeting).is_err());
+        next.live_stopping = false;
+        next.set_session_mode(SessionMode::Meeting).unwrap();
+        assert_eq!(Engine::fictional().state.session_mode, SessionMode::Meeting);
     }
 
     #[test]

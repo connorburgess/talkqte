@@ -48,6 +48,7 @@ export const commands = [
   'rename_meeting_folder',
   'delete_meeting_folder',
   'set_kept_meeting_folder',
+  'position_kept_meeting',
   'kept_meeting_export_preview',
   'export_kept_meeting',
 ];
@@ -358,6 +359,7 @@ const summary = (meeting: KeptMeeting): KeptSummary => ({
   durationMs: meeting.durationMs,
   sources: meeting.sources,
   hasMeetingNotes: meeting.meetingNotes !== undefined,
+  hasNotes: !!meeting.notes.trim() || !!meeting.meetingNotes?.trim(),
   ...(meeting.folder ? { folder: meeting.folder } : {}),
   archived: !!meeting.archived,
 });
@@ -436,7 +438,7 @@ function saveSessionMeeting(
     revision: 1,
     ...fromSession(current, includeApplication),
   };
-  meetings.push(meeting);
+  meetings.unshift(meeting);
   sessionKept = {
     id: meeting.id,
     notes: current.notes,
@@ -696,7 +698,6 @@ export function command(
             .toLowerCase();
           return query.every((word) => text.includes(word));
         })
-        .sort((a, b) => b.startedAtMs - a.startedAtMs)
         .map(summary);
       return {
         availability,
@@ -850,6 +851,49 @@ export function command(
       pendingExport = null;
       return [...folders];
     }
+    case 'position_kept_meeting': {
+      if (availability !== 'on')
+        throw 'Kept meetings are not available in this launch.';
+      const { id, folder, anchorId, placement } = args as {
+        id: string;
+        folder: string | null;
+        anchorId: string | null;
+        placement: 'before' | 'after';
+      };
+      const meeting = meetings.find((item) => item.id === id);
+      const canonical =
+        folder === null
+          ? null
+          : folders.find((f) => f.toLowerCase() === folder.toLowerCase());
+      if (!meeting || anchorId === id) throw 'That meeting is no longer kept.';
+      if (canonical === undefined) throw 'That folder no longer exists.';
+      if (
+        anchorId &&
+        !meetings.some(
+          (item) => item.id === anchorId && (item.folder ?? null) === canonical,
+        )
+      )
+        throw 'That meeting is no longer kept.';
+      meetings = meetings.filter((item) => item.id !== id);
+      if (canonical === null) delete meeting.folder;
+      else meeting.folder = canonical;
+      meeting.revision++;
+      const anchor = anchorId
+        ? meetings.findIndex((item) => item.id === anchorId)
+        : -1;
+      let insert = meetings.length;
+      if (anchor >= 0) insert = anchor + Number(placement === 'after');
+      else {
+        for (let i = meetings.length - 1; i >= 0; i--)
+          if ((meetings[i].folder ?? null) === canonical) {
+            insert = i + 1;
+            break;
+          }
+      }
+      meetings.splice(insert, 0, meeting);
+      pendingExport = null;
+      return summary(meeting);
+    }
     case 'set_kept_meeting_folder': {
       if (availability === 'newer')
         throw 'Your kept meetings were saved by a newer TalkQTE. This version leaves them as they are; update TalkQTE to change them.';
@@ -869,6 +913,14 @@ export function command(
         meeting.folder = match;
       }
       meeting.revision += 1;
+      meetings = meetings.filter((item) => item.id !== id);
+      let insert = meetings.length;
+      for (let i = meetings.length - 1; i >= 0; i--)
+        if ((meetings[i].folder ?? null) === (meeting.folder ?? null)) {
+          insert = i + 1;
+          break;
+        }
+      meetings.splice(insert, 0, meeting);
       pendingExport = null;
       return summary(meeting);
     }
@@ -1001,6 +1053,7 @@ window.historyTest = {
       folders.push(meeting.folder);
     }
     meetings.push({ ...meeting, id, revision: 1 });
+    meetings.sort((a, b) => b.startedAtMs - a.startedAtMs);
     return id;
   },
   setAvailability: (value) => {

@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { FileText, History, Link2, X } from 'lucide-react';
 import * as bridge from '../lib/bridge';
 import { setKeptMeetingArchived } from '../lib/meetingHistory';
+import {
+  savedNotesExplanation,
+  usePriorContextAvailability,
+} from '../lib/priorContextAvailability';
+import { PriorContextAvailability } from './PriorContextAvailability';
 import type {
   ContextItem,
   GranolaStatus,
@@ -26,6 +31,8 @@ export function ContextNotes({
   onError,
   onNotice,
   onGranola,
+  onOpenMeetings,
+  onOpenSettings,
 }: {
   items: ContextItem[];
   busy: boolean;
@@ -33,7 +40,27 @@ export function ContextNotes({
   onNotice: (message: string) => void;
   /** Called whenever the Granola connection is known or changes. */
   onGranola?: (status: GranolaStatus) => void;
+  onOpenMeetings?: () => void;
+  onOpenSettings?: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const savedNotes = usePriorContextAvailability(
+    expanded && items.length === 0,
+  );
+  const historyUnavailable =
+    items.length === 0 &&
+    savedNotes.state.phase === 'ready' &&
+    savedNotes.state.listing.availability !== 'on';
+  const emptyHistoryReason =
+    items.length === 0 &&
+    savedNotes.state.phase === 'ready' &&
+    (savedNotes.state.listing.availability !== 'on' ||
+      savedNotes.state.listing.meetings.length === 0 ||
+      savedNotes.state.listing.meetings.every(
+        (meeting) => 'hasNotes' in meeting && meeting.hasNotes === false,
+      ))
+      ? savedNotesExplanation(savedNotes.state)
+      : null;
   const [picked, setPicked] = useState<PickedNotes | null>(null);
   const [pickedFrom, setPickedFrom] = useState<'file' | 'granola' | 'history'>(
     'file',
@@ -276,7 +303,10 @@ export function ContextNotes({
 
   return (
     <section className="context-panel" aria-label="Prior context">
-      <details className="context-disclosure">
+      <details
+        className="context-disclosure"
+        onToggle={(event) => setExpanded(event.currentTarget.open)}
+      >
         <summary
           ref={summary}
           onBlur={() => {
@@ -297,13 +327,23 @@ export function ContextNotes({
             {granola.connected ? ' · Granola connected' : ''}
           </span>
         </summary>
+        {items.length === 0 && (
+          <PriorContextAvailability
+            state={savedNotes.state}
+            busy={busy || working}
+            refresh={savedNotes.refresh}
+            onOpenMeetings={onOpenMeetings}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
         <div className="context-heading">
           <div>
             <span className="muted small">
-              Relevant past meetings (notes only, never transcripts) are
-              auto-selected by default. Add files, kept meetings, or Granola
-              notes for context. Held in memory, excluded from Markdown exports,
-              and never sent to a cue provider without approval.
+              Use your written notes or kept meeting notes from past meetings,
+              files, or Granola. Transcripts are not used as prior context.
+              Imported notes stay in memory for this session and are excluded
+              from Markdown exports. Review and approve them separately before
+              sending them to a cue provider.
             </span>
           </div>
           <div className="context-controls">
@@ -321,7 +361,7 @@ export function ContextNotes({
                 <button
                   ref={historyButton}
                   className="secondary-button"
-                  disabled={busy || working}
+                  disabled={busy || working || historyUnavailable}
                   onClick={chooseHistory}
                 >
                   <History size={15} />
@@ -476,7 +516,7 @@ export function ContextNotes({
             count={items.filter((item) => item.provider === 'granola').length}
           />
         )}
-        {items.length > 0 ? (
+        {items.length > 0 && (
           <ul className="context-list">
             {items.map((item) => (
               <li key={`${item.provider}:${item.sourceId}`}>
@@ -547,15 +587,6 @@ export function ContextNotes({
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="muted small">
-            No prior notes selected.{' '}
-            {granola.connected
-              ? 'Choose Granola notes (last 30 days)'
-              : 'Connect Granola (last 30 days)'}
-            , pick past meetings, or add a Markdown (.md), text (.txt), or
-            TalkQTE JSON notes file.
-          </p>
         )}
       </details>
       <dialog
@@ -587,8 +618,17 @@ export function ContextNotes({
         </div>
         <p id="context-pick-description">
           Selected notes stay in memory for this session under Prior context and
-          never trigger cues on their own.
+          never trigger cues on their own. Sending them to a cue provider needs
+          a separate processing review and approval.
         </p>
+        {pickedFrom === 'history' && (
+          <p className="small muted">
+            Only your written notes and kept meeting notes are listed, never
+            transcripts. Archived notes can be chosen manually. Tick the notes
+            you want to review and import; nothing is selected automatically in
+            this chooser.
+          </p>
+        )}
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">
             Choose up to 10 notes per import. Keep up to 20 in this session.
@@ -637,7 +677,9 @@ export function ContextNotes({
             {pickedFrom === 'granola'
               ? 'No notes came back from Granola for the last 30 days. If you have meetings there from that time, the listing is not working yet; nothing was imported.'
               : pickedFrom === 'history'
-                ? 'No kept meetings with notes or meeting notes are available; nothing was imported.'
+                ? emptyHistoryReason
+                  ? `${emptyHistoryReason.title} ${emptyHistoryReason.detail} Nothing was imported.`
+                  : 'No reusable saved notes could be listed. Review Meetings, or add notes from a file or Granola. Nothing was imported.'
                 : 'This file has no notes with an id, a date, and text; nothing was imported.'}
           </p>
         )}

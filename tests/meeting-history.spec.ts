@@ -380,7 +380,9 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
     page.getByRole('heading', { name: 'Blue tin sync', level: 1 }),
   ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(dialog).toBeVisible();
   const preview = (await dialog.locator('pre').textContent()) ?? '';
@@ -740,15 +742,13 @@ test('Meetings supports optional collapsible folders: create, move, collapse/exp
     page.getByRole('button', { name: 'New folder', exact: true }),
   ).toBeFocused();
   await expect(unfiledList.locator('.history-item')).toHaveCount(3);
-  await expect(unfiledList.locator('.history-item').nth(0)).toContainText(
-    'Orchard supplier sync',
-  );
-  await expect(unfiledList.locator('.history-item').nth(1)).toContainText(
-    'Greenhouse roof check',
-  );
-  await expect(unfiledList.locator('.history-item').nth(2)).toContainText(
+  // Folder moves now append in the saved organization order. Deleting the
+  // folder preserves that order instead of re-sorting by date.
+  await expect(unfiledList.locator('.history-item-title')).toHaveText([
     'Potluck seating plan',
-  );
+    'Orchard supplier sync',
+    'Greenhouse roof check',
+  ]);
 });
 
 test('Meetings folders remain accessible and overflow-free at narrow width', async ({
@@ -1074,7 +1074,9 @@ test('Meetings detail renders diarized remote speaker chips and renames all line
   expect(a11y.violations).toEqual([]);
 
   // Export preview reflects renamed speaker label.
-  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   const preview = (await dialog.locator('pre').textContent()) ?? '';
   expect(preview).toContain('- 0:01 Priya: I will check the south latch.');

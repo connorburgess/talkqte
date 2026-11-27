@@ -358,6 +358,7 @@ fn out_of_bounds_content_and_a_full_history_are_refused() {
             duration_ms: 0,
             sources: Sources::Microphone,
             has_meeting_notes: false,
+            has_notes: false,
             folder: None,
             archived: false,
         })
@@ -1011,4 +1012,343 @@ fn folder_changes_preserve_archives_and_recover_from_an_uncommitted_file_copy() 
         reopened.suggest_prior_context(&[], None, 3).unwrap().len(),
         1
     );
+}
+
+#[test]
+fn organization_survives_reopen_filters_and_unrelated_updates_without_losing_hidden_order() {
+    let dir = Folder::new("organization");
+    let store = dir.store();
+    store.create_folder("Orchard").unwrap();
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let saved = store
+            .keep(
+                &format!("Fictional {n}"),
+                content(n * 1_000, "Shared fictional content"),
+            )
+            .unwrap();
+        store.set_folder(&saved.id, Some("Orchard")).unwrap();
+        ids.push(saved.id);
+    }
+    store.set_archived(&ids[1], true).unwrap();
+    // Move 5 before visible 3; archived 2 and hidden 4 keep their order.
+    store
+        .position(&ids[4], Some("orchard"), Some(&ids[2]), Placement::Before)
+        .unwrap();
+    drop(store);
+    let store = dir.store();
+    let expected = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[2].clone(),
+        ids[3].clone(),
+    ];
+    let listed_ids = |store: &Store| {
+        store
+            .list(None)
+            .meetings
+            .into_iter()
+            .map(|meeting| meeting.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed_ids(&store), expected);
+    store
+        .position(&ids[0], Some("Orchard"), Some(&ids[3]), Placement::After)
+        .unwrap();
+    assert_eq!(
+        listed_ids(&store),
+        vec![
+            ids[1].clone(),
+            ids[4].clone(),
+            ids[2].clone(),
+            ids[3].clone(),
+            ids[0].clone()
+        ]
+    );
+    store
+        .position(&ids[0], Some("Orchard"), Some(&ids[1]), Placement::Before)
+        .unwrap();
+    store.rename(&ids[2], "Fictional renamed").unwrap();
+    store
+        .update(&ids[0], content(9_000, "Updated fictional words"))
+        .unwrap();
+    assert_eq!(listed_ids(&store), expected);
+    assert!(store.open_meeting(&ids[1]).unwrap().archived);
+    store
+        .position(&ids[2], None, None, Placement::After)
+        .unwrap();
+    assert!(store.open_meeting(&ids[2]).unwrap().folder.is_none());
+    assert_eq!(store.list(None).meetings.len(), 5);
+    // Notes/transcript remain intact, and automatic context ranking stays by date.
+    assert_eq!(
+        store.open_meeting(&ids[3]).unwrap().content,
+        content(4_000, "Shared fictional content")
+    );
+}
+
+#[test]
+fn organization_rejects_foreign_anchor_missing_folder_invalid_ids_and_lab_writes() {
+    let dir = Folder::new("organization-guards");
+    let store = dir.store();
+    store.create_folder("Orchard").unwrap();
+    let a = store.keep("Fictional A", content(1_000, "A")).unwrap();
+    let b = store.keep("Fictional B", content(2_000, "B")).unwrap();
+    store.set_folder(&b.id, Some("Orchard")).unwrap();
+    let before = fs::read(Store::index_path(&dir.root())).unwrap();
+    for result in [
+        store.position(&a.id, None, Some(&b.id), Placement::Before),
+        store.position(&a.id, Some("Missing"), None, Placement::Before),
+        store.position("../invalid", None, None, Placement::After),
+        store.position(&a.id, None, Some(&a.id), Placement::After),
+        store.position(&a.id, None, Some(&"f".repeat(32)), Placement::After),
+    ] {
+        assert!(result.is_err());
+    }
+    assert_eq!(fs::read(Store::index_path(&dir.root())).unwrap(), before);
+    let lab = Store::open(Some(dir.root()), true);
+    assert_eq!(
+        lab.position(&a.id, None, None, Placement::Before),
+        Err(Error::Off)
+    );
+    assert_eq!(fs::read(Store::index_path(&dir.root())).unwrap(), before);
+}
+
+#[test]
+fn legacy_index_order_and_has_notes_derive_from_actual_contents() {
+    let dir = Folder::new("organization-legacy");
+    let store = dir.store();
+    let mut user = content(1_000, "Fictional speech");
+    user.meeting_notes = None;
+    let a = store.keep("User notes", user).unwrap();
+    let mut model = content(2_000, "Fictional speech");
+    model.notes.clear();
+    let b = store.keep("Model notes", model).unwrap();
+    let mut blank = content(3_000, "Transcript is not notes");
+    blank.notes = " \n ".into();
+    blank.meeting_notes = Some(" \t ".into());
+    let c = store.keep("No notes", blank).unwrap();
+    let path = Store::index_path(&dir.root());
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("order");
+    legacy["meetings"].as_array_mut().unwrap().reverse();
+    for summary in legacy["meetings"].as_array_mut().unwrap() {
+        summary.as_object_mut().unwrap().remove("hasNotes");
+    }
+    fs::write(&path, render(&legacy)).unwrap();
+    let listing = dir.store().list(None);
+    assert_eq!(
+        listing
+            .meetings
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        [c.id.as_str(), b.id.as_str(), a.id.as_str()]
+    );
+    assert_eq!(
+        listing
+            .meetings
+            .iter()
+            .map(|m| m.has_notes)
+            .collect::<Vec<_>>(),
+        [false, true, true]
+    );
+    for summary in listing.meetings {
+        assert_eq!(
+            summary.has_notes,
+            store
+                .open_meeting(&summary.id)
+                .unwrap()
+                .context_item()
+                .is_some()
+        );
+    }
+    store
+        .position(&a.id, None, Some(&c.id), Placement::Before)
+        .unwrap();
+    assert_eq!(dir.store().list(None).meetings[0].id, a.id);
+}
+
+#[test]
+fn delete_preserves_saved_content_when_the_replacement_index_cannot_be_written() {
+    let folder = Folder::new("delete-index-write-failure");
+    let store = folder.store();
+    let kept = store
+        .keep("Fictional seed planning", content(1, "Keep the seed list."))
+        .unwrap();
+    let original = store.open_meeting(&kept.id).unwrap();
+    let index_before = fs::read(folder.root().join(INDEX)).unwrap();
+    // Deterministically refuse the atomic writer's temporary file. This
+    // simulates the write failing without filling the host disk or relying
+    // on permissions (which behave differently under elevated test users).
+    let blocked = folder
+        .root()
+        .join(format!(".{INDEX}.{}.tmp", std::process::id()));
+    fs::create_dir(&blocked).unwrap();
+
+    assert_eq!(store.delete(&kept.id), Err(Error::Write));
+    assert_eq!(fs::read(folder.root().join(INDEX)).unwrap(), index_before);
+    let reopened = folder.store();
+    assert_eq!(reopened.open_meeting(&kept.id).unwrap(), original);
+    assert_eq!(reopened.list(None).meetings, vec![kept.clone()]);
+    assert_eq!(reopened.list(None).unreadable, 0);
+
+    fs::remove_dir(blocked).unwrap();
+    reopened.delete(&kept.id).unwrap();
+    assert!(folder.store().list(None).meetings.is_empty());
+    assert!(!folder.root().join(kept.id).exists());
+}
+
+#[test]
+fn interrupted_or_partial_atomic_replacements_preserve_the_saved_meeting() {
+    let folder = Folder::new("partial-write-recovery");
+    let store = folder.store();
+    let kept = store
+        .keep(
+            "Fictional garden",
+            content(1, "Keep the old planting plan."),
+        )
+        .unwrap();
+    let original = store.open_meeting(&kept.id).unwrap();
+    let path = Store::meeting_path(&folder.root(), &kept.id);
+    let original_bytes = fs::read(&path).unwrap();
+    let mut changed = original.clone();
+    changed.content.notes = "A revised fictional planting plan.".into();
+    let bytes = render(&MeetingFileOut {
+        version: VERSION,
+        meeting: &changed,
+    });
+
+    let failed = PreparedWrite::with_writer(&path, |file| {
+        file.write_all(&bytes[..bytes.len() / 2])?;
+        Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+    });
+    assert!(failed.is_err());
+    assert_eq!(fs::read(&path).unwrap(), original_bytes);
+    assert_eq!(folder.store().open_meeting(&kept.id).unwrap(), original);
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+
+    // A completed temporary file must not become visible before commit,
+    // including when a later step fails and the prepared write is dropped.
+    let pending = PreparedWrite::new(&path, &bytes).unwrap();
+    assert_eq!(folder.store().open_meeting(&kept.id).unwrap(), original);
+    drop(pending);
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    store.update(&kept.id, changed.content.clone()).unwrap();
+    assert_eq!(
+        folder.store().open_meeting(&kept.id).unwrap().content,
+        changed.content
+    );
+}
+
+#[test]
+fn a_failed_directory_removal_discards_the_prepared_delete_index() {
+    let folder = Folder::new("delete-directory-failure");
+    let store = folder.store();
+    let kept = store
+        .keep("Fictional garden", content(1, "Gate review."))
+        .unwrap();
+    // A regular file at the directory path deterministically refuses
+    // remove_dir_all on supported hosts; no permission changes are needed.
+    let directory = folder.root().join(&kept.id);
+    fs::remove_dir_all(&directory).unwrap();
+    fs::write(&directory, b"fictional damaged directory").unwrap();
+    let before = fs::read(folder.root().join(INDEX)).unwrap();
+    assert_eq!(store.delete(&kept.id), Err(Error::Write));
+    assert_eq!(fs::read(folder.root().join(INDEX)).unwrap(), before);
+    assert_eq!(fs::read_dir(folder.root()).unwrap().count(), 2);
+    assert_eq!(fs::read(directory).unwrap(), b"fictional damaged directory");
+}
+
+#[test]
+fn deleting_after_a_failed_index_write_preserves_manual_order_and_hidden_meetings() {
+    let folder = Folder::new("ordered-delete-retry");
+    let store = folder.store();
+    store.create_folder("Orchard").unwrap();
+    store.create_folder("Empty garden").unwrap();
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let title = if n == 2 || n == 4 {
+            format!("Hidden fictional {n}")
+        } else {
+            format!("Visible fictional {n}")
+        };
+        let saved = store
+            .keep(&title, content(n * 1_000, "Fictional seed plan."))
+            .unwrap();
+        store.set_folder(&saved.id, Some("Orchard")).unwrap();
+        ids.push(saved.id);
+    }
+    store.set_archived(&ids[1], true).unwrap();
+    store
+        .position(&ids[4], Some("Orchard"), Some(&ids[2]), Placement::Before)
+        .unwrap();
+    let original = folder.store().list(None);
+    let listed_ids = |listing: Listing| {
+        listing
+            .meetings
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[2].clone(),
+        ids[3].clone(),
+    ];
+    assert_eq!(listed_ids(original.clone()), expected);
+    assert_eq!(
+        listed_ids(store.list(Some("Visible"))),
+        vec![ids[0].clone(), ids[4].clone(), ids[2].clone()]
+    );
+    let meetings_before = expected
+        .iter()
+        .map(|id| store.open_meeting(id).unwrap())
+        .collect::<Vec<_>>();
+    let committed_index = fs::read(folder.root().join(INDEX)).unwrap();
+    let blocked = folder
+        .root()
+        .join(format!(".{INDEX}.{}.tmp", std::process::id()));
+    fs::create_dir(&blocked).unwrap();
+
+    assert_eq!(store.delete(&ids[2]), Err(Error::Write));
+    assert_eq!(
+        fs::read(folder.root().join(INDEX)).unwrap(),
+        committed_index
+    );
+    let reopened = folder.store();
+    assert_eq!(reopened.list(None), original);
+    for meeting in &meetings_before {
+        assert_eq!(reopened.open_meeting(&meeting.id).unwrap(), *meeting);
+    }
+
+    fs::remove_dir(blocked).unwrap();
+    reopened.delete(&ids[2]).unwrap();
+    let final_store = folder.store();
+    let survivors = vec![
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[4].clone(),
+        ids[3].clone(),
+    ];
+    assert_eq!(listed_ids(final_store.list(None)), survivors);
+    assert_eq!(final_store.list(None).folders, original.folders);
+    assert_eq!(final_store.list(None).unreadable, 0);
+    assert_eq!(
+        listed_ids(final_store.list(Some("Visible"))),
+        vec![ids[0].clone(), ids[4].clone()]
+    );
+    let index: Value =
+        serde_json::from_slice(&fs::read(folder.root().join(INDEX)).unwrap()).unwrap();
+    assert_eq!(index["order"], serde_json::json!(survivors));
+    for meeting in meetings_before
+        .iter()
+        .filter(|meeting| meeting.id != ids[2])
+    {
+        assert_eq!(final_store.open_meeting(&meeting.id).unwrap(), *meeting);
+    }
+    assert!(!folder.root().join(&ids[2]).exists());
+    assert_eq!(final_store.open_meeting(&ids[2]), Err(Error::Missing));
 }

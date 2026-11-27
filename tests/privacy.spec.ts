@@ -34,7 +34,9 @@ test('notes, focus, name and an export review stay out of browser storage and of
   await focus.fill('Agree the seating chart for the potluck');
   await focus.blur();
 
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const review = page.getByRole('dialog', { name: 'Review your export' });
   await expect(review).toContainText('confirm the garden welcome date');
   await expect(review).not.toContainText('seating chart');

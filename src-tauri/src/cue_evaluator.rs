@@ -68,6 +68,20 @@ pub struct ExistingCue {
     pub asked: bool,
 }
 
+/// Explicit session intent; never inferred from conversation content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionMode {
+    #[default]
+    Meeting,
+    Interview,
+}
+impl SessionMode {
+    fn is_meeting(&self) -> bool {
+        *self == Self::Meeting
+    }
+}
+
 /// Immutable input. The context revision must change for topic, focus, pause,
 /// dismissal, source or other eligibility changes; it is not a timer revision.
 /// Compare the current request again while holding the lifecycle lock at poll.
@@ -79,6 +93,8 @@ pub struct Request {
     sources: Vec<Source>,
     existing_cue: Option<ExistingCue>,
     user_name: Option<String>,
+    #[serde(skip_serializing_if = "SessionMode::is_meeting")]
+    session_mode: SessionMode,
     earlier_cues: Vec<EarlierCue>,
     // Bytes of source text, ids and metadata, so the listener's name and
     // earlier cues are counted within the same aggregate limit.
@@ -172,6 +188,7 @@ impl Request {
             sources,
             existing_cue,
             user_name: None,
+            session_mode: SessionMode::Meeting,
             earlier_cues: Vec::new(),
             bytes,
         };
@@ -206,6 +223,23 @@ impl Request {
         }
         self.user_name = user_name;
         self.earlier_cues = earlier_cues;
+        Ok(self)
+    }
+
+    pub fn with_session_mode(mut self, mode: SessionMode) -> Result<Self, Failure> {
+        let bytes = self.bytes - usize::from(self.session_mode == SessionMode::Interview) * 9
+            + usize::from(mode == SessionMode::Interview) * 9;
+        let listener_bytes = self.user_name.as_ref().map_or(0, String::len)
+            + self
+                .earlier_cues
+                .iter()
+                .map(|cue| cue.text.len())
+                .sum::<usize>();
+        if bytes + listener_bytes > MAX_CONTEXT_BYTES {
+            return Err(Failure::InvalidInput);
+        }
+        self.bytes = bytes;
+        self.session_mode = mode;
         Ok(self)
     }
 
@@ -271,6 +305,9 @@ impl Request {
                 ",\"earlierCues\":{}",
                 serde_json::to_string(&self.earlier_cues).map_err(|_| Failure::InvalidInput)?
             );
+        }
+        if self.session_mode == SessionMode::Interview {
+            text += ",\"sessionMode\":\"interview\"";
         }
         text.push('}');
         Ok(text)
@@ -759,6 +796,28 @@ mod tests {
             }),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn interview_mode_changes_only_the_explicit_mode_not_sources_or_identity() {
+        let original = request(false);
+        let meeting: serde_json::Value =
+            serde_json::from_str(&original.prompt_input().unwrap()).unwrap();
+        assert!(meeting.get("sessionMode").is_none());
+        let interview = original.with_session_mode(SessionMode::Interview).unwrap();
+        let mut input: serde_json::Value =
+            serde_json::from_str(&interview.prompt_input().unwrap()).unwrap();
+        assert_eq!(
+            input.as_object_mut().unwrap().remove("sessionMode"),
+            Some(json!("interview"))
+        );
+        assert_eq!(input, meeting);
+        let restored = interview.with_session_mode(SessionMode::Meeting).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&restored.prompt_input().unwrap()).unwrap(),
+            meeting
+        );
+        assert!(serde_json::from_str::<SessionMode>(r#""unsupported""#).is_err());
     }
 
     fn reply(action: &str) -> String {

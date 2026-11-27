@@ -420,6 +420,27 @@ pub(crate) async fn set_kept_meeting_folder(
 }
 
 #[tauri::command]
+pub(crate) async fn position_kept_meeting(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    id: String,
+    folder: Option<String>,
+    anchor_id: Option<String>,
+    placement: crate::meeting_history::Placement,
+) -> Result<Summary, String> {
+    main_only(&window)?;
+    let summary = blocking(&app, move |store| {
+        store.position(&id, folder.as_deref(), anchor_id.as_deref(), placement)
+    })
+    .await?
+    .map_err(message)?;
+    if let Ok(mut keeping) = app.state::<Keeping>().0.lock() {
+        keeping.export = None;
+    }
+    Ok(summary)
+}
+
+#[tauri::command]
 pub(crate) async fn set_kept_meeting_archived(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,

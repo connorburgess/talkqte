@@ -30,11 +30,12 @@ The live model policy favors useful sourced context over repeated questions, tre
 
 - **A floating companion and live notebook.** Source quotes, Hold, Dismiss, Pause cues, Stop, your own notes, and the transcript. [Controls and limits](docs/glance-mode.md).
 - **Live transcription and model cues.** Choose Deepgram or ElevenLabs for transcription, and Anthropic, OpenAI, or Gemini for cue decisions and meeting notes. The app calls your chosen services directly with your keys; each provider bills your account. [Provider setup](docs/provider-keys.md).
+- **Interview nudges.** Open This meeting and choose Session type → Interview before starting an own-key session for brief reminders of relevant details already supplied about an example, contribution, reasoning or outcome. The mode adds no context sources and is instructed to use supplied evidence; it can still produce unsupported cues, and usefulness remains unvalidated. [Interview mode](docs/interview-mode.md).
 - **Prepare before a call.** Opt-in macOS Calendar prompts offer an editable meeting title before a linked event. **Prepare session** opens the notebook without starting capture; Calendar titles stay out of provider requests. [Calendar prompts](docs/calendar-prompts.md).
 - **Names within one meeting.** Rename Deepgram remote speaker labels in live or saved transcripts. These are provider guesses, not verified identities; names stay scoped to that meeting and appear in its transcript export and confirmed meeting-note requests. [Speaker names and limits](docs/meeting-history.md#remote-speaker-names).
-- **Prior context you can inspect.** Import selected file notes or notes through the development Granola connection. Saved meetings can supply notes for later sessions; provider sharing needs a separate explicit processing review. This is not a supported live Granola integration. [Prior context](docs/run-the-prototype.md).
+- **Prior context you can inspect.** Import selected file notes or notes through the development Granola connection. Saved meetings can supply written or kept meeting notes for later sessions; transcripts are excluded. Prior context explains automatic-selection and archived/unavailable states; provider sharing needs a separate explicit processing review. This is not a supported live Granola integration. [Prior context](docs/run-the-prototype.md).
 - **Cited notes after the call.** Confirm what will be sent, request meeting notes once, then edit, keep, or discard them. Review the exact Markdown before exporting. [Meeting notes](docs/meeting-notes.md).
-- **Optional meeting organization.** Non-empty sessions save to Meetings by default; choose ask-each-time or off in Settings. Search, read, rename, archive, export, delete, or organize meetings into collapsible folders. [Kept meetings](docs/meeting-history.md).
+- **Optional meeting organization.** Non-empty sessions save to Meetings by default; choose ask-each-time or off in Settings. Search, filter by date or notes, read, rename, archive, export, delete, or drag meetings into collapsible folders and arrange their order. Folder selectors and Move up/down controls work without dragging. [Kept meetings](docs/meeting-history.md).
 
 The alpha is free for personal use and internal work under the license below; you pay your providers directly. The website's **Pro** offering—pay as you go without managing keys—is planned and unavailable.
 
@@ -55,11 +56,17 @@ For platform prerequisites, unsigned Windows/Ubuntu test artifacts, and their li
 
 ## Live session
 
+The Notebook puts **Start live session** first when your providers are available. Working notes remain editable before a call; **Export Markdown…** stays hidden while nothing exists to export and appears once notes exist or after a session ends (and in saved-meeting details). **This meeting** and **Prior context** stay folded until you need them; **Transcript** and **Ask** cross-link directly; persistent preferences live in grouped **Settings**; and the sidebar footer shows native build provenance on desktop (or `Browser preview` outside Tauri). The footer distinguishes the working copy from locally kept meetings. See [Notebook states and limits](docs/notebook-ready-polish.md).
+
 1. In **Settings → Your API keys**, choose your transcription and cue providers and add their keys. macOS stores them in the Keychain. Without the required keys, the app explains what to add.
 2. Read the disclosure beside **Start live session**. In ordinary own-key builds, starting immediately enables capture, cloud transcription, and cue processing for new speech. On macOS 14.2+, the session can also capture system audio from all other apps, excluding TalkQTE; where unavailable it uses the microphone alone. Use headphones, and make sure everyone whose speech is captured knows and agrees.
 3. Hold or dismiss a cue as needed. **Pause cues** continues transcription; **Turn off processing** or **Stop live session** stops the session's sending. Stop can drain already-captured audio and wait briefly for final results. Review the saved meeting, request cited notes, or export afterward.
 
 Imported or saved prior notes are not automatically sent to the cue provider. Turn processing off and explicitly select the notes in **Cue processing → Review processing** before including them. On macOS, call-start offers are on by default and can be turned off; automatic start is off unless you explicitly enable it in Settings. [Call-start controls](docs/call-prompt.md).
+
+## Ask about recent discussion
+
+During or after the current session, open **Ask** in the notebook, or use the companion’s **Transcript and Ask** button. **Send** explicitly shares your question and the disclosed latest transcript excerpt with your selected provider and own key. This is separate from cue approval; opening the panel sends nothing. Answers link to transcript timestamps and can be wrong. Older discussion outside the bounded excerpt is excluded. Q&A stays in memory and is not saved or exported. See [scope, controls and limits](docs/live-questions.md).
 
 ## Where your meeting goes
 

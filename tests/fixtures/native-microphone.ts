@@ -5,6 +5,7 @@ import * as granolaFixture from './native-granola';
 import * as contextFixture from './native-context';
 import * as providerKeysFixture from './native-provider-keys';
 import * as meetingNotesFixture from './native-meeting-notes';
+import * as meetingQaFixture from './native-meeting-qa';
 import * as historyFixture from './native-meeting-history';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
@@ -579,6 +580,8 @@ mockIPC(
       return permissionFixture.command(command, args);
     if (providerKeysFixture.commands.includes(command))
       return providerKeysFixture.command(command, args);
+    if (meetingQaFixture.commands.includes(command))
+      return meetingQaFixture.command(command, args, session);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
     if (historyFixture.commands.includes(command)) {
@@ -687,6 +690,18 @@ mockIPC(
       }
       case 'snapshot':
         return structuredClone(session);
+      case 'build_info': {
+        const mode = new URLSearchParams(location.search).get('build-info');
+        if (mode === 'error') throw new Error('Build identity unavailable.');
+        return {
+          version: '0.1.0',
+          commit: '1234567890abcdef1234567890abcdef12345678',
+          dirty: mode === 'dirty',
+          profile: 'debug',
+          target: 'aarch64-apple-darwin',
+          sourceDateEpoch: null,
+        };
+      }
       case 'companion_anchor':
         edgeAsked = true;
         if (edgeReply === 'fail')
@@ -781,6 +796,16 @@ mockIPC(
           message: null,
         });
         return;
+      case 'set_session_mode': {
+        if (new URLSearchParams(location.search).has('reject-session-mode'))
+          throw new Error('Session type could not be changed. Try again.');
+        if (session.status === 'running' || session.status === 'paused')
+          throw new Error('Stop the session before changing its mode.');
+        const mode = (args as Commands['set_session_mode']).mode;
+        preview.command('set_session_mode', { mode });
+        if (session.revision >= 1_000) await publish({ sessionMode: mode });
+        return;
+      }
       case 'set_focus': {
         const { lines } = args as Commands['set_focus'];
         focusSubmissions.push([...lines]);

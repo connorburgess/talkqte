@@ -91,6 +91,7 @@ export interface CueSnapshot {
   /** The capture sources this live session was started with. */
   sources?: import('./transcription').SessionSources;
 }
+export type SessionMode = 'meeting' | 'interview';
 export interface Snapshot extends CueSnapshot {
   session: string;
   title: string;
@@ -103,6 +104,8 @@ export interface Snapshot extends CueSnapshot {
   userName: string | null;
   /** Session-only: what matters in this meeting, one short line each. */
   focus: string[];
+  /** Explicit intent, kept for this app launch; never inferred from speech. */
+  sessionMode?: SessionMode;
   /** Session-only: include the transcript and cues shown in the export. */
   keepMeeting?: boolean;
   /** Session-only: where this session's model-written notes stand. */
@@ -133,6 +136,7 @@ export type Commands = {
   set_sensitivity: { value: Snapshot['sensitivity'] };
   set_user_name: { name: string | null };
   set_focus: { lines: string[] };
+  set_session_mode: { mode: SessionMode };
   set_overlay: { enabled: boolean };
   /** Include this session's transcript and cues shown in the export. */
   set_keep_meeting: { keep: boolean };

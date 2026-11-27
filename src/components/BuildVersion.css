@@ -1,0 +1,25 @@
+.build-version {
+  display: block;
+}
+
+.build-version summary {
+  cursor: pointer;
+}
+
+.build-version summary:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 3px;
+}
+
+.build-version dl {
+  margin: var(--space-12) 0 0;
+}
+
+.build-version dt {
+  margin-top: var(--space-8);
+}
+
+.build-version dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

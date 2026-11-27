@@ -27,9 +27,7 @@ async function connected(page: Page) {
   await expect(button(page, 'Disconnect Granola')).toBeEnabled();
   await expect(button(page, 'Suggest from Granola')).toBeEnabled();
   await expect(button(page, 'Connect Granola')).toHaveCount(0);
-  await expect(context(page)).toContainText(
-    'No prior notes selected. Choose Granola notes',
-  );
+  await expect(context(page)).toContainText('0 notes selected');
 }
 
 test.beforeEach(async ({ page }) => {
@@ -69,9 +67,12 @@ for (const fail of [false, true]) {
       });
       await page.setViewportSize({ width: 600, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      expect(
-        await context(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-      ).toBe(true);
+      // The notebook's ResizeObserver updates its split layout asynchronously.
+      await expect
+        .poll(() =>
+          context(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+        )
+        .toBe(true);
       await context(page).screenshot({
         path: testInfo.outputPath('granola-status-narrow.png'),
       });

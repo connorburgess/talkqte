@@ -360,10 +360,20 @@ impl<T: Transport> Evaluator for GeminiApi<T> {
         match reply.status {
             200 => {}
             401 | 403 => {
+                // Retired work cannot mark the key rejected for a resumed
+                // or replacement session.
+                if cancel.is_withdrawn() {
+                    return Err(Failure::Cancelled);
+                }
                 (self.on_rejected)();
                 return Err(Failure::SignIn);
             }
             400 if is_invalid_api_key_400(reply.body) => {
+                // The error-body read can cross withdrawal after headers.
+                // Recheck before changing shared provider readiness.
+                if cancel.is_withdrawn() {
+                    return Err(Failure::Cancelled);
+                }
                 (self.on_rejected)();
                 return Err(Failure::SignIn);
             }

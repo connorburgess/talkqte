@@ -16,6 +16,7 @@ pub mod application_audio;
 #[cfg(target_os = "macos")]
 mod application_audio_host;
 pub mod audio_tap;
+pub mod build_info;
 pub mod calendar;
 mod calendar_commands;
 pub mod call_prompt;
@@ -88,6 +89,8 @@ pub mod meeting_history;
 mod meeting_history_commands;
 pub mod meeting_notes;
 mod meeting_notes_commands;
+mod meeting_qa;
+mod meeting_qa_commands;
 mod menu_bar;
 mod microphone;
 #[cfg(target_os = "macos")]
@@ -634,6 +637,17 @@ fn set_user_name(
         |e| e.set_user_name(name),
         |s, saved| saved.user_name = s.user_name.clone(),
     )
+}
+#[tauri::command]
+fn set_session_mode(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    mode: cue_evaluator::SessionMode,
+) -> Result<(), String> {
+    if settings::lab_run() || cfg!(feature = "claude-cli") {
+        return Err("Session types require the standard own-key cue provider.".into());
+    }
+    change(&app, &state, |e| e.set_session_mode(mode))
 }
 #[tauri::command]
 async fn set_focus(
@@ -2419,6 +2433,7 @@ pub fn run() {
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
             platform::platform_capabilities,
+            build_info::build_info,
             calendar_commands::calendar_settings,
             calendar_commands::set_calendar_prompts,
             calendar_commands::respond_to_calendar_prompt,
@@ -2445,12 +2460,18 @@ pub fn run() {
             set_sensitivity,
             set_user_name,
             set_focus,
+            set_session_mode,
             set_overlay,
             export_preview,
             export_markdown,
             set_keep_meeting,
             resolve_echo_line,
             rename_speaker,
+            meeting_qa_commands::question_scope,
+            meeting_qa_commands::ask_question,
+            meeting_qa_commands::cancel_question,
+            meeting_qa_commands::question_history,
+            meeting_qa_commands::open_meeting_panel,
             meeting_notes_commands::meeting_notes_plan,
             meeting_notes_commands::write_meeting_notes,
             meeting_notes_commands::cancel_meeting_notes,
@@ -2475,6 +2496,7 @@ pub fn run() {
             meeting_history_commands::rename_meeting_folder,
             meeting_history_commands::delete_meeting_folder,
             meeting_history_commands::set_kept_meeting_folder,
+            meeting_history_commands::position_kept_meeting,
             meeting_history_commands::kept_meeting_export_preview,
             meeting_history_commands::export_kept_meeting,
             meeting_history_commands::list_kept_meetings_for_context,

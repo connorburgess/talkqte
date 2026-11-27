@@ -18,14 +18,19 @@ async function companionWithQuestion(page: Page) {
   return question;
 }
 
-test('saving an export from the keyboard returns focus to Export', async ({
+test('saving an export from the keyboard returns focus to Export Markdown…', async ({
   page,
 }) => {
   await page.goto('/');
   const exportButton = page.getByRole('button', {
-    name: 'Export',
+    name: 'Export Markdown…',
     exact: true,
   });
+  await expect(exportButton).toHaveCount(0);
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional keyboard export note.');
+  await expect(exportButton).toBeEnabled();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await exportButton.press('Enter');
   await expect(dialog).toBeVisible();
@@ -44,25 +49,24 @@ test('saving an export from the keyboard returns focus to Export', async ({
   await expect(dialog).toBeVisible();
 });
 
-test('Cue appearance and timing opens Settings with focus on the first appearance control', async ({
+test('Settings groups persistent appearance controls and exposes section jump links', async ({
   page,
 }) => {
   await page.goto('/');
+  await expect(
+    page.getByRole('button', { name: 'Cue appearance and timing' }),
+  ).toHaveCount(0);
   await page
-    .getByRole('button', { name: 'Cue appearance and timing' })
+    .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
   await expect(
     page.getByRole('heading', { name: 'Settings', level: 1 }),
   ).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(nav.getByRole('link')).toHaveCount(5);
+  await nav.getByRole('link', { name: 'Cues & companion' }).press('Enter');
   const size = page.locator('#question-size');
-  await expect(size).toBeFocused();
   await expect(size).toBeInViewport();
-  // The Settings entry in navigation is not a jump to a section.
-  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
-  await page
-    .getByRole('button', { name: 'Settings', exact: true })
-    .press('Enter');
-  await expect(size).not.toBeFocused();
 });
 
 test('keyboard Dismiss in the companion moves focus to its first remaining control', async ({
@@ -112,18 +116,15 @@ test('a delayed Dismiss acknowledgement still ends with focus on a companion con
 test('Home and End move between the notebook tabs', async ({ page }) => {
   await page.goto('/');
   const notes = page.getByRole('tab', { name: 'Notes' });
+  const ask = page.getByRole('tab', { name: 'Ask', exact: true });
   const transcript = page.getByRole('tab', { name: /Transcript/ });
   await notes.focus();
   await page.keyboard.press('End');
-  await expect(transcript).toBeFocused();
-  await expect(transcript).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tabpanel')).toHaveAttribute(
-    'id',
-    'transcript-panel',
-  );
-  // End on the last tab and Home on the first stay put.
+  await expect(ask).toBeFocused();
+  await expect(ask).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel')).toHaveAttribute('id', 'ask-panel');
   await page.keyboard.press('End');
-  await expect(transcript).toBeFocused();
+  await expect(ask).toBeFocused();
   await page.keyboard.press('Home');
   await expect(notes).toBeFocused();
   await expect(notes).toHaveAttribute('aria-selected', 'true');

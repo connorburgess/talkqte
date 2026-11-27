@@ -148,9 +148,9 @@ test('disconnect stays reachable while listing and ignores a late chooser', asyn
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await disconnect.scrollIntoViewIfNeeded();
   await expect(disconnect).toBeInViewport();
-  expect(await context.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
-    true,
-  );
+  await expect
+    .poll(() => context.evaluate((el) => el.scrollWidth <= el.clientWidth))
+    .toBe(true);
   await context.screenshot({
     path: testInfo.outputPath('granola-loading-narrow.png'),
   });
@@ -264,7 +264,7 @@ test('removing all after a Granola import returns focus to prior context', async
     .press('Enter');
   await expect(
     page.getByRole('region', { name: 'Prior context' }),
-  ).toContainText('No prior notes selected.');
+  ).toContainText('0 notes selected');
   await expect(
     page.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeFocused();

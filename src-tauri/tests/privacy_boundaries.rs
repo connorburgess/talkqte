@@ -78,11 +78,13 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
     // What the notebook alone may do. Each must exist for the notebook, so a
     // renamed command cannot make this check pass by matching nothing.
     let notebook_only = set(&[
+        "allow-build-info",
         "allow-export-preview",
         "allow-export-markdown",
         "allow-update-notes",
         "allow-set-user-name",
         "allow-set-focus",
+        "allow-set-session-mode",
         "allow-start-microphone",
         "allow-note-dictation-snapshot",
         "allow-start-note-dictation",
@@ -104,6 +106,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-review-processing-scope",
         "allow-approve-processing-scope",
         "allow-processing-snapshot",
+        "allow-question-scope",
+        "allow-ask-question",
+        "allow-cancel-question",
+        "allow-question-history",
         // The call-starting prompt's settings are the notebook's alone.
         "allow-call-prompt-settings",
         "allow-set-call-prompt",
@@ -149,6 +155,7 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-rename-meeting-folder",
         "allow-delete-meeting-folder",
         "allow-set-kept-meeting-folder",
+        "allow-position-kept-meeting",
         "allow-kept-meeting-export-preview",
         "allow-export-kept-meeting",
         "allow-list-kept-meetings-for-context",
@@ -195,6 +202,8 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-respond-to-calendar-prompt",
         "allow-respond-to-call-end-prompt",
         "allow-respond-to-end-prompt",
+        // Only opens/focuses one of two notebook panels; returns no transcript.
+        "allow-open-meeting-panel",
     ]);
     assert!(
         cue.is_subset(&companion),
