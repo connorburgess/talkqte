@@ -2,6 +2,12 @@
 
 Built 24 November 2026 (distilled UI copy updated 25 November 2026). The notebook can keep a meeting after it ends, so it works as a record for someone with no other note-taker. This page describes what the code does. The evidence is offline tests with fictional meetings; no build has kept a real meeting on a device yet.
 
+## Capture disclosure and transcript retention
+
+The live capture panel explains transcript saving independently of whether a cue processor is configured. **Save automatically** requests a local save of non-empty sessions on stop; **Ask each time** waits for a keep choice; **Don’t save** leaves the current session in memory. Lab runs do not save meetings. These are conditional descriptions of the settings, not a claim that a save succeeded; the ended-session status reports the result.
+
+This is about the meeting transcript, not questions sent to Ask or model answers. The separate [live Ask change](https://github.com/connorburgess/talkqte/pull/476) keeps its Q&A in session memory and excludes it from saved meetings. That feature is not introduced by this disclosure correction.
+
 ## Keeping a meeting
 
 By default, non-empty live sessions save automatically into local **Meetings** history when they stop, with a floating dock card to review, write cited notes, open, or delete right away. Lab runs never read, write, or auto-save to kept meetings.
