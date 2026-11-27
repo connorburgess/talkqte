@@ -143,12 +143,19 @@ export function MicrophoneControl({
                 : sourceSession
                   ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
                   : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
-              {processingConfigured
-                ? ' Cue processing controls are below.'
-                : ' TalkQTE does not save the transcript.'}{' '}
+              {processingConfigured && ' Cue processing controls are below.'}{' '}
               {sourceSession
                 ? 'Stop live session to end it.'
                 : 'Stop live session to release the microphone.'}
+            </p>
+          )}
+          {!preparing && (
+            <p className="microphone-retention">
+              Transcript saving follows Settings → Meetings, independently of
+              cue processing. Save automatically requests a local save of
+              non-empty sessions on stop. Ask each time waits for your choice;
+              Don’t save leaves the session in memory. Check the status after
+              Stop to confirm a save. Lab runs do not save meetings.
             </p>
           )}
           {(error || state?.message) && (
