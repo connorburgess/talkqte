@@ -168,7 +168,12 @@ test('the browser preview offers no Granola connection and says where it lives',
 }) => {
   const panel = page.getByRole('region', { name: 'Prior context' });
   await expect(panel.getByRole('button', { name: /Granola/ })).toHaveCount(0);
-  await expect(panel).toContainText('Connect Granola (last 30 days)');
+  await expect(
+    panel.getByRole('button', { name: 'Choose kept meetings' }),
+  ).toHaveCount(0);
+  await expect(panel).toContainText(
+    'Saved meetings and Granola connections are available in the desktop app.',
+  );
   await expect(
     panel.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeVisible();

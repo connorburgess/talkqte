@@ -27,9 +27,7 @@ async function connected(page: Page) {
   await expect(button(page, 'Disconnect Granola')).toBeEnabled();
   await expect(button(page, 'Suggest from Granola')).toBeEnabled();
   await expect(button(page, 'Connect Granola')).toHaveCount(0);
-  await expect(context(page)).toContainText(
-    'No prior notes selected. Choose Granola notes',
-  );
+  await expect(context(page)).toContainText('0 notes selected');
 }
 
 test.beforeEach(async ({ page }) => {

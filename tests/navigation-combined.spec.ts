@@ -113,7 +113,7 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
   await context
     .getByRole('button', { name: 'Remove all', exact: true })
     .press('Enter');
-  await expect(context).toContainText('No prior notes selected.');
+  await expect(context).toContainText('0 notes selected');
   await expect(
     context.getByRole('button', { name: 'Add notes from a file' }),
   ).toBeFocused();
@@ -127,7 +127,7 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
     .getByRole('button', { name: 'Notebook', exact: true })
     .press('Enter');
   await context.locator('summary').press('Enter');
-  await expect(context).toContainText('No prior notes selected.');
+  await expect(context).toContainText('0 notes selected');
   await expect(context.getByRole('listitem')).toHaveCount(0);
   expect(
     await page.evaluate(
