@@ -84,7 +84,12 @@ test('arrow keys move both ways between notebook tabs, which stay a single tab s
   await expect(notes).toBeFocused();
   await expect(notes).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tabpanel', { name: 'Notes' })).toBeVisible();
-  // Tab leaves the tab list for the selected panel instead of the other tab.
+  // Tab leaves the single-stop tab list for its neighboring Export action,
+  // then reaches the selected editor without visiting the inactive tab.
+  await page.keyboard.press(tabKey(browserName));
+  await expect(
+    page.getByRole('button', { name: 'Export', exact: true }),
+  ).toBeFocused();
   await page.keyboard.press(tabKey(browserName));
   await expect(
     page.getByRole('textbox', { name: 'Meeting notes' }),

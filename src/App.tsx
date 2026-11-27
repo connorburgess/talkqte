@@ -1864,7 +1864,9 @@ function Notebook() {
         )}
 
         {view === 'notebook' && !showOnboarding && (
-          <div className="notebook-body">
+          <div
+            className={`notebook-body${!sessionLive && !simulated && !preparing && !finishing ? ' notebook-idle' : ''}`}
+          >
             <section className="session-strip" aria-label="Session">
               <div className="session-state">
                 {/* A dot only while something runs; idle and ended have none. */}
@@ -1895,7 +1897,9 @@ function Notebook() {
                             : 'Live session ended'
                           : simulated
                             ? 'Simulated session'
-                            : 'No session yet'}
+                            : liveStatus?.available && !micCheckActive
+                              ? 'Ready for a meeting'
+                              : 'No session yet'}
                   </h1>
                   <p>
                     {preparing
@@ -2046,20 +2050,6 @@ function Notebook() {
                       {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
                     </button>
                   )}
-                <button
-                  ref={exportButton}
-                  className="secondary-button export-button"
-                  onClick={prepareExport}
-                  disabled={busy || live || preparing || finishing}
-                  title={
-                    live || finishing
-                      ? 'Stop the live session to export your notes. The transcript is never exported.'
-                      : undefined
-                  }
-                >
-                  <ArrowUpRight size={16} />
-                  Export
-                </button>
                 {!preparing && !finishing && !live && !simulated && (
                   <div className="session-start-group">
                     {liveStatus?.available && (
@@ -2110,66 +2100,82 @@ function Notebook() {
               }
             >
               <section className="editor-section" id="meeting-editor">
-                <div
-                  className="tabs"
-                  role="tablist"
-                  aria-label="Meeting content"
-                  onKeyDown={(e) => {
-                    const tabs = ['notes', 'transcript', 'ask'] as const;
-                    const next =
-                      e.key === 'Home'
-                        ? tabs[0]
-                        : e.key === 'End'
-                          ? tabs[2]
-                          : e.key === 'ArrowRight'
-                            ? tabs[(tabs.indexOf(tab) + 1) % 3]
-                            : e.key === 'ArrowLeft'
-                              ? tabs[(tabs.indexOf(tab) + 2) % 3]
-                              : null;
-                    if (!next) return;
-                    e.preventDefault();
-                    setTab(next);
-                    document.getElementById(`${next}-tab`)?.focus();
-                  }}
-                >
-                  <button
-                    role="tab"
-                    aria-selected={tab === 'notes'}
-                    aria-controls="notes-panel"
-                    id="notes-tab"
-                    tabIndex={tab === 'notes' ? 0 : -1}
-                    onClick={() => setTab('notes')}
+                <div className="editor-heading">
+                  <div
+                    className="tabs"
+                    role="tablist"
+                    aria-label="Meeting content"
+                    onKeyDown={(e) => {
+                      const tabs = ['notes', 'transcript', 'ask'] as const;
+                      const next =
+                        e.key === 'Home'
+                          ? tabs[0]
+                          : e.key === 'End'
+                            ? tabs[2]
+                            : e.key === 'ArrowRight'
+                              ? tabs[(tabs.indexOf(tab) + 1) % 3]
+                              : e.key === 'ArrowLeft'
+                                ? tabs[(tabs.indexOf(tab) + 2) % 3]
+                                : null;
+                      if (!next) return;
+                      e.preventDefault();
+                      setTab(next);
+                      document.getElementById(`${next}-tab`)?.focus();
+                    }}
                   >
-                    <FileText size={16} />
-                    <span className="tab-label">Notes</span>
-                  </button>
-                  <button
-                    ref={transcriptTab}
-                    role="tab"
-                    aria-selected={tab === 'transcript'}
-                    aria-controls="transcript-panel"
-                    id="transcript-tab"
-                    tabIndex={tab === 'transcript' ? 0 : -1}
-                    onClick={() => setTab('transcript')}
-                  >
-                    <MessageCircle size={16} />
-                    <span className="tab-label">
-                      Transcript{' '}
-                      <span className="tab-count">
-                        {state.transcript.length}
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'notes'}
+                      aria-controls="notes-panel"
+                      id="notes-tab"
+                      tabIndex={tab === 'notes' ? 0 : -1}
+                      onClick={() => setTab('notes')}
+                    >
+                      <FileText size={16} />
+                      <span className="tab-label">Notes</span>
+                    </button>
+                    <button
+                      ref={transcriptTab}
+                      role="tab"
+                      aria-selected={tab === 'transcript'}
+                      aria-controls="transcript-panel"
+                      id="transcript-tab"
+                      tabIndex={tab === 'transcript' ? 0 : -1}
+                      onClick={() => setTab('transcript')}
+                    >
+                      <MessageCircle size={16} />
+                      <span className="tab-label">
+                        Transcript{' '}
+                        <span className="tab-count">
+                          {state.transcript.length}
+                        </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                    <button
+                      role="tab"
+                      id="ask-tab"
+                      aria-controls="ask-panel"
+                      aria-selected={tab === 'ask'}
+                      tabIndex={tab === 'ask' ? 0 : -1}
+                      onClick={() => setTab('ask')}
+                    >
+                      <BookOpen size={16} aria-hidden="true" />
+                      <span className="tab-label">Ask</span>
+                    </button>
+                  </div>
                   <button
-                    role="tab"
-                    id="ask-tab"
-                    aria-controls="ask-panel"
-                    aria-selected={tab === 'ask'}
-                    tabIndex={tab === 'ask' ? 0 : -1}
-                    onClick={() => setTab('ask')}
+                    ref={exportButton}
+                    className="text-button notebook-export"
+                    onClick={prepareExport}
+                    disabled={busy || live || preparing || finishing}
+                    title={
+                      live || finishing
+                        ? 'Stop the live session to review an export.'
+                        : undefined
+                    }
                   >
-                    <BookOpen size={16} aria-hidden="true" />
-                    <span className="tab-label">Ask</span>
+                    <ArrowUpRight size={16} />
+                    Export
                   </button>
                 </div>
                 {tab === 'ask' ? (
@@ -2208,7 +2214,7 @@ function Notebook() {
                       }}
                     />
                     <div className="editor-footer">
-                      <span>In memory for this session</span>
+                      <span>Working copy</span>
                       <div className="editor-footer-actions">
                         <span>{notes.length.toLocaleString()} / 20,000</span>
                         <button
@@ -2487,7 +2493,9 @@ function Notebook() {
                             ? 'A little room to think.'
                             : sessionLive
                               ? 'Cues have stopped.'
-                              : 'No cue yet.'}
+                              : liveStatus?.available
+                                ? 'Cues follow the conversation.'
+                                : 'Live cues are unavailable.'}
                       </h3>
                       <p>
                         {state.cuesPaused
@@ -2496,7 +2504,11 @@ function Notebook() {
                             ? 'Cues pass quietly. Keep listening without needing to respond.'
                             : sessionLive
                               ? 'Start a new session for cues.'
-                              : 'One cue at a time appears here during a live session (phrase rules only in this build).'}
+                              : liveStatus?.available
+                                ? liveStatus.cueProvider
+                                  ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue when there’s something useful to add. Silence is normal.`
+                                  : 'During a session, cues appear one at a time when available. You can use one or let it pass.'
+                                : 'Check Settings for provider status and live-session setup requirements.'}
                       </p>
                     </div>
                   }
@@ -2782,6 +2794,10 @@ function Notebook() {
               onError={setError}
               onNotice={setNotice}
               onGranola={granolaChanged}
+              {...{
+                onOpenMeetings: () => setView('meetings'),
+                onOpenSettings: () => setView('settings'),
+              }}
             />
             <footer className="notebook-footer">
               <ShieldCheck size={15} />
@@ -2790,9 +2806,9 @@ function Notebook() {
                   ? 'In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.'
                   : sessionLive
                     ? sessionHistory?.kept
-                      ? 'Saved in Meetings on this Mac. Only leaves if you generate meeting notes or export.'
+                      ? 'Saved to Meetings on this computer until you delete it. Exports and backups have their own lifecycle.'
                       : 'In memory until you quit or start another session, unless you save or export it.'
-                    : 'Notes stay in memory until you quit. Export before closing to keep them.'}
+                    : 'Working notes stay here until you quit. Live meetings save locally on Stop by default; change this in Settings.'}
               </p>
             </footer>
           </div>

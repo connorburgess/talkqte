@@ -497,7 +497,7 @@ test('a launch whose live transcription is already available (development or lab
 }) => {
   await openDesktop(page, '?live');
   await expect(
-    page.getByRole('heading', { name: 'No session yet', exact: true }),
+    page.getByRole('heading', { name: 'Ready for a meeting', exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'One quiet cue beside your live call' }),
