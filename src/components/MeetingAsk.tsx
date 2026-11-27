@@ -282,18 +282,18 @@ export function MeetingAsk({
           <div className="ask-scope" id="ask-scope">
             <p>
               Send to {scope.providerName} · {scope.model}. Uses the latest{' '}
-              {scopeCount} {scopeCount === 1 ? 'line' : 'lines'} (
-              {scope.omitted ? `of ${lineCount}, ` : ''}capped at 200 lines / 64
-              KiB). Model answers can be wrong.
+              {scopeCount} {scopeCount === 1 ? 'line' : 'lines'}
+              {scope.omitted ? ` of ${lineCount}` : ''} from this session. Model
+              answers can be wrong.
             </p>
             <details>
               <summary>Transcript scope and cost</summary>
               <p>
-                {clockTime(first.atMs)}–{clockTime(last.atMs)} only. Older
-                discussion is excluded when outside this range.{' '}
+                Recent excerpt covers {clockTime(first.atMs)}–
+                {clockTime(last.atMs)} (capped at 200 lines / 64 KiB).{' '}
                 {scope.omitted
                   ? 'Earlier discussion is not included.'
-                  : 'Only the currently available transcript is included.'}{' '}
+                  : 'Older discussion outside this recent window is excluded.'}{' '}
                 No saved notes, imported context or previous answers are sent.
               </p>
               <p>

@@ -84,6 +84,10 @@ test('before a session, the notebook never says nothing is captured while the mi
   );
   await expect(session(page)).not.toContainText('microphone check above is on');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(
     page
       .getByRole('region', { name: 'Microphone', exact: true })

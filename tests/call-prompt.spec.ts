@@ -110,6 +110,10 @@ test('Settings has the dock offer on by default, Start automatically off by defa
 }) => {
   await standIn(page, '/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const setting = page.getByRole('region', { name: 'When a call starts' });
   await expect(setting).toContainText(
     'never audio, video, or what is on screen, and that stays on this Mac.',

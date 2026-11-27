@@ -268,6 +268,10 @@ test('the microphone panel claims no system audio only when no source may be cap
 }) => {
   const { microphone } = await notebook(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   const plain =
     'Shows whether your microphone picks up sound. Nothing is recorded or transcribed, and no system audio is used.';
   await expect(microphone).toContainText(plain);

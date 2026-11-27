@@ -74,6 +74,10 @@ test('unconfigured notebook stays useful with phrase cues, optional setup and a 
   await expect(stop(page)).toBeEnabled();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
   await stop(page).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(mic(page).getByRole('status')).toHaveText('Off');
   await expect(stop(page)).toHaveCount(0);
   await expect(panel(page)).toBeHidden();
@@ -210,6 +214,10 @@ test('changed notes retire review without stealing focus from Settings', async (
   await open(page, '?live&processor&lab');
   await prepare(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   const name = page.getByRole('textbox', { name: 'Name', exact: true });
   await name.focus();
   await page.evaluate(() => window.permissionTest.replaceSources());

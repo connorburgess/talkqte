@@ -156,6 +156,10 @@ test('dictation is disabled during a live session and during microphone monitori
 
   // Active microphone check (started from Settings) disables dictation on Notebook.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Start microphone' }).click();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   if (!(await focusBtn.isVisible())) {

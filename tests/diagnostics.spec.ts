@@ -57,6 +57,10 @@ test('diagnostics show codes and settings, never meeting content, and copy only 
   );
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   const section = page.getByRole('region', { name: 'Diagnostics' });
   await expect(
     section.getByRole('button', { name: 'Copy diagnostics' }),

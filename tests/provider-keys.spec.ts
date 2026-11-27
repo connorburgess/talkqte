@@ -44,6 +44,10 @@ test('browser preview fake: a new install shows both keys as not set, with what 
   await expect(keys).toContainText("kept in your Mac's Keychain");
   for (const name of ['Deepgram', 'ElevenLabs', 'Anthropic']) {
     await expect(row(page, name)).toContainText('Not set');
+    const toggle = row(page, name).getByRole('button', {
+      name: `Configure ${name} key`,
+    });
+    if (await toggle.isVisible()) await toggle.click();
     await expect(
       row(page, name).getByRole('button', { name: 'Test key' }),
     ).toBeDisabled();
@@ -327,6 +331,9 @@ test('native fixture: ElevenLabs key entry, test, removal, and Transcription pro
   await openNative(page);
   const elevenlabs = row(page, 'ElevenLabs');
   await expect(elevenlabs).toContainText('Not set');
+  await elevenlabs
+    .getByRole('button', { name: 'Configure ElevenLabs key' })
+    .click();
   await elevenlabs.getByLabel('ElevenLabs API key').fill('not-an-el-key');
   await elevenlabs.getByRole('button', { name: 'Save key' }).click();
   await expect(elevenlabs.getByRole('alert')).toContainText(
@@ -377,6 +384,8 @@ test('native fixture: openai and gemini keys validate, cross IPC once, and remov
   const gemini = row(page, 'Gemini');
   await expect(openai).toContainText('Not set');
   await expect(gemini).toContainText('Not set');
+  await openai.getByRole('button', { name: 'Configure OpenAI key' }).click();
+  await gemini.getByRole('button', { name: 'Configure Gemini key' }).click();
 
   await openai.getByLabel('OpenAI API key').fill('sk-ant-not-openai-key');
   await openai.getByLabel('OpenAI API key').press('Enter');
@@ -429,6 +438,7 @@ test('native fixture: cue provider switching, custom model validation, and hones
   page,
 }) => {
   await openNative(page);
+  await page.getByText('Custom model ID & meeting notes model').click();
   const providerSelect = page.getByLabel('Cue & notes provider');
   const cueSelect = page.getByLabel('Cue model', { exact: true });
   const customCueInput = page.getByLabel('Custom cue model ID (optional)');
@@ -505,6 +515,7 @@ test('browser preview fake: narrow 390px viewport fits all five providers and cu
   }
   await expect(page.getByLabel('Transcription provider')).toBeVisible();
   await expect(page.getByLabel('Cue & notes provider')).toBeVisible();
+  await page.getByText('Custom model ID & meeting notes model').click();
   await expect(page.getByLabel('Custom cue model ID (optional)')).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,

@@ -59,12 +59,21 @@ for (const [os, name] of [
       `On ${name}, live sessions hear your microphone only: with headphones, that is your side of a call. Hearing another application is not available on ${name} yet.`,
     );
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const settingsNav = page.getByRole('navigation', {
+      name: 'Settings sections',
+    });
+    await settingsNav
+      .getByRole('link', { name: 'Capture & prompts', exact: true })
+      .click();
     const setting = page.getByRole('region', { name: 'When a call starts' });
     await expect(setting).toContainText(`Not available on ${name} yet.`);
     await expect(setting.getByRole('checkbox')).toHaveCount(0);
     const menuBar = page.getByRole('region', { name: 'Menu bar and login' });
     await expect(menuBar).toContainText(`Not available on ${name} yet`);
     await expect(menuBar.getByRole('checkbox')).toHaveCount(0);
+    await settingsNav
+      .getByRole('link', { name: 'Meetings & storage', exact: true })
+      .click();
     const saved = page.getByRole('region', { name: 'Saved settings' });
     await expect(saved).toContainText(
       os === 'windows'
@@ -72,6 +81,9 @@ for (const [os, name] of [
         : 'Keys stay in your desktop keyring',
     );
     await expect(saved).not.toContainText('Mac');
+    await settingsNav
+      .getByRole('link', { name: 'Cues & companion', exact: true })
+      .click();
     await expect(
       page.getByText(/Highlights questions asked of you by name/),
     ).toContainText('Saved on this computer.');
@@ -96,6 +108,10 @@ test('macOS: no platform note at the session start, and setup reads as before', 
   ).toBeVisible();
   await expect(session(page)).not.toContainText('microphone only');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   await expect(
     page.getByRole('checkbox', {
       name: 'Offer in the dock when a call seems to start',

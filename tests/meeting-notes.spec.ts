@@ -170,6 +170,7 @@ test('the notes model is a plain setting with a careful default', async ({
 }) => {
   await openNative(page);
   await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByText('Custom model ID & meeting notes model').click();
   const choice = page.getByRole('combobox', {
     name: 'Model for meeting notes',
   });
@@ -246,6 +247,7 @@ test('uses the selected provider and omits cost estimates for custom notes model
   await openNative(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Cue & notes provider').selectOption('openai');
+  await page.getByText('Custom model ID & meeting notes model').click();
   await page
     .getByLabel('Custom meeting notes model ID (optional)')
     .fill('gpt-5.4-codex');

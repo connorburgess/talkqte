@@ -573,6 +573,126 @@ svg {
   font-size: 13px;
   margin-top: var(--space-4);
 }
+.live-header-shell {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: var(--space-16) var(--space-32) 0;
+  max-width: 1216px;
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+}
+@media (max-width: 1200px) {
+  .live-header-shell {
+    margin-inline: var(--space-24);
+  }
+}
+@media (max-width: 400px) {
+  .live-header-shell {
+    margin-inline: var(--space-16);
+  }
+}
+.live-header-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.live-header-primary .session-strip.is-unified {
+  flex: 1 1 320px;
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  gap: 8px 12px;
+  align-items: center;
+}
+.live-header-primary .session-strip.is-unified .session-state {
+  gap: 8px;
+}
+.live-header-primary .session-strip.is-unified .session-state h1 {
+  font-size: 15.5px;
+}
+.live-header-primary .session-strip.is-unified .session-clock {
+  font-size: 13px;
+}
+.live-header-primary .session-strip.is-unified .session-state p {
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+.live-header-primary .microphone-panel.is-unified {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+.microphone-unified-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+}
+.microphone-unified-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.microphone-unified-prep {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.microphone-more.is-unified-details {
+  max-width: 560px;
+}
+.microphone-more.is-unified-details > summary {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+  cursor: pointer;
+}
+.microphone-more.is-unified-details[open] {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.microphone-input-guidance {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.microphone-input-guidance p {
+  display: inline;
+}
+.live-header-shell .error-banner.is-inline-banner {
+  margin: 0;
+}
+.live-header-processing {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .live-header-primary .microphone-panel.is-unified {
+    align-items: flex-start;
+    width: 100%;
+  }
+  .microphone-unified-bar {
+    justify-content: flex-start;
+  }
+  .microphone-more.is-unified-details > summary {
+    text-align: left;
+  }
+}
 .session-strip.is-ended {
   padding-bottom: var(--space-16);
   margin-bottom: var(--space-16);
@@ -1553,6 +1673,16 @@ svg {
 .settings-nav a:hover {
   background: var(--hover);
   border-color: var(--border);
+}
+.settings-nav a.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+.settings-nav a.is-active:hover {
+  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-bg-hover);
 }
 .settings-group {
   margin-top: var(--space-24);

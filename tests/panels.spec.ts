@@ -176,6 +176,10 @@ test('panel widths survive Settings navigation, Reset panel sizes in Settings re
   await page
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Reset panel sizes' }).press('Enter');
   await page
     .getByRole('button', { name: 'Notebook', exact: true })

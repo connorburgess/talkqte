@@ -74,6 +74,10 @@ test('an unreadable key in the Keychain is not missing and does not auto-open on
   await expect(providerRow(page, 'Deepgram')).toContainText(
     'Could not be read from the Keychain. Unlock it or allow access, or save the key again.',
   );
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   await expect(
     page.getByRole('button', { name: 'Set up TalkQTE again' }),
   ).toBeVisible();
@@ -213,6 +217,9 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(deepgram).toContainText('Not set');
   await expect(deepgram).toContainText('console.deepgram.com');
   await expect(elevenlabs).toContainText('Not set');
+  await elevenlabs
+    .getByRole('button', { name: 'Configure ElevenLabs key' })
+    .click();
   await expect(elevenlabs).toContainText('elevenlabs.io');
   await expect(anthropic).toContainText('Not set');
   await expect(anthropic).toContainText('console.anthropic.com');
@@ -364,11 +371,19 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(
     providerRow(page, 'Deepgram').locator('.provider-key-state.is-set svg'),
   ).toBeVisible();
+  const dgConfigure = providerRow(page, 'Deepgram').getByRole('button', {
+    name: 'Configure Deepgram key',
+  });
+  if (await dgConfigure.isVisible()) await dgConfigure.click();
   await expect(
     providerRow(page, 'Deepgram').locator('.provider-key-mask'),
   ).toHaveText(SAVED_MASK);
 
   // Reopen onboarding via "Set up TalkQTE again" and verify Step 2 preserves the masked saved UI.
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
   await expect(
     page.getByRole('heading', {
@@ -381,6 +396,9 @@ test('key entry clears without echoing, Test -> rejected -> replace -> set and c
   await expect(
     providerRow(page, 'Deepgram').locator('.provider-key-state.is-set svg'),
   ).toBeVisible();
+  await providerRow(page, 'Deepgram')
+    .getByRole('button', { name: 'Configure Deepgram key' })
+    .click();
   await expect(
     providerRow(page, 'Deepgram').locator('.provider-key-mask'),
   ).toHaveText(SAVED_MASK);
@@ -506,6 +524,10 @@ test('a launch whose live transcription is already available (development or lab
     page.getByRole('button', { name: 'Start live session', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Privacy & setup', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Set up TalkQTE again' }).click();
   await expect(
     page.getByRole('heading', { name: 'One quiet cue beside your live call' }),
@@ -546,6 +568,9 @@ test('saving keys in onboarding Step 2 immediately enables Start live session in
   // Removing a required key in Step 2 disables Step 4's Start live session again.
   await page.getByRole('button', { name: 'Back' }).click();
   await page.getByRole('button', { name: 'Back' }).click();
+  await deepgram
+    .getByRole('button', { name: 'Configure Deepgram key' })
+    .click();
   await deepgram.getByRole('button', { name: 'Remove key' }).click();
   await expect(deepgram).toContainText('Not set');
   await page.getByRole('button', { name: 'Next: Permissions' }).click();

@@ -270,12 +270,11 @@ test('the session strip and Transcript tab credit the application, not the micro
 }) => {
   await notebook(page);
   await sourceSession(page, 'listening');
-  await expect(page.locator('.notebook-body')).toContainText(
+  const strip = page.getByRole('region', { name: 'Session', exact: true });
+  await expect(strip).toContainText(
     'Audio from Fictional player · audio not recorded',
   );
-  await expect(page.locator('.notebook-body')).not.toContainText(
-    'Your microphone · audio not recorded',
-  );
+  await expect(strip).not.toContainText('Your microphone · audio not recorded');
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(
     page.getByText(
@@ -324,9 +323,8 @@ test('a stale source-session flag beside a listening microphone credits the micr
     deviceName: 'Fictional USB microphone',
   });
   await expect(microphone).not.toContainText('the microphone is not used');
-  await expect(page.locator('.notebook-body')).toContainText(
-    'Your microphone · audio not recorded',
-  );
+  const strip = page.getByRole('region', { name: 'Session', exact: true });
+  await expect(strip).toContainText('Your microphone · audio not recorded');
   // Nor while the source is stopping or failed, whatever the flag says.
   await page.evaluate((value) => window.microphoneTest.send(value), {
     status: 'off' as const,
@@ -343,7 +341,7 @@ test('a stale source-session flag beside a listening microphone credits the micr
     await expect(microphone, phase).not.toContainText(
       'the microphone is not used',
     );
-    await expect(page.locator('.notebook-body'), phase).not.toContainText(
+    await expect(strip, phase).not.toContainText(
       'Audio from Fictional player · audio not recorded',
     );
   }
@@ -367,11 +365,14 @@ test('an ordinary session draining is not described as application audio', async
     microphone: 'off',
     source: source('off', false),
   } satisfies Partial<ProcessingSnapshot>);
-  const body = page.locator('.notebook-body');
-  await expect(body).toContainText(
+  const sessionRegion = page.getByRole('region', {
+    name: 'Session',
+    exact: true,
+  });
+  await expect(sessionRegion).toContainText(
     'Releasing microphone and finishing transcription…',
   );
-  await expect(body).not.toContainText('See Cue processing above.');
+  await expect(sessionRegion).not.toContainText('See Cue processing above.');
   // A source that may still be capturing is named while the session ends.
   await page.evaluate((value) => window.captureTest.send(value), {
     phase: 'stopping',
@@ -379,7 +380,7 @@ test('an ordinary session draining is not described as application audio', async
     microphone: 'off',
     source: source('stopping', true),
   } satisfies Partial<ProcessingSnapshot>);
-  await expect(body).toContainText(
+  await expect(sessionRegion).toContainText(
     'Ending live session. See Cue processing above.',
   );
 });

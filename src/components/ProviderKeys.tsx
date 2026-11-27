@@ -1,5 +1,12 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { Check, TriangleAlert } from 'lucide-react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
+import { Check, ChevronDown, TriangleAlert } from 'lucide-react';
 import {
   CURATED_CUE_MODELS,
   cueProviderName,
@@ -36,36 +43,48 @@ import './provider-keys.css';
 const providers: {
   id: KeyProvider;
   name: string;
+  category: 'transcription' | 'cues';
+  shortRole: string;
   role: string;
   whereToGet: string;
 }[] = [
   {
     id: 'deepgram',
     name: 'Deepgram',
+    category: 'transcription',
+    shortRole: 'Transcription',
     role: 'Live transcription. Billed by Deepgram per minute (480 min session cap).',
     whereToGet: 'Deepgram Console (console.deepgram.com) → API Keys',
   },
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
+    category: 'transcription',
+    shortRole: 'Transcription',
     role: 'Live transcription via Scribe v2 Realtime. Billed by ElevenLabs (480 min session cap).',
     whereToGet: 'ElevenLabs (elevenlabs.io) → Developers → API Keys',
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
+    category: 'cues',
+    shortRole: 'Cues & notes',
     role: 'Cue decisions and meeting notes. Billed by Anthropic per token.',
     whereToGet: 'Anthropic Console (console.anthropic.com) → API Keys',
   },
   {
     id: 'openai',
     name: 'OpenAI',
+    category: 'cues',
+    shortRole: 'Cues & notes',
     role: 'Cue decisions and meeting notes, if selected. Billed by OpenAI per token.',
     whereToGet: 'OpenAI Platform (platform.openai.com) → API keys',
   },
   {
     id: 'gemini',
     name: 'Gemini',
+    category: 'cues',
+    shortRole: 'Cues & notes',
     role: 'Cue decisions and meeting notes, if selected. Billed by Google per token.',
     whereToGet: 'Google AI Studio (aistudio.google.com) → API keys',
   },
@@ -265,10 +284,9 @@ export function ProviderKeys({
       <div className="provider-keys-intro">
         <h2 id="provider-keys-title">Your API keys</h2>
         <p>
-          TalkQTE runs on your own accounts (one transcription key and one cue
-          key). Each is kept in {keyStoreName(status?.store?.kind)} and is never
-          shown again. Nothing is sent until you start a live session or press
-          Test key.
+          Choose one transcription service and one cue service. Each is kept in{' '}
+          {keyStoreName(status?.store?.kind)} and is never shown again. Nothing
+          is sent until you start a live session or press Test key.
         </p>
         <NoKeyStore store={status?.store} />
         {unavailable && (
@@ -277,38 +295,59 @@ export function ProviderKeys({
           </p>
         )}
       </div>
-      <div className="provider-keys-list">
-        {providers.map((provider) => (
-          <KeyRow
-            key={provider.id}
-            provider={provider}
-            status={status?.[provider.id]}
-            store={status?.store}
-            unavailable={unavailable}
-            onStatus={(next) => {
-              setStatus(next);
-              setUnavailable(false);
-              onKeysChanged?.();
+
+      <div className="provider-active-grid">
+        <div className="provider-active-card">
+          <p className="provider-active-kicker">Transcription</p>
+          <ProviderChoice
+            onChanged={(next) => {
+              setSelectedSttProvider(next);
               onPreferencesChange?.();
             }}
           />
-        ))}
+          <LanguageChoice provider={selectedSttProvider} />
+        </div>
+        <div className="provider-active-card">
+          <p className="provider-active-kicker">Cues &amp; meeting notes</p>
+          <CueProviderAndModelChoice
+            prefs={prefs}
+            onChange={applyPrefs}
+            notesModelSlot={
+              <MeetingNotesModel
+                provider={activeProvider}
+                prefs={prefs}
+                onChange={applyPrefs}
+              />
+            }
+          />
+        </div>
+      </div>
+
+      <div className="provider-keys-list" aria-label="Provider API keys">
+        {providers.map((provider) => {
+          const selected =
+            provider.id === selectedSttProvider ||
+            provider.id === activeProvider;
+          return (
+            <KeyRow
+              key={provider.id}
+              provider={provider}
+              selected={selected}
+              status={status?.[provider.id]}
+              store={status?.store}
+              unavailable={unavailable}
+              onStatus={(next) => {
+                setStatus(next);
+                setUnavailable(false);
+                onKeysChanged?.();
+                onPreferencesChange?.();
+              }}
+            />
+          );
+        })}
         <p className="provider-keys-usage" role="status">
           {usageLine()}
         </p>
-        <ProviderChoice
-          onChanged={(next) => {
-            setSelectedSttProvider(next);
-            onPreferencesChange?.();
-          }}
-        />
-        <CueProviderAndModelChoice prefs={prefs} onChange={applyPrefs} />
-        <LanguageChoice provider={selectedSttProvider} />
-        <MeetingNotesModel
-          provider={activeProvider}
-          prefs={prefs}
-          onChange={applyPrefs}
-        />
       </div>
     </section>
   );
@@ -317,9 +356,11 @@ export function ProviderKeys({
 function CueProviderAndModelChoice({
   prefs,
   onChange,
+  notesModelSlot,
 }: {
   prefs: ProviderPreferences | null;
   onChange: (next: ProviderPreferences) => void;
+  notesModelSlot?: ReactNode;
 }) {
   const id = useId();
   const provider: CueProvider = prefs?.cueProvider ?? 'anthropic';
@@ -417,7 +458,7 @@ function CueProviderAndModelChoice({
         </p>
       </div>
 
-      <form className="provider-key provider-language" onSubmit={saveCustomCue}>
+      <div className="provider-key provider-language">
         <label htmlFor={`${id}-cue-model`}>Cue model</label>
         <select
           id={`${id}-cue-model`}
@@ -439,65 +480,74 @@ function CueProviderAndModelChoice({
           )}
         </select>
 
-        <label htmlFor={`${id}-custom-cue-model`}>
-          Custom cue model ID (optional)
-        </label>
-        <input
-          id={`${id}-custom-cue-model`}
-          type="text"
-          value={customDraft}
-          maxLength={96}
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          disabled={!prefs || busy}
-          placeholder={`Leave blank for tested default (${testedDefault})`}
-          aria-describedby={`${id}-custom-cue-help${error ? ` ${id}-cue-error` : ''}`}
-          onChange={(event) => setCustomDraft(event.target.value)}
-        />
-        <p id={`${id}-custom-cue-help`} className="provider-key-role">
-          Leave blank to use the tested default ({testedDefault}). Custom model
-          IDs keep the 400-request cap; estimated dollar spend is unavailable
-          for models outside the built-in price table.
-        </p>
-        <div className="provider-key-actions">
-          <button
-            type="submit"
-            className="secondary-button provider-key-btn"
-            disabled={!prefs || busy}
-          >
-            Save cue model
-          </button>
-          {prefs?.cueModelOverride && (
-            <button
-              type="button"
-              className="secondary-button provider-key-btn"
-              disabled={busy}
-              onClick={() => {
-                setCustomDraft('');
-                void changeCuratedCue(testedDefault);
-              }}
-            >
-              Use tested default
-            </button>
-          )}
-        </div>
-        {error ? (
-          <p
-            id={`${id}-cue-error`}
-            className="provider-keys-error"
-            role="alert"
-          >
-            {error}
-          </p>
-        ) : (
-          note && (
-            <p className="provider-key-note" role="status">
-              {note}
+        <details
+          className="provider-advanced"
+          open={!!prefs?.cueModelOverride || !!error}
+        >
+          <summary>Custom model ID &amp; meeting notes model</summary>
+          <form className="provider-advanced-body" onSubmit={saveCustomCue}>
+            <label htmlFor={`${id}-custom-cue-model`}>
+              Custom cue model ID (optional)
+            </label>
+            <input
+              id={`${id}-custom-cue-model`}
+              type="text"
+              value={customDraft}
+              maxLength={96}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              disabled={!prefs || busy}
+              placeholder={`Leave blank for tested default (${testedDefault})`}
+              aria-describedby={`${id}-custom-cue-help${error ? ` ${id}-cue-error` : ''}`}
+              onChange={(event) => setCustomDraft(event.target.value)}
+            />
+            <p id={`${id}-custom-cue-help`} className="provider-key-role">
+              Leave blank to use the tested default ({testedDefault}). Custom
+              model IDs keep the 400-request cap; estimated dollar spend is
+              unavailable for models outside the built-in price table.
             </p>
-          )
-        )}
-      </form>
+            <div className="provider-key-actions">
+              <button
+                type="submit"
+                className="secondary-button provider-key-btn"
+                disabled={!prefs || busy}
+              >
+                Save cue model
+              </button>
+              {prefs?.cueModelOverride && (
+                <button
+                  type="button"
+                  className="secondary-button provider-key-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setCustomDraft('');
+                    void changeCuratedCue(testedDefault);
+                  }}
+                >
+                  Use tested default
+                </button>
+              )}
+            </div>
+            {error ? (
+              <p
+                id={`${id}-cue-error`}
+                className="provider-keys-error"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : (
+              note && (
+                <p className="provider-key-note" role="status">
+                  {note}
+                </p>
+              )
+            )}
+          </form>
+          {notesModelSlot}
+        </details>
+      </div>
     </>
   );
 }
@@ -526,6 +576,7 @@ export function ProviderKeysRows({
         <KeyRow
           key={provider.id}
           provider={provider}
+          selected={provider.id === 'deepgram' || provider.id === 'anthropic'}
           status={status?.[provider.id]}
           store={status?.store}
           unavailable={unavailable}
@@ -544,6 +595,7 @@ export function ProviderKeysRows({
 
 function KeyRow({
   provider,
+  selected = false,
   status,
   store,
   unavailable = false,
@@ -552,6 +604,7 @@ function KeyRow({
   onStatus,
 }: {
   provider: (typeof providers)[number];
+  selected?: boolean;
   status: KeyStatus | undefined;
   store: KeyStore | undefined;
   unavailable?: boolean;
@@ -579,6 +632,10 @@ function KeyRow({
   const isRejected = status?.state === 'rejected' && !noStore && !unavailable;
   const isWarningBadge =
     badgeClass === 'is-rejected' || badgeClass === 'is-unreadable';
+  const needsAttention =
+    isWarningBadge || (selected && status?.state === 'notSet');
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  const isOpen = expanded !== null ? expanded : needsAttention || !!error;
   const showInput = !isSaved || replacing;
   const inputPlaceholder = noStore
     ? 'Cannot be saved on this system yet'
@@ -629,6 +686,7 @@ function KeyRow({
     if (action === 'save' && focusInRow) {
       pendingFocusRef.current = 'replace';
     }
+    setExpanded(true);
     setBusy(action);
     setError('');
     setNote('');
@@ -667,141 +725,168 @@ function KeyRow({
   return (
     <form
       ref={formRef}
-      className="provider-key"
+      className={`provider-key${isOpen ? ' is-open' : ' is-collapsed'}`}
       aria-labelledby={`${id}-name`}
       onSubmit={save}
     >
       <div className="provider-key-head">
-        <Heading id={`${id}-name`}>{provider.name}</Heading>
-        <p id={`${id}-state`} className={`provider-key-state ${badgeClass}`}>
-          {badgeClass === 'is-set' && (
-            <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+        <div className="provider-key-title-group">
+          <Heading id={`${id}-name`}>{provider.name}</Heading>
+          <span className="provider-key-role-tag">{provider.shortRole}</span>
+          {selected && (
+            <span className="provider-key-active-tag">Selected</span>
           )}
-          {isWarningBadge && (
-            <TriangleAlert size={14} strokeWidth={2.25} aria-hidden="true" />
-          )}
-          <span>
-            {busy === 'test'
-              ? 'Checking…'
-              : stateText(provider.name, status, store, unavailable)}
-          </span>
-        </p>
-      </div>
-      <p id={`${id}-role`} className="provider-key-role">
-        {provider.role}
-      </p>
-      {showWhereToGet && (
-        <p className="provider-key-where">
-          <strong>Where to get one:</strong> {provider.whereToGet}
-        </p>
-      )}
-      {showInput ? (
-        <>
-          <label htmlFor={`${id}-input`}>
-            {stored
-              ? `Replace ${provider.name} key`
-              : `${provider.name} API key`}
-          </label>
-          <input
-            ref={inputRef}
-            id={`${id}-input`}
-            type="password"
-            className={isRejected ? 'is-rejected' : undefined}
-            value={draft}
-            placeholder={inputPlaceholder}
-            autoComplete="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            maxLength={512}
-            disabled={noStore}
-            aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-        </>
-      ) : (
-        <div className="provider-key-stored">
-          <span className="provider-key-mask" aria-hidden="true">
-            {SAVED_KEY_MASK}
-          </span>
-          <span className="provider-key-stored-note">
-            <span className="visually-hidden">{provider.name} key </span>
-            Stored in {keyStoreLabel(store?.kind)}
-          </span>
         </div>
-      )}
-      <div className="provider-key-actions">
-        {showInput ? (
-          <>
-            <button
-              type="submit"
-              className="primary-button provider-key-btn"
-              disabled={noStore || !draft.trim() || busy !== null}
-            >
-              {busy === 'save' ? 'Saving…' : 'Save key'}
-            </button>
-            {isSaved && (
+        <div className="provider-key-head-right">
+          <p id={`${id}-state`} className={`provider-key-state ${badgeClass}`}>
+            {badgeClass === 'is-set' && (
+              <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+            )}
+            {isWarningBadge && (
+              <TriangleAlert size={14} strokeWidth={2.25} aria-hidden="true" />
+            )}
+            <span>
+              {busy === 'test'
+                ? 'Checking…'
+                : stateText(provider.name, status, store, unavailable)}
+            </span>
+          </p>
+          <button
+            type="button"
+            className="secondary-button provider-key-toggle"
+            aria-expanded={isOpen}
+            aria-controls={`${id}-panel`}
+            aria-label={`${isOpen ? 'Hide' : 'Configure'} ${provider.name} key`}
+            onClick={() => setExpanded(!isOpen)}
+          >
+            <span>{isOpen ? 'Hide' : 'Configure'}</span>
+            <ChevronDown
+              size={14}
+              aria-hidden="true"
+              className={isOpen ? 'is-rotated' : undefined}
+            />
+          </button>
+        </div>
+      </div>
+      {isOpen && (
+        <div id={`${id}-panel`} className="provider-key-body">
+          <p id={`${id}-role`} className="provider-key-role">
+            {provider.role}
+          </p>
+          {showWhereToGet && (
+            <p className="provider-key-where">
+              <strong>Where to get one:</strong> {provider.whereToGet}
+            </p>
+          )}
+          {showInput ? (
+            <>
+              <label htmlFor={`${id}-input`}>
+                {stored
+                  ? `Replace ${provider.name} key`
+                  : `${provider.name} API key`}
+              </label>
+              <input
+                ref={inputRef}
+                id={`${id}-input`}
+                type="password"
+                className={isRejected ? 'is-rejected' : undefined}
+                value={draft}
+                placeholder={inputPlaceholder}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                maxLength={512}
+                disabled={noStore}
+                aria-describedby={`${id}-state${error ? ` ${id}-error` : ''}`}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </>
+          ) : (
+            <div className="provider-key-stored">
+              <span className="provider-key-mask" aria-hidden="true">
+                {SAVED_KEY_MASK}
+              </span>
+              <span className="provider-key-stored-note">
+                <span className="visually-hidden">{provider.name} key </span>
+                Stored in {keyStoreLabel(store?.kind)}
+              </span>
+            </div>
+          )}
+          <div className="provider-key-actions">
+            {showInput ? (
+              <>
+                <button
+                  type="submit"
+                  className="primary-button provider-key-btn"
+                  disabled={noStore || !draft.trim() || busy !== null}
+                >
+                  {busy === 'save' ? 'Saving…' : 'Save key'}
+                </button>
+                {isSaved && (
+                  <button
+                    type="button"
+                    className="secondary-button provider-key-btn"
+                    disabled={busy !== null}
+                    onClick={cancelReplace}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </>
+            ) : (
               <button
+                ref={replaceButtonRef}
                 type="button"
                 className="secondary-button provider-key-btn"
                 disabled={busy !== null}
-                onClick={cancelReplace}
+                onClick={startReplace}
               >
-                Cancel
+                Replace key
               </button>
             )}
-          </>
-        ) : (
-          <button
-            ref={replaceButtonRef}
-            type="button"
-            className="secondary-button provider-key-btn"
-            disabled={busy !== null}
-            onClick={startReplace}
-          >
-            Replace key
-          </button>
-        )}
-        <button
-          type="button"
-          className="secondary-button provider-key-btn"
-          disabled={!stored || busy !== null}
-          onClick={() =>
-            void run(
-              'test',
-              () => testKey(provider.id),
-              (next) =>
-                next[provider.id]?.state === 'rejected'
-                  ? `${provider.name} rejected the key.`
-                  : `${provider.name} accepted the key.`,
-            )
-          }
-        >
-          {busy === 'test' ? 'Checking…' : 'Test key'}
-        </button>
-        <button
-          type="button"
-          className="secondary-button provider-key-btn provider-key-remove"
-          disabled={!stored || busy !== null}
-          onClick={() =>
-            void run(
-              'remove',
-              () => removeKey(provider.id),
-              () =>
-                `${provider.name} key removed from ${removedFrom(store?.kind)}.`,
-            )
-          }
-        >
-          {busy === 'remove' ? 'Removing…' : 'Remove key'}
-        </button>
-      </div>
-      {error ? (
-        <p id={`${id}-error`} className="provider-keys-error" role="alert">
-          {error}
-        </p>
-      ) : (
-        <p className="provider-key-note" role="status">
-          {note}
-        </p>
+            <button
+              type="button"
+              className="secondary-button provider-key-btn"
+              disabled={!stored || busy !== null}
+              onClick={() =>
+                void run(
+                  'test',
+                  () => testKey(provider.id),
+                  (next) =>
+                    next[provider.id]?.state === 'rejected'
+                      ? `${provider.name} rejected the key.`
+                      : `${provider.name} accepted the key.`,
+                )
+              }
+            >
+              {busy === 'test' ? 'Checking…' : 'Test key'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button provider-key-btn provider-key-remove"
+              disabled={!stored || busy !== null}
+              onClick={() =>
+                void run(
+                  'remove',
+                  () => removeKey(provider.id),
+                  () =>
+                    `${provider.name} key removed from ${removedFrom(store?.kind)}.`,
+                )
+              }
+            >
+              {busy === 'remove' ? 'Removing…' : 'Remove key'}
+            </button>
+          </div>
+          {error ? (
+            <p id={`${id}-error`} className="provider-keys-error" role="alert">
+              {error}
+            </p>
+          ) : (
+            <p className="provider-key-note" role="status">
+              {note}
+            </p>
+          )}
+        </div>
       )}
     </form>
   );
@@ -914,14 +999,19 @@ function LanguageChoice({ provider }: { provider: TranscriptionProvider }) {
         <option value="multi">Multilingual</option>
       </select>
       <p id={`${id}-language-help`} className="provider-key-role">
-        Applies to the next live session, never one already running.{' '}
-        {provider === 'elevenlabs'
-          ? 'English sets language_code=en; Multilingual lets ElevenLabs Scribe v2 Realtime detect languages automatically.'
-          : 'Multilingual follows several languages and switches between them, and Deepgram bills it at a higher rate than English.'}{' '}
-        Phrase-rule cues understand English only; a question that opens with
-        your name and ends in a question mark is noticed in any language; model
-        cues work on what the model understands.
+        Applies to the next live session, never one already running.
       </p>
+      <details className="provider-advanced">
+        <summary>Language billing &amp; cue notes</summary>
+        <p className="provider-key-role">
+          {provider === 'elevenlabs'
+            ? 'English sets language_code=en; Multilingual lets ElevenLabs Scribe v2 Realtime detect languages automatically.'
+            : 'Multilingual follows several languages and switches between them, and Deepgram bills it at a higher rate than English.'}{' '}
+          Phrase-rule cues understand English only; a question that opens with
+          your name and ends in a question mark is noticed in any language;
+          model cues work on what the model understands.
+        </p>
+      </details>
       {error && (
         <p
           id={`${id}-language-error`}

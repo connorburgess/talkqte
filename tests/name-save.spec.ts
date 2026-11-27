@@ -19,6 +19,10 @@ async function open(page: Page) {
   await page
     .getByRole('button', { name: 'Settings', exact: true })
     .press('Enter');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Cues & companion', exact: true })
+    .click();
   await expect(name(page)).toBeVisible();
 }
 async function saved(page: Page, value: string | null) {

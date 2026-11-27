@@ -18,6 +18,10 @@ async function settings(page: Page, presence: Presence = {}, path = '/') {
   }, presence);
   await standIn(page, path);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Capture & prompts', exact: true })
+    .click();
   return page.getByRole('region', { name: 'Menu bar and login' });
 }
 
@@ -77,11 +81,15 @@ test('a copy that cannot be a login item says so', async ({ page }) => {
 test('without a menu bar item the section is not offered', async ({ page }) => {
   await settings(page, { menuBar: false });
   await expect(
-    page.getByRole('heading', { name: 'Saved settings' }),
-  ).toBeVisible();
-  await expect(
     page.getByRole('region', { name: 'Menu bar and login' }),
   ).toHaveCount(0);
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Meetings & storage', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: 'Saved settings' }),
+  ).toBeVisible();
 });
 
 test('the menu bar’s Start session… opens the notebook’s start and starts nothing', async ({

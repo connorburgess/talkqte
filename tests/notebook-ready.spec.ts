@@ -137,7 +137,11 @@ test('Transcript and Ask cross-link cleanly, highlight cited lines, and Settings
     page.getByRole('tab', { name: 'Ask', exact: true }),
   ).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#ask-scope')).toContainText(
-    'Uses the latest 2 lines (capped at 200 lines / 64 KiB).',
+    'Uses the latest 2 lines from this session.',
+  );
+  await page.getByText('Transcript scope and cost').click();
+  await expect(page.locator('#ask-scope')).toContainText(
+    'capped at 200 lines / 64 KiB',
   );
 
   // Ask links back to Transcript.
