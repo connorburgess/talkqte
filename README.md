@@ -61,6 +61,10 @@ For platform prerequisites, unsigned Windows/Ubuntu test artifacts, and their li
 
 Imported or saved prior notes are not automatically sent to the cue provider. Turn processing off and explicitly select the notes in **Cue processing → Review processing** before including them. On macOS, call-start offers are on by default and can be turned off; automatic start is off unless you explicitly enable it in Settings. [Call-start controls](docs/call-prompt.md).
 
+## Ask about recent discussion
+
+During or after the current session, open **Ask** in the notebook, or use the companion’s **Transcript and Ask** button. **Send** explicitly shares your question and the disclosed latest transcript excerpt with your selected provider and own key. This is separate from cue approval; opening the panel sends nothing. Answers link to transcript timestamps and can be wrong. Older discussion outside the bounded excerpt is excluded. Q&A stays in memory and is not saved or exported. See [scope, controls and limits](docs/live-questions.md).
+
 ## Where your meeting goes
 
 - **Cloud processing:** audio goes to the selected transcription provider; approved transcript context goes to the selected cue provider. Meeting-note requests send the transcript only after their separate confirmation. There is no on-device transcription or silent fallback to another service.

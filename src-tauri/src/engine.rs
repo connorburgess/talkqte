@@ -679,6 +679,7 @@ pub struct Engine {
     last_recorded_cue: Option<String>,
     /// This session's model-written meeting notes, if the person asked.
     meeting_notes: crate::meeting_notes::Record,
+    pub(crate) meeting_qa: crate::meeting_qa::Record,
     next_segment: usize,
     cue_deadline: u64,
     cooldown_until: u64,
@@ -807,6 +808,7 @@ impl Engine {
             started_at_ms: 0,
             last_recorded_cue: None,
             meeting_notes: Default::default(),
+            meeting_qa: Default::default(),
             next_segment: 0,
             cue_deadline: 0,
             cooldown_until: 0,
@@ -833,6 +835,16 @@ impl Engine {
             withheld_notes: vec![],
             unshown: None,
         }
+    }
+
+    pub(crate) fn question_scope(&mut self) -> Result<crate::meeting_qa::Scope, String> {
+        if !self.state.live || self.live_stopping || self.state.status == Status::Ready {
+            return Err("Start a live session and wait for transcript lines before asking.".into());
+        }
+        self.meeting_qa.prepare(
+            &self.state.transcript,
+            crate::llm_provider::resolved_cue_model(),
+        )
     }
 
     pub fn cue_snapshot(&self) -> CueSnapshot {
@@ -933,6 +945,7 @@ impl Engine {
         // is dropped.
         self.meeting_notes.cancel();
         self.meeting_notes = Default::default();
+        self.meeting_qa = Default::default();
         self.state.meeting_notes = crate::meeting_notes::Phase::None;
         self.last_recorded_cue = None;
         self.generation += 1;

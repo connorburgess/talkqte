@@ -22,6 +22,10 @@ The initial audience includes people who want a little help participating and pe
 
 The intended flow is relevant context, an opportunity to respond, then the cue clears when no longer useful. Non-empty live sessions save locally to the Mac's **Meetings** list on stop by default so people do not lose ended notes or transcripts (while **Settings → Kept meetings** lets someone who relies on another note-taker switch to **Ask each time** or turn saving off, and **Delete** on the floating confirmation removes a saved session immediately); including a transcript in a Markdown export remains an explicit, per-meeting choice, and so is asking for model-written notes, which show an owner or date only when those words appear in the lines an item cites, and can still be wrong. An unused suggestion is not a meeting fact, decision, or action item and should not be automatically written into that record. There is no established need for a saved-prompt archive.
 
+## Explicit live questions
+
+Alongside passive cues, the person can explicitly ask about recent discussion in the notebook while capture continues. This owner-authorized first slice uses the disclosed bounded current-session transcript excerpt only, with a normal Send action, grounded synthesis/citations or insufficient evidence. It does not promise whole-meeting knowledge, saved-meeting search or model accuracy. It preserves cue timing and Stop independently. See [live questions](docs/live-questions.md).
+
 ## Goal and first proof
 
 **Help someone stay grounded and respond in the moment through timely, relevant context while continuing to follow the conversation.** A cue that arrives too late, introduces unsupported context, or makes listening harder fails that goal even if its wording is good. Useful participation can include understanding without speaking; response speed or speaking more is not an end in itself.

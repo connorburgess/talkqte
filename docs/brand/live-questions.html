@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live questions · TalkQTE built states</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-ask.css" />
+    <style>
+      body {
+        padding: 24px;
+      }
+      main {
+        max-width: 900px;
+        margin: auto;
+      }
+      main > article {
+        margin: 48px 0;
+      }
+      h1 {
+        font-size: 28px;
+      }
+      article > h2 {
+        font-size: 20px;
+        margin-bottom: 16px;
+      }
+      .sample {
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
+      }
+      .narrow {
+        max-width: 390px;
+      }
+      .dock {
+        width: 320px;
+        background: var(--companion-bg);
+        color: var(--companion-fg);
+        padding: 12px;
+        border-radius: var(--radius-dock);
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .dock span {
+        flex: 1;
+      }
+      .dock button {
+        color: inherit;
+        background: transparent;
+        border: 1px solid var(--companion-muted);
+        padding: 6px;
+        border-radius: var(--radius-control);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Live questions · built states</h1>
+      <p>
+        Direction C. Fictional content; static illustrations of implemented
+        controls, never live model evidence. Interactive acceptance uses the
+        rendered React app. <a href="index.html">Brand specimens</a> ·
+        <a href="../live-questions.md">Scope and acceptance limits</a>
+      </p>
+      <article>
+        <h2>Ready to ask · bounded scope</h2>
+        <section class="meeting-ask sample">
+          <h2>Ask about recent discussion</h2>
+          <p class="muted">
+            Answers use a limited excerpt of this session, not the whole
+            meeting. Model answers can be wrong; check the cited lines.
+          </p>
+          <p class="muted">
+            Ask for a recap, an explanation or what the recent discussion
+            supports. Opening Ask sends nothing.
+          </p>
+          <form>
+            <label for="question">Your question</label
+            ><textarea
+              id="question"
+              placeholder="What did we agree to do next?"
+            ></textarea>
+            <div class="ask-scope">
+              <p>
+                Send to Anthropic · selected model. Uses the latest 24 lines
+                available at 4:12.
+              </p>
+              <details>
+                <summary>Transcript scope and cost</summary>
+                <p>
+                  2:10–4:12 only. Earlier discussion is not included. No saved
+                  notes, imported context or previous answers are sent. Sending
+                  authorizes this question and this excerpt separately from
+                  automatic cues. Provider account terms apply.
+                </p>
+              </details>
+            </div>
+            <div class="ask-actions">
+              <button type="button" class="primary-button" disabled>Send</button
+              ><button type="button" class="text-button">
+                Use latest transcript
+              </button>
+            </div>
+          </form>
+        </section>
+      </article>
+      <article>
+        <h2>Grounded synthesis · source navigation</h2>
+        <section class="meeting-ask sample">
+          <h3>What did we choose?</h3>
+          <p class="ask-answer-label">Model answer</p>
+          <p>
+            The team chose a Saturday greenhouse check. The weather backup was
+            not resolved in these lines.
+          </p>
+          <div class="ask-citations">
+            <button class="text-button" type="button">Transcript 0:01</button>
+          </div>
+          <p class="muted small">
+            Model answer, not a transcript fact. Source IDs are checked;
+            semantic accuracy still needs review.
+          </p>
+        </section>
+      </article>
+      <article>
+        <h2>Insufficient evidence · excluded beginning</h2>
+        <section class="meeting-ask sample">
+          <h3>What did we decide at the start?</h3>
+          <p class="ask-answer-label">Model answer · insufficient evidence</p>
+          <p>
+            I cannot tell what was decided at the start: that discussion is
+            outside the supplied recent excerpt.
+          </p>
+        </section>
+      </article>
+      <article>
+        <h2>Answering · independent capture and Cancel</h2>
+        <section class="meeting-ask sample">
+          <label for="busy-question">Your question</label
+          ><textarea id="busy-question" disabled>What was chosen?</textarea>
+          <div class="ask-actions">
+            <button class="primary-button" disabled>Answering…</button
+            ><button class="secondary-button" type="button">
+              Cancel answer
+            </button>
+          </div>
+          <p role="status">Waiting for a model answer. You can cancel.</p>
+          <p class="muted">
+            While running, capture and automatic cues continue independently. A
+            sent request may still be billed after cancellation.
+          </p>
+        </section>
+      </article>
+      <article>
+        <h2>Error and retry · question preserved</h2>
+        <section class="meeting-ask sample">
+          <label for="retry-question">Your question</label
+          ><textarea id="retry-question">What was chosen?</textarea>
+          <p role="status">
+            The provider could not answer. Check your connection and retry; a
+            sent request may be billed.
+          </p>
+          <button class="primary-button" type="button">Send</button>
+        </section>
+      </article>
+      <article>
+        <h2>Narrow and long answers</h2>
+        <section class="meeting-ask sample narrow">
+          <h3>Explain the recent choice and remaining uncertainty.</h3>
+          <p class="ask-answer-label">Model answer</p>
+          <p>
+            The team favored Saturday because the greenhouse is available then.
+            The excerpt supports the date preference but does not identify an
+            owner or a weather backup. Those details are unknown rather than
+            inferred.
+          </p>
+          <button class="text-button" type="button">Transcript 0:01</button>
+          <p class="muted">
+            History scrolls independently. New speech does not pull a transcript
+            reader to the latest line; Jump to latest line is explicit.
+          </p>
+        </section>
+      </article>
+      <article>
+        <h2>Current session ended and no transcript</h2>
+        <section class="meeting-ask sample">
+          <p>
+            Ended current-session transcript remains available to an explicit
+            Send. A new session clears in-memory Q&amp;A.
+          </p>
+          <p role="status">
+            Wait for transcript lines before asking a question.
+          </p>
+          <button class="primary-button" type="button" disabled>Send</button
+          ><button class="text-button" type="button">
+            Use latest transcript
+          </button>
+        </section>
+      </article>
+      <article>
+        <h2>Dock navigation · explicit click only</h2>
+        <div class="dock">
+          <span>Listening</span><button type="button">Transcript and Ask</button
+          ><button type="button">Stop</button>
+        </div>
+        <p>
+          Actual dock uses the existing glyph system and accessible names inside
+          its fixed bar. Clicking opens/focuses the notebook; no transcript is
+          sent to the dock. Passive cues never invoke navigation.
+        </p>
+      </article>
+    </main>
+  </body>
+</html>

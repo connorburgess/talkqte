@@ -6,6 +6,10 @@ TalkQTE should help people stay grounded and respond during a conversation throu
 
 The current public objective is to explain the idea with a clearly labeled fictional concept preview and invite people to follow development. Downloads, tester recruitment, and a broad launch are not current calls to action. The pilot and distribution stages below remain preparation for later decisions. Saving and note-taking are secondary use cases; a successful preview or first experience need not end in a saved artifact.
 
+## Explicit questions checkpoint — 27 November 2026
+
+The bounded current-session Ask slice has offline scope/lifecycle/provider and fictional browser acceptance; it does not establish live usefulness. [Live questions](live-questions.md) documents the separate Send authorization, exclusions, memory-only history and tests. Next blocker: verify grounded synthesis and insufficient evidence on separately approved fictional live inputs, then native dock-to-notebook focus, Stop and assistive access with cost/latency evidence. Whole-session retrieval and saved-meeting Q&A remain open.
+
 ## Current provider checkpoint — 20 November 2026
 
 Deepgram streaming and the Anthropic API are the selected development direction. The cloud implementation is merged. With the person's own keys an ordinary build runs both providers after the session review is approved; without them it has no live transcription. Earlier dated checkpoints below describe the source and observations at their recorded dates, including the former local Whisper path; they are not current setup instructions. See [cloud transcription](cloud-transcription.md) and the [current provider release blocker](#cloud-providers-for-a-shipped-product).
