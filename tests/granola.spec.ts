@@ -148,9 +148,9 @@ test('disconnect stays reachable while listing and ignores a late chooser', asyn
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await disconnect.scrollIntoViewIfNeeded();
   await expect(disconnect).toBeInViewport();
-  expect(await context.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
-    true,
-  );
+  await expect
+    .poll(() => context.evaluate((el) => el.scrollWidth <= el.clientWidth))
+    .toBe(true);
   await context.screenshot({
     path: testInfo.outputPath('granola-loading-narrow.png'),
   });

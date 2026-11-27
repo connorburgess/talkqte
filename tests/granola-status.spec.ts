@@ -67,9 +67,12 @@ for (const fail of [false, true]) {
       });
       await page.setViewportSize({ width: 600, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      expect(
-        await context(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-      ).toBe(true);
+      // The notebook's ResizeObserver updates its split layout asynchronously.
+      await expect
+        .poll(() =>
+          context(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+        )
+        .toBe(true);
       await context(page).screenshot({
         path: testInfo.outputPath('granola-status-narrow.png'),
       });

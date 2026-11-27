@@ -48,9 +48,9 @@ test('a pending focus suggestion keeps disconnect and the notebook usable', asyn
   await page.setViewportSize({ width: 600, height: 700 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const focusPanel = page.getByRole('region', { name: 'This meeting' });
-  expect(
-    await focusPanel.evaluate((el) => el.scrollWidth <= el.clientWidth),
-  ).toBe(true);
+  await expect
+    .poll(() => focusPanel.evaluate((el) => el.scrollWidth <= el.clientWidth))
+    .toBe(true);
   await focusPanel.screenshot({
     path: testInfo.outputPath('granola-focus-narrow.png'),
   });
