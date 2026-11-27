@@ -7,6 +7,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-snapshot",
+    "allow-build-info",
     "allow-processing-snapshot",
     "allow-stop-capture",
     "allow-review-processing-scope",

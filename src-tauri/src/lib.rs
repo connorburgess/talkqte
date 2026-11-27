@@ -16,6 +16,7 @@ pub mod application_audio;
 #[cfg(target_os = "macos")]
 mod application_audio_host;
 pub mod audio_tap;
+pub mod build_info;
 pub mod calendar;
 mod calendar_commands;
 pub mod call_prompt;
@@ -2421,6 +2422,7 @@ pub fn run() {
             application_audio_host::app::application_audio,
             capture_control::stop_capture,
             platform::platform_capabilities,
+            build_info::build_info,
             calendar_commands::calendar_settings,
             calendar_commands::set_calendar_prompts,
             calendar_commands::respond_to_calendar_prompt,
