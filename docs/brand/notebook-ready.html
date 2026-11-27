@@ -303,15 +303,15 @@
                   </div>
                   <div class="ask-scope">
                     <p>
-                      Send to Anthropic · fictional-model. Uses the latest 2
-                      lines (capped at 200 lines / 64 KiB). Model answers can be
-                      wrong.
+                      Send to Anthropic · fictional-model. Uses the latest 3
+                      lines from this session. Model answers can be wrong.
                     </p>
                     <details>
                       <summary>Transcript scope and cost</summary>
                       <p>
-                        0:05–0:12 only. Older discussion is excluded when
-                        outside this range.
+                        Recent excerpt covers 0:04–1:32 (capped at 200 lines /
+                        64 KiB). Older discussion outside this recent window is
+                        excluded.
                       </p>
                     </details>
                   </div>
@@ -423,7 +423,9 @@
             </p>
             <nav class="settings-nav" aria-label="Specimen Settings sections">
               <a href="#settings">Providers &amp; keys</a>
-              <a href="#settings">Cues &amp; companion</a>
+              <a href="#settings" class="is-active" aria-current="page"
+                >Cues &amp; companion</a
+              >
               <a href="#settings">Capture &amp; prompts</a>
               <a href="#settings">Meetings &amp; storage</a>
               <a href="#settings">Privacy &amp; setup</a>
