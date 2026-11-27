@@ -54,9 +54,13 @@ for (const all of [false, true]) {
     if (all) {
       await page.setViewportSize({ width: 600, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      expect(
-        await panel(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-      ).toBe(true);
+      // ResizeObserver updates the notebook's split layout through React.
+      // Wait for that responsive update, retaining the exact overflow check.
+      await expect
+        .poll(() =>
+          panel(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+        )
+        .toBe(true);
       await panel(page).screenshot({
         path: testInfo.outputPath('context-empty-narrow.png'),
       });
