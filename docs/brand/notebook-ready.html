@@ -123,10 +123,13 @@
                   <h1>Ready for a meeting</h1>
                 </div>
                 <p>Nothing is captured until you start a live session.</p>
-                <p class="session-hint">
-                  Use headphones if you can—speaker playback can echo into your
-                  mic and TalkQTE can’t catch every repeat.
-                </p>
+                <details class="session-tip">
+                  <summary>Audio &amp; headphones tip</summary>
+                  <p>
+                    Use headphones if you can—speaker playback can echo into
+                    your mic and TalkQTE can’t catch every repeat.
+                  </p>
+                </details>
               </div>
             </div>
             <div class="session-actions">
@@ -181,13 +184,10 @@
                 <h2>Cues</h2>
                 <span class="companion-state-tag">Standby</span>
               </div>
-              <div class="question-idle">
-                <h3>Cues follow the conversation.</h3>
-                <p>
-                  During a session, Anthropic can offer a source-backed cue when
-                  there’s something useful to add. Silence is normal.
-                </p>
-              </div>
+              <p class="companion-ready-note">
+                During a session, Anthropic can offer a source-backed cue here
+                when helpful. Silence is normal.
+              </p>
             </aside>
             <div class="meeting-prep-group">
               <section class="meeting-focus">
@@ -297,20 +297,23 @@
                 <section class="meeting-ask">
                   <div class="ask-header">
                     <h2>Ask about recent discussion</h2>
-                    <p class="muted">
-                      Answers use a limited excerpt of this session, not the
-                      whole meeting. Model answers can be wrong; check the cited
-                      lines.
-                    </p>
-                  </div>
-                  <div class="ask-grounding">
-                    <span
-                      >Recent excerpt: 2 lines in scope (capped at 200 lines /
-                      64 KiB)</span
-                    >
                     <button type="button" class="text-button">
                       View transcript
                     </button>
+                  </div>
+                  <div class="ask-scope">
+                    <p>
+                      Send to Anthropic · fictional-model. Uses the latest 2
+                      lines (capped at 200 lines / 64 KiB). Model answers can be
+                      wrong.
+                    </p>
+                    <details>
+                      <summary>Transcript scope and cost</summary>
+                      <p>
+                        0:05–0:12 only. Older discussion is excluded when
+                        outside this range.
+                      </p>
+                    </details>
                   </div>
                 </section>
               </section>
