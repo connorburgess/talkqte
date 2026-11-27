@@ -31,15 +31,20 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
 });
 
-test('the export preview opens, keeps focus inside, and returns it to Export from the keyboard at 480px', async ({
+test('the export preview opens, keeps focus inside, and returns it to Export Markdown… from the keyboard at 480px', async ({
   page,
   browserName,
 }) => {
   await page.goto('/');
   const exportButton = page.getByRole('button', {
-    name: 'Export',
+    name: 'Export Markdown…',
     exact: true,
   });
+  await expect(exportButton).toHaveCount(0);
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional narrow export note.');
+  await expect(exportButton).toBeEnabled();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await exportButton.press('Enter');
   await expect(dialog).toBeVisible();
@@ -84,12 +89,8 @@ test('arrow keys move both ways between notebook tabs, which stay a single tab s
   await expect(notes).toBeFocused();
   await expect(notes).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tabpanel', { name: 'Notes' })).toBeVisible();
-  // Tab leaves the single-stop tab list for its neighboring Export action,
-  // then reaches the selected editor without visiting the inactive tab.
-  await page.keyboard.press(tabKey(browserName));
-  await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeFocused();
+  // Tab leaves the single-stop tab list straight to the selected editor
+  // without visiting inactive tabs.
   await page.keyboard.press(tabKey(browserName));
   await expect(
     page.getByRole('textbox', { name: 'Meeting notes' }),

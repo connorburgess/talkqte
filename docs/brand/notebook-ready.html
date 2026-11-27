@@ -3,8 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Notebook states · TalkQTE</title>
+    <title>Notebook &amp; Settings states · TalkQTE</title>
     <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-ask.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-notes.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-history.css" />
+    <link rel="stylesheet" href="../../src/components/processing.css" />
+    <link rel="stylesheet" href="../../src/components/cue-card.css" />
+    <link rel="stylesheet" href="../../src/components/BuildVersion.css" />
     <style>
       @font-face {
         font-family: 'Manrope Variable';
@@ -18,16 +24,23 @@
         font-weight: 400;
         src: url('./fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
       }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 500;
+        src: url('./fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+      }
       body {
         padding: var(--space-24);
       }
       main {
-        max-width: 1100px;
+        max-width: 1120px;
         margin: auto;
       }
       main > p {
         max-width: 68ch;
         margin-top: var(--space-12);
+        color: var(--muted);
       }
       article {
         margin-top: var(--space-48);
@@ -38,55 +51,91 @@
       }
       .specimen {
         border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
         padding: var(--space-24);
+        background: var(--paper);
       }
-      .specimen .notebook-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .specimen .notebook-grid.is-split {
+        grid-template-columns: minmax(0, 1.25fr) 24px minmax(0, 0.95fr);
       }
-      .specimen .companion {
-        grid-column: 2;
-        grid-row: 1;
+      .specimen-divider {
+        width: 1px;
+        background: var(--line);
+        margin: 0 auto;
+        height: 100%;
+      }
+      .version-specimen-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: var(--space-16);
+        align-items: start;
+      }
+      .version-specimen-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        padding: var(--space-12);
+        background: var(--sidebar);
+      }
+      .version-specimen-card > p {
+        margin: 0 0 var(--space-8);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .version-specimen-card .version {
+        margin: 0;
+        padding-top: var(--space-12);
       }
       @media (max-width: 760px) {
         body,
         .specimen {
           padding: var(--space-16);
         }
-        .specimen .notebook-grid {
+        .specimen .notebook-grid.is-split {
           grid-template-columns: minmax(0, 1fr);
         }
-        .specimen .companion {
-          grid-column: auto;
-          grid-row: auto;
+        .specimen-divider {
+          display: none;
         }
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Notebook states</h1>
+      <h1>Notebook &amp; Settings states</h1>
       <p>
-        Built React surface · Direction C. Fictional, static specimens using
-        shared app tokens and styles. Buttons illustrate available states; they
-        do not start capture, call a provider, or save content. Responsive
-        ready, active and recovery behavior is checked separately in the browser
-        fixture.
+        Built React surface · Direction C (White and studio amber). Static
+        fictional specimens using shared app tokens and styles: Ready, Live with
+        active cue, Transcript &amp; Ask grounding, Ended with outcome-named
+        Export Markdown…, Error recovery, and grouped Settings hierarchy.
+        Buttons are illustrative only; they do not capture audio or call any
+        provider.
       </p>
+
       <article id="ready">
-        <h2>Ready</h2>
-        <div class="specimen notebook-idle">
-          <section class="session-strip" aria-label="ready session">
+        <h2>
+          1. Ready (idle, notes empty, Export hidden until content exists)
+        </h2>
+        <div class="specimen notebook-body is-ready notebook-idle">
+          <section class="session-strip is-ready notebook-idle">
             <div class="session-state">
-              <div>
-                <h1>Ready for a meeting</h1>
+              <div class="session-state-copy">
+                <div class="session-heading-row">
+                  <h1>Ready for a meeting</h1>
+                </div>
                 <p>Nothing is captured until you start a live session.</p>
+                <p class="session-hint">
+                  Use headphones if you can—speaker playback can echo into your
+                  mic and TalkQTE can’t catch every repeat.
+                </p>
               </div>
             </div>
             <div class="session-actions">
               <div class="session-start-group">
-                <button type="button" class="primary-button">
-                  Start live session
-                </button>
+                <div class="session-start-buttons">
+                  <button type="button" class="primary-button">
+                    Start live session
+                  </button>
+                </div>
                 <p class="session-start-disclosure">
                   Starts immediately: sends your microphone and system audio to
                   Deepgram and recent lines to Anthropic until you press Stop.
@@ -94,48 +143,44 @@
               </div>
             </div>
           </section>
-          <div class="notebook-grid">
+          <div class="notebook-grid is-split is-ready-grid">
             <section class="editor-section">
               <div class="editor-heading">
-                <div
-                  class="tabs"
-                  role="tablist"
-                  aria-label="Illustrated meeting content"
-                >
-                  <button
-                    role="tab"
-                    aria-selected="true"
-                    id="specimen-notes-tab"
-                    aria-controls="specimen-notes"
-                  >
-                    Notes</button
-                  ><button role="tab" aria-selected="false" tabindex="-1">
-                    Transcript <span class="tab-count">0</span>
+                <div class="tabs" role="tablist">
+                  <button role="tab" aria-selected="true">
+                    <span class="tab-label">Notes</span>
+                  </button>
+                  <button role="tab" aria-selected="false">
+                    <span class="tab-label"
+                      >Transcript <span class="tab-count">0</span></span
+                    >
+                  </button>
+                  <button role="tab" aria-selected="false">
+                    <span class="tab-label">Ask</span>
                   </button>
                 </div>
-                <button type="button" class="text-button notebook-export">
-                  Export
-                </button>
               </div>
-              <div
-                role="tabpanel"
-                id="specimen-notes"
-                aria-labelledby="specimen-notes-tab"
-              >
-                <label class="visually-hidden" for="specimen-working-copy"
-                  >Meeting notes</label
-                ><textarea
-                  class="note-editor"
-                  id="specimen-working-copy"
-                  placeholder="What would you like to remember?"
-                ></textarea>
-                <div class="editor-footer">
-                  <span>Working copy</span><span>0 / 20,000</span>
+              <textarea
+                class="note-editor"
+                readonly
+                aria-label="Fictional notes preview"
+                placeholder="What would you like to remember?"
+              ></textarea>
+              <div class="editor-footer">
+                <span>Working copy</span>
+                <div class="editor-footer-actions">
+                  <span>0 / 20,000</span>
                 </div>
               </div>
             </section>
-            <aside class="companion">
-              <div class="companion-heading"><h2>Cues</h2></div>
+            <div class="content-divider">
+              <div class="specimen-divider"></div>
+            </div>
+            <aside class="companion is-standby">
+              <div class="companion-heading">
+                <h2>Cues</h2>
+                <span class="companion-state-tag">Standby</span>
+              </div>
               <div class="question-idle">
                 <h3>Cues follow the conversation.</h3>
                 <p>
@@ -143,213 +188,198 @@
                   there’s something useful to add. Silence is normal.
                 </p>
               </div>
-              <button type="button" class="text-button companion-settings">
-                Cue appearance and timing
-              </button>
             </aside>
+            <div class="meeting-prep-group">
+              <section class="meeting-focus">
+                <details class="focus-disclosure">
+                  <summary>
+                    This meeting <span>Add focus · optional</span>
+                  </summary>
+                </details>
+              </section>
+              <section class="context-panel">
+                <details class="context-disclosure">
+                  <summary>
+                    <strong>Prior context</strong>
+                    <span class="muted small">0 notes selected</span>
+                  </summary>
+                </details>
+              </section>
+            </div>
           </div>
-          <section class="meeting-focus">
-            <details class="focus-disclosure">
-              <summary>This meeting <span>Add focus · optional</span></summary>
-              <p class="small muted">
-                Up to 5 short topics you want to cover, word-matched for this
-                session until you quit.
-              </p>
-              <label for="specimen-focus">Focus · optional</label
-              ><textarea id="specimen-focus" rows="3"></textarea>
-            </details>
-          </section>
-          <details class="focus-disclosure">
-            <summary>Prior context <span>0 notes selected</span></summary>
-            <p class="small muted">
-              Importing notes does not approve sending them to a cue provider.
-              Review processing separately.
-            </p>
-          </details>
-          <footer class="notebook-footer">
-            <p>
-              Working notes stay here until you quit. Live meetings save locally
-              on Stop by default; change this in Settings.
-            </p>
-          </footer>
         </div>
       </article>
-      <article id="unavailable">
-        <h2>Unavailable</h2>
-        <div class="specimen notebook-idle">
-          <section class="session-strip" aria-label="unavailable session">
-            <div class="session-state">
-              <div>
-                <h1>No session yet</h1>
-                <p>
-                  Nothing is captured. This build has no live transcription.
-                </p>
-              </div>
-            </div>
-            <div class="session-actions">
-              <div class="session-start-group"></div>
-            </div>
-          </section>
-          <aside class="companion">
-            <div class="companion-heading"><h2>Cues</h2></div>
-            <div class="question-idle">
-              <h3>Live cues are unavailable.</h3>
-              <p>
-                Check Settings for provider status and live-session setup
-                requirements.
-              </p>
-            </div>
-            <button type="button" class="text-button companion-settings">
-              Cue appearance and timing
-            </button>
-          </aside>
-        </div>
-      </article>
-      <article id="preparing">
-        <h2>Preparing</h2>
+
+      <article id="live">
+        <h2>2. Live session (compact capture + Cue processing + live cue)</h2>
         <div class="specimen">
-          <section class="session-strip" aria-label="preparing session">
-            <div class="session-state">
-              <div>
-                <h1>Preparing live session</h1>
-                <p>Starting…</p>
-                <p>
-                  Capture controls remain above the Notebook in the running app.
-                  Preparing and cancellation remain retryable.
-                </p>
-              </div>
-            </div>
-            <div class="session-actions">
-              <div class="session-start-group">
-                <button type="button" class="secondary-button">
-                  Cancel start
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
-      </article>
-      <article id="active">
-        <h2>Active</h2>
-        <div class="specimen">
-          <section class="session-strip" aria-label="active session">
-            <div class="session-state">
-              <div>
-                <h1>Live session in progress</h1>
-                <p>Your microphone and system audio · audio not recorded</p>
-                <p>
-                  Capture controls remain above the Notebook in the running app.
-                  Stop remains available independently of note editing.
-                </p>
-              </div>
-            </div>
-            <div class="session-actions">
-              <div class="session-start-group">
+          <section class="microphone-panel is-live" style="padding: 0">
+            <div class="microphone-panel-body">
+              <div class="microphone-heading">
+                <div>
+                  <strong>Live session</strong>
+                  <span class="status-sep">·</span>
+                  <span class="microphone-status">On</span>
+                  <span class="status-sep">·</span>
+                  <span class="microphone-activity is-active">
+                    <span class="status-dot active"></span>
+                    Signal detected
+                  </span>
+                </div>
                 <button type="button" class="secondary-button">
                   Stop live session
                 </button>
               </div>
-            </div>
-          </section>
-          <aside class="companion">
-            <div class="companion-heading"><h2>Cues</h2></div>
-            <div class="question-idle">
-              <h3>A little room to think.</h3>
-              <p>
-                Cues pass quietly. Keep listening without needing to respond.
-              </p>
-            </div>
-            <button type="button" class="text-button companion-settings">
-              Cue appearance and timing
-            </button>
-          </aside>
-        </div>
-      </article>
-      <article id="paused">
-        <h2>Paused</h2>
-        <div class="specimen">
-          <section class="session-strip" aria-label="paused session">
-            <div class="session-state">
-              <div>
-                <h1>Cues paused · session continues</h1>
+              <div class="microphone-disclosures">
                 <p>
-                  Microphone and transcript continue. Stop live session when
-                  done.
+                  Your microphone is sent to Deepgram for transcription. TalkQTE
+                  does not record audio. Cue processing controls are below. Stop
+                  live session to release the microphone.
                 </p>
-                <p>
-                  Capture controls remain above the Notebook in the running app.
-                  Stop remains available independently of note editing.
+                <p class="microphone-retention">
+                  Transcript saving follows Settings → Meetings, independently
+                  of cue processing. Save automatically requests a local save of
+                  non-empty sessions on stop. Ask each time waits for your
+                  choice; Don’t save leaves the session in memory.
                 </p>
               </div>
             </div>
-            <div class="session-actions">
-              <div class="session-start-group">
+          </section>
+          <div class="notebook-processing" style="padding: 0">
+            <section class="processing-panel is-compact-live">
+              <div class="processing-heading">
+                <h2>Cue processing</h2>
+                <span class="is-active">Model connection on</span>
+              </div>
+              <p><strong>Anthropic</strong> · Hosted by Anthropic</p>
+              <div class="processing-actions">
                 <button type="button" class="secondary-button">
-                  Stop live session</button
-                ><button type="button" class="secondary-button">
-                  Resume cues
+                  Pause cues
+                </button>
+                <button type="button" class="secondary-button">
+                  Turn off processing
                 </button>
               </div>
-            </div>
-          </section>
-          <aside class="companion">
-            <div class="companion-heading"><h2>Cues</h2></div>
-            <div class="question-idle">
-              <h3>Cues are paused.</h3>
-              <p>
-                Resume cues when you want suggestions again. Speech during the
-                pause won’t trigger cues.
-              </p>
-            </div>
-            <button type="button" class="text-button companion-settings">
-              Cue appearance and timing
-            </button>
-          </aside>
-        </div>
-      </article>
-      <article id="stopping">
-        <h2>Stopping</h2>
-        <div class="specimen">
-          <section class="session-strip" aria-label="stopping session">
-            <div class="session-state">
-              <div>
-                <h1>Finishing live session</h1>
-                <p>Releasing microphone and finishing transcription…</p>
-                <p>
-                  Capture controls remain above the Notebook in the running app.
-                  Stop remains available independently of note editing.
-                </p>
-              </div>
-            </div>
-            <div class="session-actions">
-              <div class="session-start-group">
-                <button type="button" class="secondary-button">
-                  Stop live session
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
-      </article>
-      <article id="error">
-        <h2>Error</h2>
-        <div class="specimen notebook-idle">
-          <div class="error-banner" role="alert">
-            The cloud transcription settings are not usable.
-            <button type="button" class="text-button">Dismiss</button>
+            </section>
           </div>
-          <section class="session-strip" aria-label="error session">
+          <div class="notebook-body is-live" style="padding: 16px 0 0">
+            <section class="session-strip is-live">
+              <div class="session-state">
+                <span class="status-dot running"></span>
+                <div class="session-state-copy">
+                  <div class="session-heading-row">
+                    <h1>Live session in progress</h1>
+                  </div>
+                  <p>Your microphone and system audio · audio not recorded</p>
+                </div>
+              </div>
+              <div class="session-actions">
+                <span class="session-clock">4:08</span>
+              </div>
+            </section>
+            <div class="notebook-grid is-split is-live-grid">
+              <section class="editor-section">
+                <div class="editor-heading">
+                  <div class="tabs" role="tablist">
+                    <button role="tab" aria-selected="false">
+                      <span class="tab-label">Notes</span>
+                    </button>
+                    <button role="tab" aria-selected="false">
+                      <span class="tab-label"
+                        >Transcript <span class="tab-count">2</span></span
+                      >
+                    </button>
+                    <button role="tab" aria-selected="true">
+                      <span class="tab-label">Ask</span>
+                    </button>
+                  </div>
+                </div>
+                <section class="meeting-ask">
+                  <div class="ask-header">
+                    <h2>Ask about recent discussion</h2>
+                    <p class="muted">
+                      Answers use a limited excerpt of this session, not the
+                      whole meeting. Model answers can be wrong; check the cited
+                      lines.
+                    </p>
+                  </div>
+                  <div class="ask-grounding">
+                    <span
+                      >Recent excerpt: 2 lines in scope (capped at 200 lines /
+                      64 KiB)</span
+                    >
+                    <button type="button" class="text-button">
+                      View transcript
+                    </button>
+                  </div>
+                </section>
+              </section>
+              <div class="content-divider">
+                <div class="specimen-divider"></div>
+              </div>
+              <aside class="companion">
+                <div class="companion-heading">
+                  <h2>Cues</h2>
+                </div>
+                <article class="cue-card" style="margin-top: 12px">
+                  <div class="cue-lead">
+                    <span class="cue-marker"></span>
+                    <span>You could ask</span>
+                  </div>
+                  <h3 class="question">Who will take the first draft?</h3>
+                  <blockquote class="cue-source">
+                    <p>
+                      “Agreed. Someone can take the first draft of the welcome
+                      guide soon.”
+                    </p>
+                  </blockquote>
+                </article>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article id="ended">
+        <h2>3. Ended &amp; error recovery (outcome-named Export Markdown…)</h2>
+        <div class="specimen notebook-body is-ended">
+          <section class="session-strip is-ended">
             <div class="session-state">
-              <div>
-                <h1>Ready for a meeting</h1>
-                <p>Nothing is captured until you start a live session.</p>
+              <div class="session-state-copy">
+                <div class="session-heading-row">
+                  <h1>Live session ended</h1>
+                  <span class="session-badge is-saved">Saved to Meetings</span>
+                </div>
+                <p>
+                  Saved to Meetings. Notes stay here until you start another
+                  session or quit.
+                </p>
+                <div class="session-alert-row">
+                  <p role="alert">
+                    Transcription by Deepgram stopped: the service refused the
+                    API key or credential. Replace the key in Settings. The live
+                    session ended; nothing fell back to another transcription
+                    service.
+                  </p>
+                  <button
+                    type="button"
+                    class="secondary-button session-recovery-button"
+                  >
+                    Open Settings
+                  </button>
+                </div>
               </div>
             </div>
             <div class="session-actions">
               <div class="session-start-group">
-                <button type="button" class="primary-button">
-                  Start live session
-                </button>
+                <div class="session-start-buttons">
+                  <button type="button" class="secondary-button export-button">
+                    Export Markdown…
+                  </button>
+                  <button type="button" class="primary-button">
+                    Start live session
+                  </button>
+                </div>
                 <p class="session-start-disclosure">
                   Starts immediately: sends your microphone and system audio to
                   Deepgram and recent lines to Anthropic until you press Stop.
@@ -357,35 +387,141 @@
               </div>
             </div>
           </section>
-        </div>
-      </article>
-      <article id="ended">
-        <h2>Ended</h2>
-        <div class="specimen">
-          <section class="session-strip" aria-label="ended session">
-            <div class="session-state">
-              <div>
-                <h1>Live session ended</h1>
-                <p>
-                  Saved to Meetings. Notes stay here until you start another
-                  session or quit.
-                </p>
+          <div class="ended-outcomes">
+            <section class="meeting-notes">
+              <div class="meeting-notes-head">
+                <h2>Meeting notes</h2>
               </div>
-            </div>
-            <div class="session-actions">
-              <div class="session-start-group">
+              <p class="meeting-notes-help">
+                Summary, decisions, action items, and open questions from this
+                transcript, cited to the lines they came from.
+              </p>
+              <div class="meeting-notes-controls">
                 <button type="button" class="primary-button">
-                  Start live session
+                  Generate notes
                 </button>
               </div>
-            </div>
-          </section>
-          <footer class="notebook-footer">
-            <p>
-              Saved to Meetings on this computer until you delete it. Exports
-              and backups have their own lifecycle.
+            </section>
+            <section class="keep-history is-kept">
+              <p>Saved to Meetings as “Fictional welcome guide sync”.</p>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article id="settings">
+        <h2>4. Settings hierarchy (grouped sections + jump navigation)</h2>
+        <div class="specimen settings-page" style="padding: 24px">
+          <div class="settings-page-head">
+            <h1>Settings</h1>
+            <p class="page-description">
+              Persistent preferences for providers, cues, capture, saved
+              meetings, and diagnostics.
             </p>
-          </footer>
+            <nav class="settings-nav" aria-label="Specimen Settings sections">
+              <a href="#settings">Providers &amp; keys</a>
+              <a href="#settings">Cues &amp; companion</a>
+              <a href="#settings">Capture &amp; prompts</a>
+              <a href="#settings">Meetings &amp; storage</a>
+              <a href="#settings">Privacy &amp; setup</a>
+            </nav>
+          </div>
+          <section class="settings-group" style="margin-top: 16px">
+            <h2 class="settings-group-heading">Cues &amp; companion</h2>
+            <section class="setting">
+              <div>
+                <h2>Question timing</h2>
+                <p>
+                  Balanced waits 10s between cues; Quiet waits 30s. Focused
+                  shows only cues matching your Focus lines, your name, or prior
+                  notes.
+                </p>
+              </div>
+              <select aria-label="Specimen Question timing">
+                <option>Balanced</option>
+                <option>Focused · only what matters</option>
+                <option>Quiet</option>
+              </select>
+            </section>
+          </section>
+        </div>
+      </article>
+
+      <article id="build-version">
+        <h2>5. Build identity footer (BuildVersion states)</h2>
+        <div class="specimen">
+          <div class="version-specimen-grid">
+            <div class="version-specimen-card">
+              <p>Known clean (expanded)</p>
+              <details class="version build-version" open>
+                <summary>TalkQTE <span>0.1.0 · 1234567</span></summary>
+                <dl>
+                  <dt>Source commit</dt>
+                  <dd>1234567890abcdef1234567890abcdef12345678</dd>
+                  <dt>Source changes</dt>
+                  <dd>Clean at build</dd>
+                  <dt>Build profile</dt>
+                  <dd>debug</dd>
+                  <dt>Target</dt>
+                  <dd>fictional-test-target</dd>
+                </dl>
+              </details>
+            </div>
+            <div class="version-specimen-card">
+              <p>Modified working tree</p>
+              <details class="version build-version">
+                <summary>
+                  TalkQTE <span>0.1.0 · abcdef0 · modified</span>
+                </summary>
+                <dl>
+                  <dt>Source commit</dt>
+                  <dd>abcdef0123456789abcdef0123456789abcdef01</dd>
+                  <dt>Source changes</dt>
+                  <dd>Uncommitted changes</dd>
+                  <dt>Build profile</dt>
+                  <dd>debug</dd>
+                  <dt>Target</dt>
+                  <dd>fictional-test-target</dd>
+                </dl>
+              </details>
+            </div>
+            <div class="version-specimen-card">
+              <p>Unknown source + source date</p>
+              <details class="version build-version" open>
+                <summary>
+                  TalkQTE <span>0.1.0 · unknown source · changes unknown</span>
+                </summary>
+                <dl>
+                  <dt>Source commit</dt>
+                  <dd>unknown</dd>
+                  <dt>Source changes</dt>
+                  <dd>Unknown</dd>
+                  <dt>Build profile</dt>
+                  <dd>release</dd>
+                  <dt>Target</dt>
+                  <dd>fictional-test-target</dd>
+                  <dt>Source date (UTC)</dt>
+                  <dd>1970-01-01T00:00:00.000Z</dd>
+                </dl>
+              </details>
+            </div>
+            <div class="version-specimen-card">
+              <p>Browser preview</p>
+              <div class="version">TalkQTE <span>Browser preview</span></div>
+            </div>
+            <div class="version-specimen-card">
+              <p>Native identity unavailable</p>
+              <div class="version">
+                TalkQTE <span>Build identity unavailable</span>
+              </div>
+            </div>
+            <div class="version-specimen-card">
+              <p>Loading</p>
+              <div class="version">
+                TalkQTE <span>Reading build identity…</span>
+              </div>
+            </div>
+          </div>
         </div>
       </article>
     </main>

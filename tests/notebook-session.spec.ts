@@ -150,8 +150,8 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     session(page).getByRole('button', { name: 'Start live session' }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Export Markdown…', exact: true }),
+  ).toHaveCount(0);
   await page.evaluate(
     ([text, question]) => window.liveTest.say(text, question),
     [firstLine, firstCue],
@@ -187,7 +187,9 @@ test('a session runs from Start to Stop, and what remains afterwards is stated',
     page.getByRole('textbox', { name: 'Meeting notes' }),
   ).toHaveValue('Fictional note: ask about the welcome guide.');
   // After Stop the notes can be exported; the transcript never is.
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const review = page.getByRole('dialog', { name: 'Review your export' });
   await expect(review.locator('pre')).toHaveText(
     '# TalkQTE notes\n\nFictional note: ask about the welcome guide.\n',
@@ -258,12 +260,7 @@ for (const width of [320, 390, 880]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    for (const name of [
-      'Export',
-      'Pause cues',
-      'Stop live session',
-      'Dismiss',
-    ]) {
+    for (const name of ['Pause cues', 'Stop live session', 'Dismiss']) {
       const button = page.getByRole('button', { name, exact: true }).first();
       const bounds = await button.boundingBox();
       expect(bounds!.width, name).toBeGreaterThanOrEqual(44);

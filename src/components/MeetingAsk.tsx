@@ -6,9 +6,11 @@ import './meeting-ask.css';
 export function MeetingAsk({
   snapshot,
   onCitation,
+  onViewTranscript,
 }: {
   snapshot: Snapshot;
   onCitation: (id: string) => void;
+  onViewTranscript?: () => void;
 }) {
   const [scope, setScope] = useState<qa.QaScope | null>(null);
   const [entries, setEntries] = useState<qa.QaEntry[]>([]);
@@ -101,13 +103,39 @@ export function MeetingAsk({
   }
   const first = scope?.lines[0],
     last = scope?.lines.at(-1);
+  const lineCount = snapshot.transcript.length;
+  const scopeCount = scope?.lines.length ?? 0;
+  const groundingSummary =
+    scope && scopeCount > 0
+      ? scope.omitted
+        ? `Recent excerpt: latest ${scopeCount} of ${lineCount} transcript lines (capped at 200 lines / 64 KiB; earlier lines excluded)`
+        : `Recent excerpt: ${scopeCount} ${scopeCount === 1 ? 'line' : 'lines'} in scope (capped at 200 lines / 64 KiB)`
+      : lineCount > 0
+        ? `Bounded recent excerpt (up to 200 lines / 64 KiB; ${lineCount} ${lineCount === 1 ? 'line' : 'lines'} in session)`
+        : 'No transcript lines yet — Ask sends only a bounded recent excerpt (up to 200 lines / 64 KiB) once lines arrive.';
   return (
     <section className="meeting-ask" aria-labelledby="ask-heading">
-      <h2 id="ask-heading">Ask about recent discussion</h2>
-      <p className="muted">
-        Answers use a limited excerpt of this session, not the whole meeting.
-        Model answers can be wrong; check the cited lines.
-      </p>
+      <div className="ask-header">
+        <div>
+          <h2 id="ask-heading">Ask about recent discussion</h2>
+          <p className="muted">
+            Answers use a limited excerpt of this session, not the whole
+            meeting. Model answers can be wrong; check the cited lines.
+          </p>
+        </div>
+      </div>
+      <div className="ask-grounding">
+        <span>{groundingSummary}</span>
+        {onViewTranscript && (
+          <button
+            type="button"
+            className="text-button"
+            onClick={onViewTranscript}
+          >
+            View transcript
+          </button>
+        )}
+      </div>
       <div
         className="ask-history"
         aria-label="Question and answer history"

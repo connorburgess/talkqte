@@ -38,7 +38,9 @@ test('export saves exactly the reviewed notes and nothing about a demo', async (
   await page
     .getByRole('textbox', { name: 'Meeting notes', exact: true })
     .fill('Ask about a large-print welcome guide.');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(dialog).toContainText('Ask about a large-print welcome guide.');
   const reviewed = await dialog.locator('pre').innerText();
@@ -155,11 +157,17 @@ test('keyboard users can change notebook tabs and close the export preview', asy
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: /Transcript/ })).toBeFocused();
   await expect(page.getByRole('tabpanel')).toContainText('No transcript yet.');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.keyboard.press('ArrowLeft');
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional tab export note.');
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
+    page.getByRole('button', { name: 'Export Markdown…', exact: true }),
   ).toBeFocused();
 });
 
@@ -230,7 +238,12 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
     .getByRole('button', { name: 'Remove Visitor questions (2026-11-02)' })
     .click();
   await expect(panel.getByRole('listitem')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional export note.');
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const exportDialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(exportDialog.locator('pre')).not.toContainText('tool shed');
   await page.keyboard.press('Escape');

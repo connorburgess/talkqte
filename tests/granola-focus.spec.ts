@@ -43,8 +43,8 @@ test('a pending focus suggestion keeps disconnect and the notebook usable', asyn
   });
   await expect(disconnect).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeEnabled();
+    page.getByRole('textbox', { name: 'Meeting notes', exact: true }),
+  ).toBeEditable();
   await page.setViewportSize({ width: 600, height: 700 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const focusPanel = page.getByRole('region', { name: 'This meeting' });

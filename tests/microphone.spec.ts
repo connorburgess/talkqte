@@ -76,7 +76,12 @@ test('microphone requires explicit start and only native snapshots confirm activ
   await expect(panel.getByRole('status')).toHaveText('On');
   await expect(panel).toContainText('Signal detected');
   // Other notebook actions leave the check running; only Stop ends it.
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional mic-check note.');
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   await expect(page.getByRole('dialog')).not.toContainText(/microphone/i);
   await page.keyboard.press('Escape');
   await expect(panel.getByRole('status')).toHaveText('On');
@@ -276,8 +281,8 @@ test('a live session is labelled live, has no end time, and cannot be exported',
     'Shows whether your microphone picks up sound',
   );
   await expect(
-    page.getByRole('button', { name: 'Export', exact: true }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Export Markdown…', exact: true }),
+  ).toHaveCount(0);
   await page.evaluate(() =>
     window.liveTest.say(
       'Someone can take the first draft.',

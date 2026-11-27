@@ -380,7 +380,9 @@ test('Meetings renames, exports the reviewed Markdown, and deletes with confirma
     page.getByRole('heading', { name: 'Blue tin sync', level: 1 }),
   ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(dialog).toBeVisible();
   const preview = (await dialog.locator('pre').textContent()) ?? '';
@@ -1072,7 +1074,9 @@ test('Meetings detail renders diarized remote speaker chips and renames all line
   expect(a11y.violations).toEqual([]);
 
   // Export preview reflects renamed speaker label.
-  await page.getByRole('button', { name: 'Export…', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Review your export' });
   const preview = (await dialog.locator('pre').textContent()) ?? '';
   expect(preview).toContain('- 0:01 Priya: I will check the south latch.');
