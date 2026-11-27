@@ -1168,3 +1168,94 @@ fn legacy_index_order_and_has_notes_derive_from_actual_contents() {
         .unwrap();
     assert_eq!(dir.store().list(None).meetings[0].id, a.id);
 }
+
+#[test]
+fn delete_preserves_saved_content_when_the_replacement_index_cannot_be_written() {
+    let folder = Folder::new("delete-index-write-failure");
+    let store = folder.store();
+    let kept = store
+        .keep("Fictional seed planning", content(1, "Keep the seed list."))
+        .unwrap();
+    let original = store.open_meeting(&kept.id).unwrap();
+    let index_before = fs::read(folder.root().join(INDEX)).unwrap();
+    // Deterministically refuse the atomic writer's temporary file. This
+    // simulates the write failing without filling the host disk or relying
+    // on permissions (which behave differently under elevated test users).
+    let blocked = folder
+        .root()
+        .join(format!(".{INDEX}.{}.tmp", std::process::id()));
+    fs::create_dir(&blocked).unwrap();
+
+    assert_eq!(store.delete(&kept.id), Err(Error::Write));
+    assert_eq!(fs::read(folder.root().join(INDEX)).unwrap(), index_before);
+    let reopened = folder.store();
+    assert_eq!(reopened.open_meeting(&kept.id).unwrap(), original);
+    assert_eq!(reopened.list(None).meetings, vec![kept.clone()]);
+    assert_eq!(reopened.list(None).unreadable, 0);
+
+    fs::remove_dir(blocked).unwrap();
+    reopened.delete(&kept.id).unwrap();
+    assert!(folder.store().list(None).meetings.is_empty());
+    assert!(!folder.root().join(kept.id).exists());
+}
+
+#[test]
+fn interrupted_or_partial_atomic_replacements_preserve_the_saved_meeting() {
+    let folder = Folder::new("partial-write-recovery");
+    let store = folder.store();
+    let kept = store
+        .keep(
+            "Fictional garden",
+            content(1, "Keep the old planting plan."),
+        )
+        .unwrap();
+    let original = store.open_meeting(&kept.id).unwrap();
+    let path = Store::meeting_path(&folder.root(), &kept.id);
+    let original_bytes = fs::read(&path).unwrap();
+    let mut changed = original.clone();
+    changed.content.notes = "A revised fictional planting plan.".into();
+    let bytes = render(&MeetingFileOut {
+        version: VERSION,
+        meeting: &changed,
+    });
+
+    let failed = PreparedWrite::with_writer(&path, |file| {
+        file.write_all(&bytes[..bytes.len() / 2])?;
+        Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+    });
+    assert!(failed.is_err());
+    assert_eq!(fs::read(&path).unwrap(), original_bytes);
+    assert_eq!(folder.store().open_meeting(&kept.id).unwrap(), original);
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+
+    // A completed temporary file must not become visible before commit,
+    // including when a later step fails and the prepared write is dropped.
+    let pending = PreparedWrite::new(&path, &bytes).unwrap();
+    assert_eq!(folder.store().open_meeting(&kept.id).unwrap(), original);
+    drop(pending);
+    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    store.update(&kept.id, changed.content.clone()).unwrap();
+    assert_eq!(
+        folder.store().open_meeting(&kept.id).unwrap().content,
+        changed.content
+    );
+}
+
+#[test]
+fn a_failed_directory_removal_discards_the_prepared_delete_index() {
+    let folder = Folder::new("delete-directory-failure");
+    let store = folder.store();
+    let kept = store
+        .keep("Fictional garden", content(1, "Gate review."))
+        .unwrap();
+    // A regular file at the directory path deterministically refuses
+    // remove_dir_all on supported hosts; no permission changes are needed.
+    let directory = folder.root().join(&kept.id);
+    fs::remove_dir_all(&directory).unwrap();
+    fs::write(&directory, b"fictional damaged directory").unwrap();
+    let before = fs::read(folder.root().join(INDEX)).unwrap();
+    assert_eq!(store.delete(&kept.id), Err(Error::Write));
+    assert_eq!(fs::read(folder.root().join(INDEX)).unwrap(), before);
+    assert_eq!(fs::read_dir(folder.root()).unwrap().count(), 2);
+    assert_eq!(fs::read(directory).unwrap(), b"fictional damaged directory");
+}

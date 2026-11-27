@@ -885,18 +885,37 @@ fn owner_only_dir(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
-/// Replaces `path` with `bytes` atomically, owner-only.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("no folder"))?;
-    owner_only_dir(directory)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| std::io::Error::other("no file name"))?
-        .to_string_lossy();
-    let temporary = directory.join(format!(".{name}.{}.tmp", std::process::id()));
-    let result = (|| {
+/// An owner-only replacement, fully written and synced but not published.
+/// Dropping it after any failure leaves the destination untouched.
+struct PreparedWrite {
+    destination: PathBuf,
+    temporary: PathBuf,
+}
+
+impl PreparedWrite {
+    fn new(path: &Path, bytes: &[u8]) -> std::io::Result<Self> {
+        Self::with_writer(path, |file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+    }
+
+    fn with_writer(
+        path: &Path,
+        write: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+    ) -> std::io::Result<Self> {
+        let directory = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("no folder"))?;
+        owner_only_dir(directory)?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("no file name"))?
+            .to_string_lossy();
+        let prepared = Self {
+            destination: path.to_path_buf(),
+            temporary: directory.join(format!(".{name}.{}.tmp", std::process::id())),
+        };
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
@@ -904,20 +923,30 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut file = options.open(&temporary)?;
+        let mut file = options.open(&prepared.temporary)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        write(&mut file)?;
+        Ok(prepared)
     }
-    result
+
+    fn commit(self) -> std::io::Result<()> {
+        fs::rename(&self.temporary, &self.destination)
+    }
+}
+
+impl Drop for PreparedWrite {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.temporary);
+    }
+}
+
+/// Replaces `path` with `bytes` atomically, owner-only.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    PreparedWrite::new(path, bytes)?.commit()
 }
 
 fn render<T: Serialize>(value: &T) -> Vec<u8> {
@@ -1060,8 +1089,12 @@ impl Store {
         }
     }
 
-    fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
-        write_atomic(
+    fn prepare_index(
+        root: &Path,
+        entries: &[Summary],
+        folders: &[String],
+    ) -> Result<PreparedWrite, Error> {
+        PreparedWrite::new(
             &Self::index_path(root),
             &render(&IndexFile {
                 version: VERSION,
@@ -1071,6 +1104,12 @@ impl Store {
             }),
         )
         .map_err(|_| Error::Write)
+    }
+
+    fn write_index(root: &Path, entries: &[Summary], folders: &[String]) -> Result<(), Error> {
+        Self::prepare_index(root, entries, folders)?
+            .commit()
+            .map_err(|_| Error::Write)
     }
 
     fn write_meeting(root: &Path, meeting: &Meeting) -> Result<(), Error> {
@@ -1592,8 +1631,9 @@ impl Store {
             .collect())
     }
 
-    /// Deletes one kept meeting for good: its folder is removed, then the
-    /// list. A folder that cannot be removed leaves the meeting listed.
+    /// Prepares and syncs the replacement index before deleting any content.
+    /// An index write failure leaves the saved meeting intact and retryable.
+    /// The directory removal and final index rename are not one transaction.
     pub fn delete(&self, id: &str) -> Result<(), Error> {
         if !valid_id(id) {
             return Err(Error::Missing);
@@ -1603,12 +1643,13 @@ impl Store {
         let Some(position) = entries.iter().position(|entry| entry.id == id) else {
             return Err(Error::Missing);
         };
+        entries.remove(position);
+        let prepared = Self::prepare_index(&root, &entries, &folders)?;
         let folder = root.join(id);
         if folder.exists() {
             fs::remove_dir_all(&folder).map_err(|_| Error::Write)?;
         }
-        entries.remove(position);
-        Self::write_index(&root, &entries, &folders)
+        prepared.commit().map_err(|_| Error::Write)
     }
 
     /// Deletes every kept meeting, including any that could not be read or

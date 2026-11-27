@@ -75,7 +75,15 @@ meetings/                 mode 700
   (Settings says so); a newer meeting file is not shown and not changed.
   Only **Delete all meetings** removes them. This is the rule the release
   path sets for the settings file. A version-1 fixture is read in a test.
-- **Deleting.** Deleting a meeting removes its folder, then its list entry.
+- **Deleting.** Before deleting any meeting content, TalkQTE prepares and
+  flushes the replacement index to a temporary file. If that preparation
+  fails (for example, because the disk is full), Delete reports a write error
+  and leaves the saved meeting and committed index intact for retry. It then
+  removes the meeting's folder and renames the prepared index into place.
+  These two operations are not a transaction: interruption during removal or
+  failure of the final rename can still leave a missing or partially removed
+  meeting referenced by the old index. There is no crash-recovery journal or
+  power-loss durability guarantee.
   **Delete all meetings** (Settings, with an inline confirmation) removes the
   whole `meetings` folder, including files that could not be read. Files are
   unlinked, not overwritten; copies in backups (Time Machine) or exports are
@@ -214,3 +222,30 @@ narrow layout, automated accessibility and error recovery. Real Tauri drag and
 native VoiceOver behavior remain unverified. Next acceptance: an authorized
 fictional native run moves/reorders with active filters, relaunches, clears them,
 and confirms keyboard/VoiceOver feedback without lost meetings or note changes.
+
+## Write-failure acceptance and remaining recovery work
+
+The persistence regressions use separate fictional temporary stores and
+injected filesystem failures; they never fill the host disk or read installed
+app history. A refused index temporary file must leave a failed single Delete
+listed, readable with its exact original content after reopening, and deletable
+on retry after the fault is removed. An injected partial write with a
+`StorageFull` error must preserve the previous meeting bytes; dropping a fully
+prepared replacement before commit must also preserve them and remove its
+temporary file. A refused directory removal must discard the prepared index
+without replacing the committed list.
+
+These checks cover failures before destructive single-meeting removal, not a
+recoverable multi-file transaction. Single-meeting removal can partially
+succeed before failing; final index rename failure can leave an unreadable
+entry. An interrupted new keep can leave an unindexed meeting file, and an
+update/rename can write its meeting file before its index write fails. Delete
+all can also partially remove a history before returning an error. No recovery
+journal, orphan discovery or backup restoration is implemented. Backups and
+exports remain outside TalkQTE's control.
+
+The next P1/P3/U6 acceptance gap is a separately designed recovery protocol for
+those interrupted multi-file operations, tested at each destructive boundary
+and across reopen, while preserving explicit deletion and newer-version
+protection. Synthetic failure injection does not establish filesystem or
+power-loss behavior on supported devices. No roadmap item is completed here.
