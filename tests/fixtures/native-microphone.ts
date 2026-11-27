@@ -690,6 +690,18 @@ mockIPC(
       }
       case 'snapshot':
         return structuredClone(session);
+      case 'build_info': {
+        const mode = new URLSearchParams(location.search).get('build-info');
+        if (mode === 'error') throw new Error('Build identity unavailable.');
+        return {
+          version: '0.1.0',
+          commit: '1234567890abcdef1234567890abcdef12345678',
+          dirty: mode === 'dirty',
+          profile: 'debug',
+          target: 'aarch64-apple-darwin',
+          sourceDateEpoch: null,
+        };
+      }
       case 'companion_anchor':
         edgeAsked = true;
         if (edgeReply === 'fail')

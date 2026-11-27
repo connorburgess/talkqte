@@ -239,6 +239,14 @@ export const ALLOWED_ONE_SIDED_BORDERS = [
     kind: 'hairline',
     reason: 'Full-width 1px neutral row divider between Settings sections.',
   },
+  {
+    file: 'src/styles.css',
+    selector: '.settings-group-heading',
+    property: 'border-bottom',
+    kind: 'hairline',
+    reason:
+      'Full-width 1px neutral section divider under each Settings group heading.',
+  },
 ];
 
 function stripCssComments(source) {

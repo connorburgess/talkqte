@@ -39,7 +39,9 @@ test('notes only by default; keeping the meeting is a reviewed choice', async ({
 }) => {
   await openNative(page);
   await endedSession(page);
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const dialog = exportDialog(page);
   const keep = dialog.getByRole('checkbox', {
     name: 'Include transcript and shown cues',
@@ -65,17 +67,22 @@ test('a running session offers no choice and a new session starts with it off', 
     window.liveTest.publish({
       live: true,
       status: 'ended',
+      notes: 'Fictional wrap-up note.',
       transcript: [],
       cue: null,
       keepMeeting: true,
     }),
   );
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   // Nothing to keep: no transcript, so no choice is offered.
   await expect(exportDialog(page).getByRole('checkbox')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await endedSession(page);
   await page.evaluate(() => window.liveTest.publish({ keepMeeting: false }));
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   await expect(exportDialog(page).getByRole('checkbox')).not.toBeChecked();
 });

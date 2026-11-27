@@ -554,7 +554,7 @@ export function MeetingHistory({
               onClick={() => void openExport()}
             >
               <ArrowUpRight size={16} />
-              Export…
+              Export Markdown…
             </button>
             <button
               type="button"

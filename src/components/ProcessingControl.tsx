@@ -472,11 +472,21 @@ export function ProcessingControl({
   const showLabDetails = isLabProcessor(snapshot?.processor?.id);
   const showApprovalBySetting = !!snapshot?.approvalBySetting;
   const showDevGroup = showLabDetails || showApprovalBySetting;
+  const compactLive =
+    !!status &&
+    !editing &&
+    !review &&
+    (active || paused) &&
+    !snapshot?.issue &&
+    !error &&
+    !status.failed &&
+    !showDevGroup &&
+    !sourceOperation;
 
   return (
     <section
       ref={panel}
-      className="processing-panel"
+      className={`processing-panel${compactLive ? ' is-compact-live' : ''}`}
       aria-labelledby="processing-title"
       onKeyDown={(event) => {
         if (event.key === 'Escape' && editing && busy !== 'approve') {

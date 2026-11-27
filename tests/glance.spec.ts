@@ -132,11 +132,15 @@ test('the source shows without a click, and Hold keeps a question through later 
   await expect(question).toHaveCount(0);
 });
 
-test('appearance controls are discoverable, apply to cues, and last into the next session', async ({
+test('appearance controls are discoverable in Settings, apply to cues, and last into the next session', async ({
   page,
 }) => {
   await standIn(page, '/?live');
-  await page.getByRole('button', { name: 'Cue appearance and timing' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Cue appearance and timing' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('link', { name: 'Cues & companion' }).click();
   await expect(
     page.getByRole('heading', { name: 'Glance view' }),
   ).toBeVisible();

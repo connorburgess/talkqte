@@ -69,7 +69,12 @@ test('a Markdown note without a date waits for the date the person enters, then 
     .click();
   await expect(panel(page).getByRole('listitem')).toHaveCount(0);
   await expect(panel(page)).toContainText('0 notes selected');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Meeting notes', exact: true })
+    .fill('Fictional note without prior context.');
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   await expect(
     page.getByRole('dialog', { name: 'Review your export' }).locator('pre'),
   ).not.toContainText('print shop');

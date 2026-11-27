@@ -80,7 +80,9 @@ test('generated notes are checked, editable and join the export only when kept',
   await page.getByText('Where each item came from').click();
   await expect(notesSection(page)).toContainText(`transcript 00:05 “${LINE}”`);
   // Not in the export before it is kept.
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   const exportDialog = page.getByRole('dialog', { name: 'Review your export' });
   await expect(exportDialog.locator('pre')).not.toContainText(
     '## Meeting notes',
@@ -95,7 +97,9 @@ test('generated notes are checked, editable and join the export only when kept',
   await page.getByRole('button', { name: 'Keep with this meeting' }).click();
   await expect(notesSection(page)).toContainText('Notes kept.');
   await expect(writeButton(page)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Export Markdown…', exact: true })
+    .click();
   await expect(exportDialog.locator('pre')).toContainText(
     'Return the spare keys to the blue tin. Owner: not stated.',
   );
