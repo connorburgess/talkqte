@@ -1966,10 +1966,13 @@ function Notebook() {
                                     : 'Nothing is captured.'}
                   </p>
                   {capturesSystemAudio && liveStatus?.available && isReady && (
-                    <p className="session-hint">
-                      Use headphones if you can—speaker playback can echo into
-                      your mic and TalkQTE can’t catch every repeat.
-                    </p>
+                    <details className="session-tip">
+                      <summary>Audio &amp; headphones tip</summary>
+                      <p className="session-hint">
+                        Use headphones if you can—speaker playback can echo into
+                        your mic and TalkQTE can’t catch every repeat.
+                      </p>
+                    </details>
                   )}
                   {notMacos(platform) && isReady && (
                     <p className="session-hint">
@@ -2598,41 +2601,43 @@ function Notebook() {
                     <span className="companion-state-tag">Stopped</span>
                   )}
                 </div>
-                <CueCard
-                  cue={state.cue}
-                  size={state.questionSize}
-                  busy={busy}
-                  onDismiss={dismiss}
-                  onHold={holdCue}
-                  empty={
-                    <div className="question-idle">
-                      <h3>
-                        {state.cuesPaused
-                          ? 'Cues are paused.'
-                          : live || simulated
-                            ? 'A little room to think.'
-                            : sessionLive
-                              ? 'Cues have stopped.'
-                              : liveStatus?.available
-                                ? 'Cues follow the conversation.'
-                                : 'Live cues are unavailable.'}
-                      </h3>
-                      <p>
-                        {state.cuesPaused
-                          ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
-                          : live || simulated
-                            ? 'Cues pass quietly. Keep listening without needing to respond.'
-                            : sessionLive
-                              ? 'Start a new session for cues.'
-                              : liveStatus?.available
-                                ? liveStatus.cueProvider
-                                  ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue when there’s something useful to add. Silence is normal.`
-                                  : 'During a session, cues appear one at a time when available. You can use one or let it pass.'
-                                : 'Check Settings for provider status and live-session setup requirements.'}
-                      </p>
-                    </div>
-                  }
-                />
+                {(isReady || isEnded) && !state.cue ? (
+                  <p className="companion-ready-note">
+                    {isEnded
+                      ? 'Cues have stopped. Start a new session for cues.'
+                      : liveStatus?.available
+                        ? liveStatus.cueProvider
+                          ? `During a session, ${liveStatus.cueProvider} can offer a source-backed cue here when helpful. Silence is normal.`
+                          : 'During a session, cues appear one at a time when available.'
+                        : 'Live cues are unavailable. Check Settings for provider status and live-session setup requirements.'}
+                  </p>
+                ) : (
+                  <CueCard
+                    cue={state.cue}
+                    size={state.questionSize}
+                    busy={busy}
+                    onDismiss={dismiss}
+                    onHold={holdCue}
+                    empty={
+                      <div className="question-idle">
+                        <h3>
+                          {state.cuesPaused
+                            ? 'Cues are paused.'
+                            : live || simulated
+                              ? 'A little room to think.'
+                              : 'Cues have stopped.'}
+                        </h3>
+                        <p>
+                          {state.cuesPaused
+                            ? 'Resume cues when you want suggestions again. Speech during the pause won’t trigger cues.'
+                            : live || simulated
+                              ? 'Cues pass quietly. Keep listening without needing to respond.'
+                              : 'Start a new session for cues.'}
+                        </p>
+                      </div>
+                    }
+                  />
+                )}
                 {(live || simulated) && (
                   <p className="companion-footnote">
                     {state.live && capture.state?.processor

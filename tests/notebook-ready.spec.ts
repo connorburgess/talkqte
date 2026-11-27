@@ -37,6 +37,19 @@ for (const width of [320, 390, 1320]) {
     await expect(page.locator('.context-disclosure')).not.toHaveAttribute(
       'open',
     );
+    // Ready + Ask stays quiet with no disabled composer or 64 KiB technical wall.
+    await page.getByRole('tab', { name: 'Ask', exact: true }).click();
+    await expect(
+      page.getByRole('heading', {
+        name: 'Ask after the conversation starts',
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('textbox', { name: 'Your question' }),
+    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Send' })).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Notes', exact: true }).click();
     // Sidebar footer mounts BuildVersion (never hardcoded 0.1 · alpha).
     await expect(page.locator('.meeting-list')).not.toContainText(
       '0.1 · alpha',
@@ -123,8 +136,8 @@ test('Transcript and Ask cross-link cleanly, highlight cited lines, and Settings
   await expect(
     page.getByRole('tab', { name: 'Ask', exact: true }),
   ).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('.ask-grounding')).toContainText(
-    'Recent excerpt: 2 lines in scope (capped at 200 lines / 64 KiB)',
+  await expect(page.locator('#ask-scope')).toContainText(
+    'Uses the latest 2 lines (capped at 200 lines / 64 KiB).',
   );
 
   // Ask links back to Transcript.

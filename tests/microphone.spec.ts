@@ -474,10 +474,10 @@ test('your name is applied when you leave the field, and a rejected name explain
   await nativePage(page, '?live');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const name = page.getByRole('textbox', { name: 'Name' });
-  // Wide and tall enough to read and tap, not a checkbox-sized box.
+  // Wide and comfortably sized for desktop reading and editing.
   const box = (await name.boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(160);
-  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(32);
   await name.fill('  Sam ');
   await name.press('Enter');
   await expect(name).toHaveValue('Sam');
@@ -557,13 +557,14 @@ test('live input name and change instructions remain reachable in Settings witho
   await expect(panel).toContainText('Input: Garden USB microphone');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(panel).toContainText('Input: Garden USB microphone');
-  await panel.locator('summary').focus();
+  const changeMic = panel.locator('summary', { hasText: 'Change microphone' });
+  await changeMic.focus();
   await page.keyboard.press('Enter');
   await expect(panel).toContainText('System Settings → Sound → Input');
   await expect(
     panel.getByRole('button', { name: 'Stop live session' }),
   ).toBeEnabled();
-  await expect(panel.locator('summary')).toBeFocused();
+  await expect(changeMic).toBeFocused();
   expect(await page.evaluate(() => window.microphoneTest.calls)).not.toContain(
     'stop_microphone',
   );

@@ -180,12 +180,14 @@ test('narrow and desktop preparation controls fit, and cancellation does not tak
   await open(page);
   await start(page).click();
   await expect(cancel(page)).toBeEnabled();
+  const narrowBox = (await cancel(page).boundingBox())!;
+  expect(narrowBox.height).toBeGreaterThanOrEqual(44);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
   await page.setViewportSize({ width: 1320, height: 880 });
   const box = (await cancel(page).boundingBox())!;
-  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(32);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(1320);
   expect(

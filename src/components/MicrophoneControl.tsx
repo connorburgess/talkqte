@@ -127,7 +127,6 @@ export function MicrophoneControl({
             </div>
             {action}
           </div>
-          <MicrophoneInput state={state} />
           <div className="microphone-disclosures">
             {preparing ? (
               <p role="status">
@@ -139,25 +138,29 @@ export function MicrophoneControl({
               <p>
                 {processingConfigured && !processingApproved
                   ? sourceSession
-                    ? `Audio from ${sourceSession} is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
-                    : `Your microphone is sent to ${provider} for transcription once you enable cue processing for this session; until then nothing is transcribed. TalkQTE does not record audio.`
+                    ? `Audio from ${sourceSession} is sent to ${provider} once cue processing is enabled; until then nothing is transcribed. The microphone is not used. TalkQTE does not record audio.`
+                    : `Your microphone is sent to ${provider} once cue processing is enabled; until then nothing is transcribed. TalkQTE does not record audio.`
                   : sourceSession
                     ? `Audio from ${sourceSession} is sent to ${provider} for transcription. The microphone is not used. TalkQTE does not record audio.`
                     : `Your microphone is sent to ${provider} for transcription. TalkQTE does not record audio.`}
-                {processingConfigured && ' Cue processing controls are below.'}{' '}
                 {sourceSession
-                  ? 'Stop live session to end it.'
-                  : 'Stop live session to release the microphone.'}
+                  ? ' Stop live session to end it.'
+                  : ' Stop live session to release the microphone.'}
               </p>
             )}
+            <MicrophoneInput state={state} />
             {!preparing && (
-              <p className="microphone-retention">
-                Transcript saving follows Settings → Meetings, independently of
-                cue processing. Save automatically requests a local save of
-                non-empty sessions on stop. Ask each time waits for your choice;
-                Don’t save leaves the session in memory. Check the status after
-                Stop to confirm a save. Lab runs do not save meetings.
-              </p>
+              <details className="microphone-more">
+                <summary>Transcript saving details</summary>
+                <p className="microphone-retention">
+                  Transcript saving follows Settings → Meetings, independently
+                  of cue processing. Save automatically requests a local save of
+                  non-empty sessions on stop. Ask each time waits for your
+                  choice; Don’t save leaves the session in memory. Check the
+                  status after Stop to confirm a save. Lab runs do not save
+                  meetings.
+                </p>
+              </details>
             )}
           </div>
           {(error || state?.message) && (
