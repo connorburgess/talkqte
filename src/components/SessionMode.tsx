@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { SessionMode as Mode } from '../lib/types';
 import './session-mode.css';
 
@@ -15,7 +15,17 @@ export function SessionMode({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const select = useRef<HTMLSelectElement>(null);
+  const restoreFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (saving || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    // WebKit can move focus to the body when a focused control is disabled.
+    // Restore only that lost focus, never focus the user moved elsewhere.
+    if (document.activeElement === document.body) select.current?.focus();
+  }, [saving]);
   async function choose(value: Mode) {
+    restoreFocus.current = document.activeElement === select.current;
     setSaving(true);
     setError('');
     try {
@@ -31,6 +41,7 @@ export function SessionMode({
       <div className="session-mode-choice">
         <label htmlFor="session-mode">Session type</label>
         <select
+          ref={select}
           id="session-mode"
           value={mode}
           disabled={locked || busy || saving}

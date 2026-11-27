@@ -121,3 +121,38 @@ test('Interview stays locked during a live session and becomes editable after St
   await mode.selectOption('meeting');
   await expect(mode).toHaveValue('meeting');
 });
+
+test('a delayed session-type save restores lost focus without stealing outside focus', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    document.body.innerHTML = '<main id="mode-fixture"></main>';
+    const path = '/tests/fixtures/session-mode.tsx';
+    const { mountSessionMode } = await import(path);
+    mountSessionMode(document.getElementById('mode-fixture')!);
+  });
+  const mode = page.getByRole('combobox', { name: 'Session type' });
+  const release = () =>
+    page.evaluate(async () => {
+      const path = '/tests/fixtures/session-mode.tsx';
+      const { releaseSessionMode } = await import(path);
+      releaseSessionMode();
+    });
+  await mode.focus();
+  await mode.selectOption('interview');
+  await expect(mode).toBeDisabled();
+  await release();
+  await expect(mode).toBeEnabled();
+  await expect(mode).toBeFocused();
+  await expect(mode).toHaveValue('interview');
+
+  await mode.selectOption('meeting');
+  await expect(mode).toBeDisabled();
+  const outside = page.getByRole('button', { name: 'Another control' });
+  await outside.focus();
+  await release();
+  await expect(mode).toBeEnabled();
+  await expect(outside).toBeFocused();
+  await expect(mode).toHaveValue('meeting');
+});
