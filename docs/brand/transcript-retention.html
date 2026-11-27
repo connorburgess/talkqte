@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Capture transcript retention · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <style>
+      body {
+        padding: 24px;
+      }
+      main {
+        max-width: 760px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      main > p,
+      section {
+        margin-top: 24px;
+      }
+      .microphone-panel {
+        padding: 16px;
+      }
+      table {
+        margin-top: 24px;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 12px;
+        vertical-align: top;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Capture transcript retention · built copy</h1>
+      <p>
+        Direction C. Static fictional capture-panel specimen; no capture or
+        provider request. The same conditional guidance applies with cue
+        processing configured or unconfigured.
+        <a href="index.html">Brand guide</a> ·
+        <a href="../meeting-history.md">Retention behavior</a>
+      </p>
+      <section class="microphone-panel is-live" aria-label="Microphone">
+        <div class="microphone-panel-body">
+          <div class="microphone-heading">
+            <strong>Live session · Listening</strong
+            ><button type="button" class="secondary-button">
+              Stop live session
+            </button>
+          </div>
+          <p>
+            Your microphone is sent to the transcription service for
+            transcription. TalkQTE does not record audio. Stop live session to
+            release the microphone.
+          </p>
+          <p>
+            Transcript saving follows Settings → Meetings, independently of cue
+            processing. Save automatically requests a local save of non-empty
+            sessions on stop. Ask each time waits for your choice; Don’t save
+            leaves the session in memory. Check the status after Stop to confirm
+            a save. Lab runs do not save meetings.
+          </p>
+        </div>
+      </section>
+      <table>
+        <caption>
+          Policy outcomes covered by fictional browser fixtures
+        </caption>
+        <thead>
+          <tr>
+            <th>Policy</th>
+            <th>After Stop</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Save automatically</td>
+            <td>
+              A non-empty meeting is saved locally when storage succeeds;
+              inspect the ended status.
+            </td>
+          </tr>
+          <tr>
+            <td>Ask each time</td>
+            <td>No automatic write; the person chooses whether to keep.</td>
+          </tr>
+          <tr>
+            <td>Don’t save</td>
+            <td>
+              No automatic save or keep prompt; the current session remains in
+              memory.
+            </td>
+          </tr>
+          <tr>
+            <td>Lab run</td>
+            <td>No saved meeting under any policy.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        This specimen concerns the meeting transcript. Questions and answers in
+        the separate Ask feature remain session-memory data and are excluded
+        from saved meetings; that feature is not introduced by this copy
+        correction.
+      </p>
+    </main>
+  </body>
+</html>
