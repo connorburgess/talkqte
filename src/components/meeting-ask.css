@@ -93,3 +93,7 @@
     min-height: 44px;
   }
 }
+.ask-citations .text-button,
+.ask-actions .text-button {
+  min-height: 44px;
+}
