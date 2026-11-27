@@ -4,7 +4,7 @@ Choose **Session type → Interview** in the Notebook before starting a live ses
 
 Prepare one real example: the situation, your contribution, a trade-off and the result. The cue policy asks for a brief nudge only when the supplied conversation clearly supports an unanswered part of an explicit request and the response is wrapping up or moving away. An unfinished answer or newly asked question alone should stay quiet. This is a model instruction, not a guarantee of semantic accuracy or useful timing.
 
-For a fictional interviewer request, “Explain the trade-off and what happened,” a possible nudge after a clearly concluded response could be “The question also asks about the trade-off.” This is an authored example, not observed model output. The policy forbids inventing experience, metrics, achievements or prepared stories, scoring the interview, guessing emotions or hiring likelihood, and suggesting concealment of assistance. The same guidance applies to human and AI interviewers.
+A useful nudge recalls a specific relevant detail already supplied, rather than repeating the question. For example, if the supplied conversation states that a queue added two engineer-days of monthly maintenance, that detail can help with an omitted trade-off after the response clearly concludes. This is an illustrative scenario, not a guarantee of live behavior. If the detail is absent or cannot be connected without guessing identity, the policy asks for silence. The policy forbids inventing experience, metrics, achievements or prepared stories, scoring the interview, guessing emotions or hiring likelihood, and suggesting concealment of assistance. The same guidance applies to human and AI interviewers.
 
 ## Sources and controls
 
