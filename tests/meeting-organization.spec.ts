@@ -107,6 +107,7 @@ test('keyboard reorder under search preserves hidden and archived entries, then 
   ).toEqual(['Archived Birch', 'Hidden Cedar']);
   expect(stored).toHaveLength(6);
   await page.getByRole('searchbox', { name: 'Search meetings' }).fill('');
+  await page.getByRole('button', { name: /^Filters/ }).click();
   await page.getByRole('checkbox', { name: /Show archived/ }).check();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Meetings', exact: true }).click();
@@ -170,13 +171,22 @@ test('date, archive, notes and search filters combine without treating transcrip
   page,
 }) => {
   await openFictional(page);
+  await page.getByRole('button', { name: /^Filters/ }).click();
   await page.getByRole('checkbox', { name: 'Has notes', exact: true }).check();
+  await expect(page.getByRole('button', { name: 'Filters (1)' })).toBeVisible();
   await expect
     .poll(() => titles(page))
     .toEqual(['Visible Apple', 'Visible Damson', 'Garden Fig']);
   await page.getByRole('checkbox', { name: /Show archived/ }).check();
   await page.getByLabel('From date', { exact: true }).fill('2026-01-12');
   await page.getByLabel('To date', { exact: true }).fill('2026-01-14');
+  await expect(page.getByRole('button', { name: 'Filters (4)' })).toBeVisible();
+  // Closing Filters keeps active filter chips and Clear filters visible.
+  await page.getByRole('button', { name: 'Filters (4)' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Active meeting filters' }),
+  ).toContainText('Has notes');
+  await page.getByRole('button', { name: 'Filters (4)' }).click();
   await expect
     .poll(() => titles(page))
     .toEqual(['Archived Birch', 'Visible Damson']);

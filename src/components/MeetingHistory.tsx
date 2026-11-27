@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
@@ -68,6 +69,8 @@ export function MeetingHistory({
   const [notesOnly, setNotesOnly] = useState(false);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersButton = useRef<HTMLButtonElement>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const dragHandles = useRef(new Map<string, HTMLButtonElement>());
@@ -889,6 +892,17 @@ export function MeetingHistory({
     (item) => item.archived,
   ).length;
   const filtered = notesOnly || !!fromDate || !!toDate;
+  const activeFilterCount =
+    (notesOnly ? 1 : 0) +
+    (fromDate ? 1 : 0) +
+    (toDate ? 1 : 0) +
+    (showArchived ? 1 : 0);
+  const clearAllFilters = () => {
+    setFromDate('');
+    setToDate('');
+    setNotesOnly(false);
+    setShowArchived(false);
+  };
   const invalidDates = !!fromDate && !!toDate && fromDate > toDate;
   const visibleMeetings = (listing?.meetings ?? []).filter((item) => {
     const when = new Date(item.startedAtMs);
@@ -963,115 +977,116 @@ export function MeetingHistory({
         }}
         onDrop={(event) => dropMeeting(event, folder, item.id)}
       >
-        <div
-          className="history-order-controls"
-          role="group"
-          aria-label={`Organize ${item.title}`}
-        >
+        {button}
+        <div className="history-row-tools">
+          <div
+            className="history-order-controls"
+            role="group"
+            aria-label={`Organize ${item.title}`}
+          >
+            <button
+              type="button"
+              className="icon-button history-drag-handle"
+              aria-label={`Drag ${item.title}`}
+              title="Drag to a folder or before another meeting. Or use Move up, Move down and Folder."
+              ref={(node) => {
+                if (node) dragHandles.current.set(item.id, node);
+                else dragHandles.current.delete(item.id);
+              }}
+              draggable={!busy}
+              disabled={busy}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(
+                  'application/x-talkqte-meeting-id',
+                  item.id,
+                );
+                event.dataTransfer.effectAllowed = 'move';
+                setDragging(item.id);
+              }}
+              onDragEnd={() => {
+                setDragging(null);
+                setDropTarget(null);
+              }}
+            >
+              <GripVertical size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Move ${item.title} up`}
+              title="Move up"
+              disabled={busy || index === 0}
+              onClick={() =>
+                void positionMeeting(
+                  item.id,
+                  folder,
+                  siblings[index - 1].id,
+                  'before',
+                )
+              }
+            >
+              <ArrowUp size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Move ${item.title} down`}
+              title="Move down"
+              disabled={busy || index === siblings.length - 1}
+              onClick={() =>
+                void positionMeeting(
+                  item.id,
+                  folder,
+                  siblings[index + 1].id,
+                  'after',
+                )
+              }
+            >
+              <ArrowDown size={15} aria-hidden="true" />
+            </button>
+          </div>
+          {folders.length > 0 && (
+            <select
+              ref={(node) => {
+                if (node) folderSelectors.current.set(item.id, node);
+                else folderSelectors.current.delete(item.id);
+              }}
+              className="history-row-folder"
+              aria-label={`Folder for ${item.title}`}
+              value={item.folder ?? ''}
+              disabled={busy}
+              onChange={(event) =>
+                void moveMeeting(item.id, event.target.value || null)
+              }
+            >
+              <option value="">Unfiled / Top</option>
+              {folders.map((folder) => (
+                <option key={folder} value={folder}>
+                  {folder}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
-            className="icon-button history-drag-handle"
-            aria-label={`Drag ${item.title}`}
-            title="Drag to a folder or before another meeting. Or use Move up, Move down and Folder."
-            ref={(node) => {
-              if (node) dragHandles.current.set(item.id, node);
-              else dragHandles.current.delete(item.id);
-            }}
-            draggable={!busy}
+            className="text-button history-archive-button"
+            aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
             disabled={busy}
-            onDragStart={(event) => {
-              event.dataTransfer.setData(
-                'application/x-talkqte-meeting-id',
-                item.id,
-              );
-              event.dataTransfer.effectAllowed = 'move';
-              setDragging(item.id);
-            }}
-            onDragEnd={() => {
-              setDragging(null);
-              setDropTarget(null);
-            }}
+            onClick={() => void toggleArchived(item.id, !item.archived)}
           >
-            <GripVertical size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Move ${item.title} up`}
-            title="Move up"
-            disabled={busy || index === 0}
-            onClick={() =>
-              void positionMeeting(
-                item.id,
-                folder,
-                siblings[index - 1].id,
-                'before',
-              )
-            }
-          >
-            <ArrowUp size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Move ${item.title} down`}
-            title="Move down"
-            disabled={busy || index === siblings.length - 1}
-            onClick={() =>
-              void positionMeeting(
-                item.id,
-                folder,
-                siblings[index + 1].id,
-                'after',
-              )
-            }
-          >
-            <ArrowDown size={16} aria-hidden="true" />
+            {item.archived ? 'Unarchive' : 'Archive'}
           </button>
         </div>
-        {button}
-        <button
-          type="button"
-          className="secondary-button history-archive-button"
-          aria-label={`${item.archived ? 'Unarchive' : 'Archive'} ${item.title}`}
-          disabled={busy}
-          onClick={() => void toggleArchived(item.id, !item.archived)}
-        >
-          {item.archived ? 'Unarchive' : 'Archive'}
-        </button>
-        {folders.length > 0 && (
-          <select
-            ref={(node) => {
-              if (node) folderSelectors.current.set(item.id, node);
-              else folderSelectors.current.delete(item.id);
-            }}
-            className="history-row-folder"
-            aria-label={`Folder for ${item.title}`}
-            value={item.folder ?? ''}
-            disabled={busy}
-            onChange={(event) =>
-              void moveMeeting(item.id, event.target.value || null)
-            }
-          >
-            <option value="">Unfiled / Top</option>
-            {folders.map((folder) => (
-              <option key={folder} value={folder}>
-                {folder}
-              </option>
-            ))}
-          </select>
-        )}
       </li>
     );
   };
 
   return (
     <div className="history">
-      <h1>Meetings</h1>
-      <p className="page-description">
-        Saved on this Mac. Drag to organize, or use Move up, Move down and
-        Folder.
-      </p>
+      <div className="history-page-head">
+        <h1>Meetings</h1>
+        <p className="page-description">Saved locally on this Mac.</p>
+      </div>
 
       <p className="visually-hidden" role="status">
         {notice}
@@ -1118,7 +1133,7 @@ export function MeetingHistory({
               {query && (
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="text-button history-clear-search"
                   onClick={() => {
                     setQuery('');
                     setSearchCollapsed({});
@@ -1128,6 +1143,20 @@ export function MeetingHistory({
                 </button>
               )}
             </div>
+            <button
+              ref={filtersButton}
+              type="button"
+              className={`secondary-button history-filters-btn${activeFilterCount > 0 ? ' has-active' : ''}`}
+              aria-expanded={filtersOpen || invalidDates}
+              aria-controls={`${id}-filters`}
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              <SlidersHorizontal size={14} aria-hidden="true" />
+              <span>
+                Filters
+                {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </span>
+            </button>
             {!creatingFolder && (
               <button
                 type="button"
@@ -1148,6 +1177,34 @@ export function MeetingHistory({
               </button>
             )}
           </div>
+
+          {activeFilterCount > 0 && !filtersOpen && !invalidDates && (
+            <div
+              className="history-active-filters"
+              role="region"
+              aria-label="Active meeting filters"
+            >
+              {fromDate && (
+                <span className="history-filter-chip">From {fromDate}</span>
+              )}
+              {toDate && (
+                <span className="history-filter-chip">To {toDate}</span>
+              )}
+              {notesOnly && (
+                <span className="history-filter-chip">Has notes</span>
+              )}
+              {showArchived && (
+                <span className="history-filter-chip">Including archived</span>
+              )}
+              <button
+                type="button"
+                className="text-button"
+                onClick={clearAllFilters}
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
 
           {creatingFolder && (
             <form
@@ -1200,63 +1257,71 @@ export function MeetingHistory({
               </div>
             </form>
           )}
-          <div
-            className="history-filter-row"
-            role="group"
-            aria-label="Filter meetings"
-          >
-            <label className="history-field">
-              From date
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
-              />
-            </label>
-            <label className="history-field">
-              To date
-              <input
-                type="date"
-                value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
-              />
-            </label>
-            <label className="history-check">
-              <input
-                type="checkbox"
-                checked={notesOnly}
-                onChange={(event) => setNotesOnly(event.target.checked)}
-              />
-              Has notes
-            </label>
-            {filtered && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setFromDate('');
-                  setToDate('');
-                  setNotesOnly(false);
-                }}
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
+          {(filtersOpen || invalidDates) && (
+            <div
+              id={`${id}-filters`}
+              className="history-filter-popover"
+              role="group"
+              aria-label="Filter meetings"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setFiltersOpen(false);
+                  filtersButton.current?.focus();
+                }
+              }}
+            >
+              <div className="history-filter-row">
+                <label className="history-field">
+                  From date
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(event) => setFromDate(event.target.value)}
+                  />
+                </label>
+                <label className="history-field">
+                  To date
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(event) => setToDate(event.target.value)}
+                  />
+                </label>
+                <label className="history-check">
+                  <input
+                    type="checkbox"
+                    checked={notesOnly}
+                    onChange={(event) => setNotesOnly(event.target.checked)}
+                  />
+                  Has notes
+                </label>
+                {(archivedCount > 0 || showArchived) && (
+                  <label className="history-check">
+                    <input
+                      type="checkbox"
+                      checked={showArchived}
+                      onChange={(event) =>
+                        setShowArchived(event.target.checked)
+                      }
+                    />
+                    <span>Show archived ({archivedCount})</span>
+                  </label>
+                )}
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={clearAllFilters}
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {invalidDates && (
             <p role="alert">From date must be on or before To date.</p>
-          )}
-          {(archivedCount > 0 || showArchived) && (
-            <div className="history-filter-row">
-              <label className="history-check">
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={(event) => setShowArchived(event.target.checked)}
-                />
-                <span>Show archived ({archivedCount})</span>
-              </label>
-            </div>
           )}
 
           {listing && listing.unreadable > 0 && (
