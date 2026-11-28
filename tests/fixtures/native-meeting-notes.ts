@@ -36,6 +36,9 @@ let release: (() => void) | undefined;
 let failNext: string | null = null;
 let refuseNext: string | null = null;
 let cancelled = false;
+let sentAttempts = 0;
+let validationFailed = false;
+let generation = 0;
 
 function notesDestination(provider: CueProvider): string {
   switch (provider) {
@@ -49,9 +52,9 @@ function notesDestination(provider: CueProvider): string {
 }
 
 /** Stands in for Rust's digest of exactly what would be sent. */
-const fingerprint = (current: Snapshot, include: boolean) => {
+const fingerprint = (current: Snapshot, include: boolean, retry = false) => {
   const prefs = currentPreferences();
-  return `fictional-${prefs.cueProvider}-${current.transcript.length}-${prefs.effectiveNotesModel}-${include ? current.notes : ''}`;
+  return `fictional-${retry ? `retry-${generation}-` : ''}${prefs.cueProvider}-${current.transcript.length}-${prefs.effectiveNotesModel}-${include ? current.notes : ''}`;
 };
 
 const baseFictionalDraft = {
@@ -102,7 +105,10 @@ export async function command(
     case 'meeting_notes_plan': {
       if (!current.live || current.status !== 'ended')
         throw 'Meeting notes can be written once a live session has ended. Nothing was sent.';
-      if (phase !== 'none')
+      const retry = Boolean((args as { retry?: boolean }).retry);
+      if (retry && (!validationFailed || sentAttempts !== 1 || customModel))
+        throw 'A retry cannot be bounded or is unavailable. Nothing was sent.';
+      if ((!retry && phase !== 'none') || (retry && phase !== 'failed'))
         throw 'Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.';
       const include = (args as { includeNotes: boolean }).includeNotes;
       const plan: MeetingNotesPlan = {
@@ -118,7 +124,9 @@ export async function command(
         spendCapMicroUsd: customModel ? null : 1_000_000,
         destination: notesDestination(provider),
         cueSpentMicroUsd: 12_000,
-        fingerprint: fingerprint(current, include),
+        fingerprint: fingerprint(current, include, retry),
+        retry,
+        priorReservedMicroUsd: retry ? 336_000 : 0,
       };
       if (include)
         plan.noteLines = current.notes
@@ -132,12 +140,19 @@ export async function command(
         refuseNext = null;
         throw refusal;
       }
-      const { includeNotes, fingerprint: confirmed } = args as {
+      const {
+        includeNotes,
+        fingerprint: confirmed,
+        retry = false,
+      } = args as {
         includeNotes: boolean;
         fingerprint: string;
+        retry?: boolean;
       };
-      if (confirmed !== fingerprint(current, includeNotes))
+      if (confirmed !== fingerprint(current, includeNotes, retry))
         throw 'What would be sent has changed since you looked (the transcript, your notes or the notes setting). Review it again. Nothing was sent.';
+      const priorPhase = phase;
+      generation++;
       cancelled = false;
       await publish({ meetingNotes: 'writing' });
       if (hold) {
@@ -146,15 +161,19 @@ export async function command(
       }
       // Stop waiting while the key was being read: nothing is sent.
       if (cancelled) {
-        await publish({ meetingNotes: 'none' });
+        await publish({ meetingNotes: priorPhase });
         throw 'Stopped before anything was sent. Nothing was sent.';
       }
+      sentAttempts++;
       if (failNext) {
+        validationFailed = failNext.includes('failed a check');
         failure = failNext;
         failNext = null;
         await publish({ meetingNotes: 'failed' });
         throw failure;
       }
+      validationFailed = false;
+      failure = null;
       draft = {
         ...structuredClone(baseFictionalDraft),
         spentMicroUsd: customModel ? null : 41_000,
@@ -178,6 +197,7 @@ export async function command(
           : {}),
         providerName,
         customModel,
+        retryAvailable: validationFailed && sentAttempts === 1,
       };
     case 'keep_meeting_notes':
       kept = (args as { markdown: string }).markdown;
@@ -214,6 +234,9 @@ export const meetingNotesTest = {
     draft = null;
     failure = null;
     kept = null;
+    sentAttempts = 0;
+    validationFailed = false;
+    generation = 0;
   },
 };
 

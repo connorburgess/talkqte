@@ -87,7 +87,8 @@
   font-size: 13.5px;
 }
 .meeting-notes-result,
-.meeting-notes-writing {
+.meeting-notes-writing,
+.meeting-notes-retry {
   display: grid;
   gap: var(--space-12);
   min-width: 0;
@@ -229,4 +230,11 @@
     transition: none;
     animation: none;
   }
+}
+
+.meeting-notes-retry {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
