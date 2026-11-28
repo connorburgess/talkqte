@@ -1085,6 +1085,7 @@ fn failed_fragmented_session() -> (Engine, u64, Prepared) {
     let mut engine = Engine::live();
     engine.start().unwrap();
     let session = engine.session();
+    engine.advance(235_000);
     for segment in fragmented_transcript() {
         engine.ingest(session, segment).unwrap();
     }
