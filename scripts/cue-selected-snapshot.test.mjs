@@ -11,9 +11,11 @@ import {
   INPUT_BYTES,
   FRAME_BYTES,
   selectedSnapshotInput,
+  selectedPriorContextInput,
   selectedSnapshotFrame,
   selectedSnapshotSchema,
   selectedSnapshotReply,
+  selectedPriorContextReply,
   buildSelectedSnapshotAnthropicParams,
   SELECTED_SNAPSHOT_RULE,
 } from './cue-selected-snapshot.mjs';
@@ -307,4 +309,106 @@ test('shared selected-mode string domain rejects all Cc except LF/TAB, with stri
       v.priorNotes[0].id = 'prior:file:' + id;
     });
   }
+});
+
+test('selected-prior-context-v2 accepts optional sessionMode:"interview" while inert v1 and invalid values fail closed', () => {
+  const v2Base = () => ({
+    ...input(),
+    inputContract: 'selected-prior-context-v2',
+  });
+
+  // Inert v1 stays unchanged and rejects sessionMode.
+  rejects((v) => {
+    v.sessionMode = 'interview';
+  });
+
+  // v2 accepts optional sessionMode:"interview" for both populated and 0-note controls.
+  for (const priorNotes of [v2Base().priorNotes, []]) {
+    const valid = { ...v2Base(), priorNotes, sessionMode: 'interview' };
+    const wire = JSON.parse(selectedPriorContextInput(valid));
+    assert.equal(wire.sessionMode, 'interview');
+    assert.deepEqual(wire.priorNotes, priorNotes);
+    assert.deepEqual(wire.events, valid.events);
+  }
+
+  // Meeting mode omits sessionMode; invalid values and extra fields fail closed.
+  for (const bad of [
+    'meeting',
+    'Interview',
+    'coaching',
+    '',
+    null,
+    false,
+    true,
+    0,
+    123,
+    {},
+    [],
+  ]) {
+    assert.throws(
+      () => selectedPriorContextInput({ ...v2Base(), sessionMode: bad }),
+      /invalid_selected_snapshot/,
+    );
+  }
+  assert.throws(
+    () =>
+      selectedPriorContextInput({
+        ...v2Base(),
+        sessionMode: 'interview',
+        extra: 'unexpected',
+      }),
+    /invalid_selected_snapshot/,
+  );
+
+  // Reply validation still requires a current speech anchor and <= 10 words in interview mode.
+  const interviewWithNote = { ...v2Base(), sessionMode: 'interview' };
+  const speechId = interviewWithNote.events[0].id;
+  const noteId = interviewWithNote.priorNotes[0].id;
+  assert.deepEqual(
+    selectedPriorContextReply(
+      {
+        action: 'show',
+        cue: 'Note: pack ships Friday.',
+        sourceIds: [speechId, noteId],
+      },
+      interviewWithNote,
+    ).sourceIds,
+    [speechId, noteId],
+  );
+  assert.throws(
+    () =>
+      selectedPriorContextReply(
+        {
+          action: 'show',
+          cue: 'Note: pack ships Friday.',
+          sourceIds: [noteId],
+        },
+        interviewWithNote,
+      ),
+    /invalid_selected_snapshot/,
+  );
+
+  // Exact 16 KiB serialized byte boundary includes sessionMode:"interview".
+  const padded = { ...v2Base(), sessionMode: 'interview' };
+  const template = structuredClone(padded.priorNotes[0]);
+  padded.priorNotes[0].text = 'b';
+  for (let n = 0; n < 8; n++) {
+    padded.priorNotes.push({
+      ...template,
+      id: `prior:file:pad-${n}`,
+      text: 'a'.repeat(1800),
+    });
+  }
+  const baseBytes = Buffer.byteLength(selectedPriorContextInput(padded));
+  const remaining = INPUT_BYTES - baseBytes;
+  padded.priorNotes[0].text = 'b'.repeat(1 + remaining);
+  assert.equal(
+    Buffer.byteLength(selectedPriorContextInput(padded)),
+    INPUT_BYTES,
+  );
+  padded.priorNotes[0].text += 'b';
+  assert.throws(
+    () => selectedPriorContextInput(padded),
+    /invalid_selected_snapshot/,
+  );
 });

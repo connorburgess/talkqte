@@ -104,6 +104,9 @@ impl Request {
         if !self.earlier_cues.is_empty() {
             value["earlierCues"] = json!(self.earlier_cues);
         }
+        if v2 && self.session_mode == super::SessionMode::Interview {
+            value["sessionMode"] = json!("interview");
+        }
         let text = value.to_string();
         if text.len() > SELECTED_SNAPSHOT_INPUT_BYTES {
             return Err(Failure::InvalidInput);
@@ -380,5 +383,79 @@ mod tests {
             r.sources.push(note);
         }
         assert_eq!(r.selected_snapshot_input(), Err(Failure::InvalidInput));
+    }
+
+    #[test]
+    fn selected_prior_v2_interview_mode_preserves_sources_and_byte_bounds() {
+        let with_note = request(7);
+        let meeting_wire: Value =
+            serde_json::from_str(&with_note.selected_prior_context_input().unwrap()).unwrap();
+        assert!(meeting_wire.get("sessionMode").is_none());
+
+        // v2 carries optional sessionMode:"interview" with notes and with 0 notes,
+        // matching the shared JS/Rust selected-context-interview-input.json fixture.
+        let interview_with_note = request(u64::MAX)
+            .with_session_mode(super::super::SessionMode::Interview)
+            .unwrap();
+        let interview_wire: Value =
+            serde_json::from_str(&interview_with_note.selected_prior_context_input().unwrap())
+                .unwrap();
+        let shared_fixture: Value = serde_json::from_str(include_str!(
+            "../../../scripts/fixtures/selected-context-interview-input.json"
+        ))
+        .unwrap();
+        assert_eq!(interview_wire, shared_fixture);
+        assert_eq!(interview_wire["sessionMode"], json!("interview"));
+        assert_eq!(interview_wire["events"], meeting_wire["events"]);
+
+        // Inert v1 stays unchanged and omits sessionMode.
+        let v1_wire: Value =
+            serde_json::from_str(&interview_with_note.selected_snapshot_input().unwrap()).unwrap();
+        assert!(v1_wire.get("sessionMode").is_none());
+
+        // Zero-note v2 control also preserves sessionMode:"interview" and never resurrects removed notes.
+        let mut zero_note = request(7);
+        zero_note.sources.pop();
+        let zero_interview = zero_note
+            .with_session_mode(super::super::SessionMode::Interview)
+            .unwrap();
+        let zero_wire: Value =
+            serde_json::from_str(&zero_interview.selected_prior_context_input().unwrap()).unwrap();
+        assert_eq!(zero_wire["sessionMode"], json!("interview"));
+        assert_eq!(zero_wire["priorNotes"], json!([]));
+
+        // Exact 16 KiB serialized boundary includes sessionMode bytes.
+        let mut bounded = request(7);
+        bounded.sources[1].text = String::new();
+        for n in 0..8 {
+            let mut note = bounded.sources[1].clone();
+            note.id = format!("prior:file:pad-{n}");
+            note.text = "a".repeat(1800);
+            bounded.sources.push(note);
+        }
+        bounded.sources[1].text = "b".into();
+        let meeting_size = bounded.selected_prior_context_input().unwrap().len();
+        let mut interview_bounded = bounded
+            .with_session_mode(super::super::SessionMode::Interview)
+            .unwrap();
+        let size = interview_bounded
+            .selected_prior_context_input()
+            .unwrap()
+            .len();
+        assert_eq!(size - meeting_size, r#","sessionMode":"interview""#.len());
+        let left = SELECTED_SNAPSHOT_INPUT_BYTES - size;
+        interview_bounded.sources[1].text = "b".repeat(1 + left);
+        assert_eq!(
+            interview_bounded
+                .selected_prior_context_input()
+                .unwrap()
+                .len(),
+            SELECTED_SNAPSHOT_INPUT_BYTES
+        );
+        interview_bounded.sources[1].text.push('b');
+        assert_eq!(
+            interview_bounded.selected_prior_context_input(),
+            Err(Failure::InvalidInput)
+        );
     }
 }

@@ -1,0 +1,23 @@
+{
+  "inputContract": "selected-prior-context-v2",
+  "events": [
+    {
+      "id": "transcript:current",
+      "speaker": "Speaker",
+      "text": "Can we send the pack Friday?"
+    }
+  ],
+  "priorNotes": [
+    {
+      "id": "prior:file:a",
+      "provider": "file",
+      "title": "Welcome pack review",
+      "date": "2026-11-01",
+      "snapshotRevision": "18446744073709551615",
+      "freshness": "not_verified",
+      "text": "Review needs two days."
+    }
+  ],
+  "existingCue": null,
+  "sessionMode": "interview"
+}
