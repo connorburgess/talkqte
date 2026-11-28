@@ -29,13 +29,16 @@ URLs, descriptions, locations, attendees, or the live session's meeting title.
 it does not start capture. **Start live session** then uses that title for the
 local session and kept-meeting record. **Clear** explicitly starts without the
 calendar title. Starting directly from the notebook while an offer is visible
-also uses the matched title. Titles never enter transcription or cue-provider
-requests. Turning Calendar prompts off clears the native pending title and offer.
+also uses the matched title. Calendar access does not itself send titles to transcription or cue providers.
+A title kept with a session can later accompany explicitly approved saved context. Turning Calendar prompts off clears the native pending title and offer.
 A newer disable or reset invalidates in-flight enable requests: a late permission
 reply cannot start an event query, and late query results cannot re-enable or
 persist the setting. An already-running OS request cannot be cancelled.
 The setting is backward compatible with settings version 1 and defaults to false.
 Lab runs use an unavailable source and never query or request Calendar access.
+
+The separate [notebook agenda](calendar-agenda.md) has its own default-off opt-in
+and wider event projection. It does not widen this prompt window or its notes scan.
 
 ## Acceptance and next blocker
 

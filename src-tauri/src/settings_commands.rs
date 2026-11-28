@@ -42,6 +42,10 @@ pub(crate) fn apply(runtime: &mut crate::Runtime, settings: &Settings) {
         settings.call_prompt_auto_start && !lab,
         &settings.call_prompt_not_for,
     );
+    runtime.calendar_agenda.restore(
+        settings.calendar_agenda && cfg!(target_os = "macos") && !lab,
+        settings.calendar_selected_ids.clone(),
+    );
     let calendar_on = settings.calendar_prompts && !crate::settings::lab_run();
     runtime.calendar.set_enabled(calendar_on);
     if !calendar_on {
@@ -138,6 +142,7 @@ pub(crate) async fn reset_settings(
         crate::companion::reset_drag(&app);
         crate::publish(&app, &mut runtime);
     }
+    crate::calendar_agenda_commands::emit_current(&app);
     crate::refresh_auto_prior_context(&app).await;
     crate::companion::refresh(&app);
     Ok(())
