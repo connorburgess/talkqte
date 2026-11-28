@@ -296,22 +296,24 @@
                 </div>
                 <section class="meeting-ask">
                   <div class="ask-header">
-                    <h2>Ask about recent discussion</h2>
+                    <h2>Ask about this meeting</h2>
                     <button type="button" class="text-button">
                       View transcript
                     </button>
                   </div>
                   <div class="ask-scope">
                     <p>
-                      Send to Anthropic · fictional-model. Uses the latest 3
-                      lines from this session. Model answers can be wrong.
+                      Send to Anthropic · fictional-model. Uses all 3 available
+                      transcript lines from this session, plus 0 prior
+                      exchanges. Model answers can be wrong.
                     </p>
                     <details>
                       <summary>Transcript scope and cost</summary>
                       <p>
-                        Recent excerpt covers 0:04–1:32 (capped at 200 lines /
-                        64 KiB). Older discussion outside this recent window is
-                        excluded.
+                        Whole available transcript: 0:04–1:32. The complete
+                        request must fit 128 KiB and its cost limit; no tail
+                        fallback. Prior answers are conversation, never
+                        evidence.
                       </p>
                     </details>
                   </div>

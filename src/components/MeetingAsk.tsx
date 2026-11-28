@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as qa from '../lib/meetingQa';
 import { clockTime, type Snapshot } from '../lib/types';
+import type { KeptMeeting } from '../lib/meetingHistory';
 import './meeting-ask.css';
 
 export function MeetingAsk({
   snapshot,
+  savedMeeting,
   onCitation,
   onViewTranscript,
 }: {
-  snapshot: Snapshot;
+  snapshot?: Snapshot;
+  savedMeeting?: KeptMeeting;
   onCitation: (id: string) => void;
   onViewTranscript?: () => void;
 }) {
+  const savedId = savedMeeting?.id;
+  const savedRevision = savedMeeting?.revision;
+  const saved =
+    savedId !== undefined && savedRevision !== undefined
+      ? { id: savedId, revision: savedRevision }
+      : undefined;
+  const transcript = savedMeeting
+    ? savedMeeting.transcript.map((line, index) => ({
+        ...line,
+        id: `saved-line-${index}`,
+      }))
+    : (snapshot?.transcript ?? []);
+  const identity = savedMeeting
+    ? `saved-${savedId}-${savedRevision}`
+    : `current-${snapshot?.session}`;
+  const latestScope = useRef<string | null>(null);
   const [scope, setScope] = useState<qa.QaScope | null>(null);
   const [entries, setEntries] = useState<qa.QaEntry[]>([]);
   const [question, setQuestion] = useState('');
@@ -19,6 +38,7 @@ export function MeetingAsk({
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState('');
   const generation = useRef(0);
+  const priorStatus = useRef(snapshot?.status);
   const active = useRef<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const history = useRef<HTMLDivElement>(null);
@@ -32,8 +52,9 @@ export function MeetingAsk({
     setPreparing(true);
     setScope(null);
     try {
-      const next = await qa.questionScope();
+      const next = await qa.questionScope(saved);
       if (turn === generation.current) {
+        latestScope.current = next.ticket;
         setScope(next);
       }
     } catch (e) {
@@ -41,8 +62,8 @@ export function MeetingAsk({
     } finally {
       if (turn === generation.current) setPreparing(false);
     }
-  }, []);
-  const lineCount = snapshot.transcript.length;
+  }, [savedId, savedRevision]);
+  const lineCount = transcript.length;
   useEffect(() => {
     generation.current++;
     const turn = generation.current;
@@ -52,18 +73,19 @@ export function MeetingAsk({
     setScope(null);
     setError('');
     void qa
-      .questionHistory()
+      .questionHistory(saved)
       .then((value) => {
         if (turn === generation.current) setEntries(value);
       })
       .catch(() => {});
     return () => {
       generation.current++;
-      if (active.current)
-        void qa.cancelQuestion(active.current).catch(() => {});
+      const ticket = active.current ?? latestScope.current;
+      if (ticket) void qa.cancelQuestion(ticket, saved, true).catch(() => {});
+      latestScope.current = null;
       active.current = null;
     };
-  }, [snapshot.session, snapshot.status]);
+  }, [identity]);
   const hasLines = lineCount > 0;
   useEffect(() => {
     if (!hasLines) {
@@ -72,7 +94,24 @@ export function MeetingAsk({
       return;
     }
     void refresh();
-  }, [hasLines, snapshot.session, snapshot.status, refresh]);
+  }, [hasLines, identity, refresh]);
+  useEffect(() => {
+    const previous = priorStatus.current;
+    priorStatus.current = snapshot?.status;
+    if (
+      savedMeeting ||
+      previous === snapshot?.status ||
+      snapshot?.status !== 'ended'
+    )
+      return;
+    // Stop retires the pending answer, not accepted conversational history.
+    generation.current++;
+    const ticket = active.current;
+    active.current = null;
+    setBusy(false);
+    if (ticket) void qa.cancelQuestion(ticket).catch(() => {});
+    void refresh();
+  }, [snapshot?.status, savedId, refresh]);
   async function send() {
     if (!scope || busy || !question.trim()) return;
     const turn = generation.current;
@@ -81,7 +120,7 @@ export function MeetingAsk({
     setBusy(true);
     setError('');
     try {
-      const answer = await qa.askQuestion(scope.ticket, sent);
+      const answer = await qa.askQuestion(scope.ticket, sent, saved);
       if (turn !== generation.current) return;
       setEntries((old) =>
         [...old, { question: sent, answer, scope }].slice(-10),
@@ -97,6 +136,25 @@ export function MeetingAsk({
       }
     }
   }
+  async function clearConversation() {
+    if (busy) return;
+    generation.current++;
+    const turn = generation.current;
+    setPreparing(true);
+    setScope(null);
+    setEntries([]);
+    try {
+      const next = await qa.questionScope(saved, true);
+      if (turn !== generation.current) return;
+      setScope(next);
+      latestScope.current = next.ticket;
+      setError('Conversation cleared. Ask budget allowances are unchanged.');
+    } catch (e) {
+      if (turn === generation.current) setError(String(e));
+    } finally {
+      if (turn === generation.current) setPreparing(false);
+    }
+  }
   async function cancel() {
     const token = active.current;
     if (!token) return;
@@ -104,7 +162,7 @@ export function MeetingAsk({
     active.current = null;
     setBusy(false);
     try {
-      await qa.cancelQuestion(token);
+      await qa.cancelQuestion(token, saved);
       setError('Stopped waiting. A request already sent may still be billed.');
     } catch (e) {
       setError(String(e));
@@ -114,20 +172,22 @@ export function MeetingAsk({
   const first = scope?.lines[0],
     last = scope?.lines.at(-1);
   const scopeCount = scope?.lines.length ?? 0;
-  const isLiveRunning = snapshot.live && snapshot.status === 'running';
+  const isLiveRunning = snapshot?.live && snapshot.status === 'running';
 
   if (lineCount === 0 && entries.length === 0) {
     return (
       <section className="meeting-ask is-empty" aria-labelledby="ask-heading">
         <div className="ask-empty">
           <h2 id="ask-heading">
-            {isLiveRunning
-              ? 'Waiting for transcript lines'
-              : 'Ask after the conversation starts'}
+            {savedMeeting
+              ? 'No transcript in this saved meeting'
+              : isLiveRunning
+                ? 'Waiting for transcript lines'
+                : 'Ask after the conversation starts'}
           </h2>
           <p className="muted">
-            Once transcript lines arrive, you can ask for a recap or check what
-            was just said. Opening Ask sends nothing.
+            When a transcript is available, you can ask about the meeting or
+            follow up. Opening Ask sends nothing.
           </p>
           {isLiveRunning && onViewTranscript && (
             <button
@@ -149,7 +209,7 @@ export function MeetingAsk({
   return (
     <section className="meeting-ask" aria-labelledby="ask-heading">
       <div className="ask-header">
-        <h2 id="ask-heading">Ask about recent discussion</h2>
+        <h2 id="ask-heading">Ask about this meeting</h2>
         {onViewTranscript && (
           <button
             type="button"
@@ -192,9 +252,7 @@ export function MeetingAsk({
                   const line = entry.scope.lines.find(
                     (value) => value.id === id,
                   );
-                  const available = snapshot.transcript.some(
-                    (value) => value.id === id,
-                  );
+                  const available = transcript.some((value) => value.id === id);
                   return (
                     line && (
                       <button
@@ -233,11 +291,13 @@ export function MeetingAsk({
           ref={input}
           id="ask-question"
           value={question}
-          maxLength={1000}
+          maxLength={2000}
           rows={2}
           disabled={busy}
-          placeholder="Ask for a recap or check what was just said…"
-          onChange={(event) => setQuestion(event.target.value)}
+          placeholder="Ask about this meeting, or follow up…"
+          onChange={(event) =>
+            setQuestion(Array.from(event.target.value).slice(0, 1000).join(''))
+          }
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&
@@ -276,33 +336,62 @@ export function MeetingAsk({
               {preparing ? 'Updating…' : 'Use latest transcript'}
             </button>
           )}
-          <span className="muted ask-char-count">{question.length}/1,000</span>
+          {entries.length > 0 && !busy && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() =>
+                void clearConversation().catch((e) => setError(String(e)))
+              }
+            >
+              Clear conversation
+            </button>
+          )}
+          <span className="muted ask-char-count">
+            {Array.from(question).length}/1,000
+          </span>
         </div>
         {scope && first && last && (
           <div className="ask-scope" id="ask-scope">
             <p>
-              Send to {scope.providerName} · {scope.model}. Uses the latest{' '}
-              {scopeCount} {scopeCount === 1 ? 'line' : 'lines'}
-              {scope.omitted ? ` of ${lineCount}` : ''} from this session. Model
-              answers can be wrong.
+              Send to {scope.providerName} · {scope.model}. Uses all{' '}
+              {scopeCount} available transcript{' '}
+              {scopeCount === 1 ? 'line' : 'lines'} from{' '}
+              {savedMeeting ? 'this saved meeting' : 'this session'}, plus{' '}
+              {scope.priorPairs} prior{' '}
+              {scope.priorPairs === 1 ? 'exchange' : 'exchanges'}. Model answers
+              can be wrong.
             </p>
             <details>
               <summary>Transcript scope and cost</summary>
               <p>
-                Recent excerpt covers {clockTime(first.atMs)}–
-                {clockTime(last.atMs)} (capped at 200 lines / 64 KiB).{' '}
-                {scope.omitted
-                  ? 'Earlier discussion is not included.'
-                  : 'Older discussion outside this recent window is excluded.'}{' '}
-                No saved notes, imported context or previous answers are sent.
+                Whole available selected transcript: {clockTime(first.atMs)}–
+                {clockTime(last.atMs)}. No tail-only fallback. The complete
+                serialized request must fit 128 KiB and its cost limit. Missing
+                or incorrect transcription is not recovered.
+              </p>
+              <p>
+                The latest three accepted question/answer pairs may be included,
+                up to 12 KiB; whole older pairs are omitted.{' '}
+                {scope.omittedPairs} earlier{' '}
+                {scope.omittedPairs === 1 ? 'exchange is' : 'exchanges are'}{' '}
+                excluded. Prior model answers help interpret follow-ups; only
+                transcript lines are evidence. No saved notes, imported context
+                or other meetings are sent.
               </p>
               <p>
                 Estimated maximum ${(scope.worstMicroUsd / 1000000).toFixed(3)}{' '}
                 for this question, not a billing guarantee. Provider retention
                 follows your provider account terms. Sending authorizes this
-                question and this excerpt separately from automatic cues.
-                Questions and answers stay in memory for this session and are
-                not added to the transcript, saved meetings or exports.
+                question and this whole transcript and disclosed conversation
+                separately from automatic cues. Ask is capped at 20 sends and $1
+                in cumulative worst-case estimates.{' '}
+                {savedMeeting
+                  ? 'The saved-meeting allowance spans all saved meetings until the app restarts.'
+                  : 'This session’s allowance resets only with a new session.'}{' '}
+                Navigation and clearing chat do not reset it. Questions and
+                answers stay in memory and are not added to the transcript,
+                saved meetings or exports.
               </p>
             </details>
           </div>

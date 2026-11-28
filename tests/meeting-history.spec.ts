@@ -355,7 +355,10 @@ test('Meetings lists kept meetings newest first, searches by text, and opens rea
   await page.getByRole('button', { name: 'Hide 1 likely echo line' }).click();
   await expect(page.getByText('Likely echo', { exact: true })).toHaveCount(0);
   // Read-only detail view has no editor textarea for notes or transcript.
-  await expect(page.locator('textarea')).toHaveCount(0);
+  await expect(page.locator('textarea:not(#ask-question)')).toHaveCount(0);
+  await expect(
+    page.getByRole('textbox', { name: 'Your question' }),
+  ).toBeEditable();
 });
 
 test('Meetings renames, exports the reviewed Markdown, and deletes with confirmation', async ({

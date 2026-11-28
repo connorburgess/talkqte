@@ -24,7 +24,7 @@ The intended flow is relevant context, an opportunity to respond, then the cue c
 
 ## Explicit live questions
 
-Alongside passive cues, the person can explicitly ask about recent discussion in the notebook while capture continues. This owner-authorized first slice uses the disclosed bounded current-session transcript excerpt only, with a normal Send action, grounded synthesis/citations or insufficient evidence. It does not promise whole-meeting knowledge, saved-meeting search or model accuracy. It preserves cue timing and Stop independently. See [live questions](docs/live-questions.md).
+Alongside passive cues, the person can explicitly ask about the whole available current or one selected saved meeting transcript, with bounded accepted Q&A for follow-ups. A normal Send action authorizes each request separately. Oversized or truncated sources are refused rather than silently using a tail. Prior answers are conversational context, never evidence; only supplied transcript lines may be cited. This does not promise complete capture, cross-meeting search or model accuracy. Cue timing and Stop remain independent. See [live questions](docs/live-questions.md).
 
 ## Goal and first proof
 

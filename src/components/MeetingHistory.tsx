@@ -40,6 +40,7 @@ import {
   type KeptSummary,
 } from '../lib/meetingHistory';
 import { clockTime } from '../lib/types';
+import { SavedMeetingAsk } from './SavedMeetingAsk';
 import { SpeakerChip } from './SpeakerChip';
 import {
   formatTurnTime,
@@ -769,7 +770,15 @@ export function MeetingHistory({
           )}
         </section>
 
+        <SavedMeetingAsk
+          meeting={selected}
+          onRevealTranscript={() => setShowEchoes(true)}
+        />
+
         {(() => {
+          const originalIndices = new Map(
+            selected.transcript.map((line, index) => [line, index]),
+          );
           const spokenTranscript = selected.transcript.filter(
             (line) => !line.echo,
           );
@@ -782,6 +791,7 @@ export function MeetingHistory({
             <section
               className="history-section"
               aria-labelledby={`${id}-transcript-heading`}
+              id="saved-meeting-transcript"
             >
               <div className="history-section-head">
                 <h2 id={`${id}-transcript-heading`}>
@@ -808,11 +818,10 @@ export function MeetingHistory({
                     visibleTranscript.map(
                       (
                         line,
-                        index,
                       ): GroupableLine & {
                         line: (typeof visibleTranscript)[number];
                       } => ({
-                        id: `${line.atMs}-${index}`,
+                        id: `saved-line-${originalIndices.get(line)}`,
                         atMs: line.atMs,
                         text: line.text,
                         speaker:
@@ -853,7 +862,12 @@ export function MeetingHistory({
                             </span>
                             <time>{clockTime(line.atMs)}</time>
                           </div>
-                          <p>{line.text}</p>
+                          <p
+                            id={`saved-transcript-${selected.id}-${selected.revision}-${turn.id}`}
+                            tabIndex={-1}
+                          >
+                            {line.text}
+                          </p>
                         </article>
                       );
                     }
@@ -908,6 +922,8 @@ export function MeetingHistory({
                                     {lIndex > 0 ? ' ' : null}
                                     <span
                                       className="transcript-line"
+                                      id={`saved-transcript-${selected.id}-${selected.revision}-${lineKey}`}
+                                      tabIndex={-1}
                                       data-at-ms={line.atMs}
                                       title={clockTime(line.atMs)}
                                     >

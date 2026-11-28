@@ -8,7 +8,7 @@ The current public objective is to explain the idea with a clearly labeled ficti
 
 ## Explicit questions checkpoint — 27 November 2026
 
-The bounded current-session Ask slice has offline scope/lifecycle/provider and fictional browser acceptance; it does not establish live usefulness. [Live questions](live-questions.md) documents the separate Send authorization, exclusions, memory-only history and tests. Next blocker: verify grounded synthesis and insufficient evidence on separately approved fictional live inputs, then native dock-to-notebook focus, Stop and assistive access with cost/latency evidence. Whole-session retrieval and saved-meeting Q&A remain open.
+The bounded current-session Ask slice has offline scope/lifecycle/provider and fictional browser acceptance; it does not establish live usefulness. [Live questions](live-questions.md) documents the separate Send authorization, exclusions, memory-only history and tests. Next blocker: verify grounded synthesis and insufficient evidence on separately approved fictional live inputs, then native dock-to-notebook focus, Stop and assistive access with cost/latency evidence. Whole available current/selected saved transcript Ask and bounded conversational follow-ups now have explicit byte/cost/source boundaries; oversized/truncated sources are refused. Saved allowances span the app process rather than navigation. The next acceptance remains measured grounded provider behavior and native accessibility/cancellation, not a claim of dependable overall assessment.
 
 ## Current provider checkpoint — 20 November 2026
 
