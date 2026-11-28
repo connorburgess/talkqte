@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -45,6 +45,11 @@ import { KeepMeetingChoice } from './components/KeepMeetingChoice';
 import { KeepInHistory } from './components/KeepInHistory';
 import { MeetingHistory } from './components/MeetingHistory';
 import { SpeakerChip } from './components/SpeakerChip';
+import {
+  formatTurnTime,
+  groupTranscriptTurns,
+  type GroupableLine,
+} from './lib/transcriptTurns';
 import { MeetingHistorySettings } from './components/MeetingHistorySettings';
 import { MeetingNotes } from './components/MeetingNotes';
 import { MeetingAsk } from './components/MeetingAsk';
@@ -2647,6 +2652,27 @@ function Notebook() {
                       const visibleLines = showEchoes
                         ? allLines
                         : allLines.filter(({ echo }) => !echo || echo.kept);
+                      const groupedTurns = groupTranscriptTurns(
+                        visibleLines.map(
+                          ({
+                            segment,
+                            echo,
+                          }): GroupableLine & {
+                            segment: Segment;
+                            echo?: EchoLine;
+                          } => ({
+                            id: segment.id,
+                            atMs: segment.atMs,
+                            text: segment.text,
+                            speaker: segment.speaker,
+                            speakerId: segment.speakerId,
+                            isEcho: !!(echo && !echo.kept),
+                            partial: segment.partial,
+                            segment,
+                            echo,
+                          }),
+                        ),
+                      );
                       return (
                         <>
                           {echoCount > 0 && (
@@ -2663,92 +2689,164 @@ function Notebook() {
                               </button>
                             </div>
                           )}
-                          {visibleLines.length ? (
-                            visibleLines.map(({ segment, echo }) => (
-                              <article
-                                className={`transcript-segment${echo && !echo.kept ? ' is-echo' : ''}${citedLine === segment.id ? ' is-cited' : ''}`}
-                                key={segment.id}
-                                id={`transcript-line-${segment.id}`}
-                                tabIndex={-1}
-                              >
-                                <div className="transcript-segment-head">
-                                  {segment.speakerId !== undefined ? (
-                                    <SpeakerChip
-                                      speakerId={segment.speakerId}
-                                      label={
-                                        state.speakerNames?.[
-                                          segment.speakerId
-                                        ] ?? segment.speaker
-                                      }
-                                      disabled={busy}
-                                      isEditing={
-                                        editingSpeaker?.key === segment.id &&
-                                        editingSpeaker.speakerId ===
-                                          segment.speakerId
-                                      }
-                                      onStartEdit={() =>
-                                        setEditingSpeaker({
-                                          key: segment.id,
-                                          speakerId: segment.speakerId!,
-                                        })
-                                      }
-                                      onCancelEdit={() =>
-                                        setEditingSpeaker(null)
-                                      }
-                                      onRename={async (speakerId, name) => {
-                                        await bridge.command('rename_speaker', {
-                                          session: state.session,
-                                          speakerId,
-                                          name,
-                                        });
-                                        setEditingSpeaker(null);
-                                      }}
-                                    />
-                                  ) : (
-                                    <strong>{segment.speaker}</strong>
-                                  )}
-                                  <time>{clockTime(segment.atMs)}</time>
-                                  {echo && !echo.kept && (
-                                    <span className="transcript-echo-label">
-                                      Likely an echo of Them · not used for cues
-                                    </span>
-                                  )}
-                                </div>
-                                <p>{segment.text}</p>
-                                {echo && !echo.kept && (
-                                  <div className="transcript-echo-actions">
-                                    <button
-                                      className="secondary-button"
-                                      disabled={busy}
-                                      onClick={() =>
-                                        void run(() =>
-                                          bridge.command('resolve_echo_line', {
-                                            id: segment.id,
-                                            keep: true,
-                                          }),
-                                        )
-                                      }
-                                    >
-                                      It was me
-                                    </button>
-                                    <button
-                                      className="secondary-button transcript-echo-remove"
-                                      disabled={busy}
-                                      onClick={() =>
-                                        void run(() =>
-                                          bridge.command('resolve_echo_line', {
-                                            id: segment.id,
-                                            keep: false,
-                                          }),
-                                        )
-                                      }
-                                    >
-                                      Remove
-                                    </button>
+                          {groupedTurns.length ? (
+                            groupedTurns.map((turn) => {
+                              if (turn.isEcho) {
+                                const { segment } = turn.lines[0];
+                                return (
+                                  <article
+                                    className={`transcript-segment is-echo${citedLine === segment.id ? ' is-cited' : ''}`}
+                                    key={segment.id}
+                                    id={`transcript-line-${segment.id}`}
+                                    tabIndex={-1}
+                                  >
+                                    <div className="transcript-segment-head">
+                                      <strong>{segment.speaker}</strong>
+                                      <time>{clockTime(segment.atMs)}</time>
+                                      <span className="transcript-echo-label">
+                                        Likely an echo of Them · not used for
+                                        cues
+                                      </span>
+                                    </div>
+                                    <p>{segment.text}</p>
+                                    <div className="transcript-echo-actions">
+                                      <button
+                                        className="secondary-button"
+                                        disabled={busy}
+                                        onClick={() =>
+                                          void run(() =>
+                                            bridge.command(
+                                              'resolve_echo_line',
+                                              {
+                                                id: segment.id,
+                                                keep: true,
+                                              },
+                                            ),
+                                          )
+                                        }
+                                      >
+                                        It was me
+                                      </button>
+                                      <button
+                                        className="secondary-button transcript-echo-remove"
+                                        disabled={busy}
+                                        onClick={() =>
+                                          void run(() =>
+                                            bridge.command(
+                                              'resolve_echo_line',
+                                              {
+                                                id: segment.id,
+                                                keep: false,
+                                              },
+                                            ),
+                                          )
+                                        }
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  </article>
+                                );
+                              }
+                              const displaySpeaker =
+                                turn.speakerId !== undefined
+                                  ? (state.speakerNames?.[turn.speakerId] ??
+                                    turn.speaker)
+                                  : turn.speaker;
+                              return (
+                                <article
+                                  className="transcript-segment"
+                                  key={turn.id}
+                                >
+                                  <div className="transcript-segment-head">
+                                    {turn.speakerId !== undefined ? (
+                                      <SpeakerChip
+                                        speakerId={turn.speakerId}
+                                        label={displaySpeaker}
+                                        disabled={busy}
+                                        isEditing={
+                                          editingSpeaker?.key === turn.id &&
+                                          editingSpeaker.speakerId ===
+                                            turn.speakerId
+                                        }
+                                        onStartEdit={() =>
+                                          setEditingSpeaker({
+                                            key: turn.id,
+                                            speakerId: turn.speakerId!,
+                                          })
+                                        }
+                                        onCancelEdit={() =>
+                                          setEditingSpeaker(null)
+                                        }
+                                        onRename={async (speakerId, name) => {
+                                          await bridge.command(
+                                            'rename_speaker',
+                                            {
+                                              session: state.session,
+                                              speakerId,
+                                              name,
+                                            },
+                                          );
+                                          setEditingSpeaker(null);
+                                        }}
+                                      />
+                                    ) : (
+                                      <strong>
+                                        {displaySpeaker || 'Unknown speaker'}
+                                      </strong>
+                                    )}
+                                    <time>
+                                      {formatTurnTime(
+                                        turn.startAtMs,
+                                        turn.endAtMs,
+                                      )}
+                                    </time>
                                   </div>
-                                )}
-                              </article>
-                            ))
+                                  <div className="transcript-turn-body">
+                                    {turn.paragraphs.map(
+                                      (paragraph, pIndex) => (
+                                        <p
+                                          key={paragraph[0].id}
+                                          className="transcript-paragraph"
+                                          data-paragraph-index={pIndex}
+                                        >
+                                          {paragraph.map(
+                                            ({ segment }, lIndex) => {
+                                              const isCited =
+                                                citedLine === segment.id;
+                                              return (
+                                                <Fragment key={segment.id}>
+                                                  {lIndex > 0 ? ' ' : null}
+                                                  <span
+                                                    id={`transcript-line-${segment.id}`}
+                                                    className={`transcript-line${isCited ? ' is-cited' : ''}${segment.partial ? ' is-partial' : ''}`}
+                                                    tabIndex={-1}
+                                                    data-line-id={segment.id}
+                                                    data-at-ms={segment.atMs}
+                                                    title={clockTime(
+                                                      segment.atMs,
+                                                    )}
+                                                  >
+                                                    {isCited && (
+                                                      <time className="transcript-line-cited-time">
+                                                        {clockTime(
+                                                          segment.atMs,
+                                                        )}
+                                                      </time>
+                                                    )}
+                                                    {segment.text}
+                                                  </span>
+                                                </Fragment>
+                                              );
+                                            },
+                                          )}
+                                        </p>
+                                      ),
+                                    )}
+                                  </div>
+                                </article>
+                              );
+                            })
                           ) : echoCount > 0 ? null : (
                             <div className="empty-inline">
                               <MessageCircle size={25} />

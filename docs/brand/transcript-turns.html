@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Transcript turn grouping · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/styles.css" />
+    <link rel="stylesheet" href="../../src/components/meeting-ask.css" />
+    <style>
+      body {
+        padding: var(--space-16);
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: var(--space-32);
+      }
+      section {
+        min-width: 0;
+        padding: var(--space-16);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
+        background: var(--paper);
+      }
+      h2 {
+        font-size: 16px;
+        margin-bottom: var(--space-8);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Transcript turn grouping · built states</h1>
+    <p class="small muted">
+      Fictional UI specimens using shared app tokens and styles. Consecutive
+      same-source/speaker segments flow as readable turns while keeping
+      immutable line IDs and timestamps for Ask and cue citations.
+    </p>
+    <main>
+      <section>
+        <h2>Grouped turns · multi-paragraph &amp; citation highlight</h2>
+        <div class="transcript">
+          <article class="transcript-segment">
+            <div class="transcript-segment-head">
+              <strong>You</strong>
+              <time>0:10–0:26</time>
+            </div>
+            <div class="transcript-turn-body">
+              <p class="transcript-paragraph">
+                <span class="transcript-line" title="0:10"
+                  >On the fictional greenhouse rollout we hit a retry storm
+                  during the weekend import.</span
+                >
+                <span class="transcript-line is-cited" title="0:16"
+                  ><time class="transcript-line-cited-time">0:16</time>I added
+                  an idempotency key per batch and bounded the queue so
+                  duplicates dropped cleanly.</span
+                >
+              </p>
+              <p class="transcript-paragraph">
+                <span class="transcript-line" title="0:26"
+                  >After that change, duplicate alerts fell from forty a week to
+                  zero.</span
+                >
+              </p>
+            </div>
+          </article>
+          <article class="transcript-segment">
+            <div class="transcript-segment-head">
+              <button type="button" class="transcript-speaker-chip">
+                <strong>Priya</strong>
+              </button>
+              <time>0:30–0:34</time>
+            </div>
+            <div class="transcript-turn-body">
+              <p class="transcript-paragraph">
+                <span class="transcript-line" title="0:30"
+                  >How did you validate the dry-run output?</span
+                >
+                <span class="transcript-line is-partial" title="0:34"
+                  >Did it slow down the normal nightly sync…</span
+                >
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section>
+        <h2>Boundaries · long gap, unknown speaker &amp; echo isolation</h2>
+        <div class="transcript">
+          <article class="transcript-segment">
+            <div class="transcript-segment-head">
+              <strong>You</strong>
+              <time>1:05</time>
+            </div>
+            <div class="transcript-turn-body">
+              <p class="transcript-paragraph">
+                <span class="transcript-line" title="1:05"
+                  >To follow up after the pause, dry-run stayed on for one
+                  week.</span
+                >
+              </p>
+            </div>
+          </article>
+          <article class="transcript-segment is-echo">
+            <div class="transcript-segment-head">
+              <strong>You</strong>
+              <time>1:08</time>
+              <span class="transcript-echo-label"
+                >Likely an echo of Them · not used for cues</span
+              >
+            </div>
+            <p>Did it slow down the normal nightly sync?</p>
+          </article>
+          <article class="transcript-segment">
+            <div class="transcript-segment-head">
+              <strong>Unknown speaker</strong>
+              <time>1:12</time>
+            </div>
+            <div class="transcript-turn-body">
+              <p class="transcript-paragraph">
+                <span class="transcript-line" title="1:12"
+                  >Could we check the lighting schedule too?</span
+                >
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

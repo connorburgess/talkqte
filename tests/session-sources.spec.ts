@@ -438,9 +438,14 @@ test('speaker rename preserves failed drafts, retries, resets, and keeps keyboar
   await expect(input).toHaveValue('Priya Patel');
   await expect(input).toBeEnabled();
   await transcript.getByRole('button', { name: 'Save', exact: true }).click();
+  // Consecutive segments from Speaker 1 (1s, 2s) share one turn header.
   await expect(
     transcript.getByRole('button', { name: 'Rename Priya Patel' }),
-  ).toHaveCount(2);
+  ).toHaveCount(1);
+  await expect(transcript).toContainText(
+    'I will check the fictional garden gate.',
+  );
+  await expect(transcript).toContainText('I can bring a spare key.');
   await expect(
     transcript.getByRole('button', { name: 'Rename Priya Patel' }).first(),
   ).toBeFocused();
@@ -452,7 +457,7 @@ test('speaker rename preserves failed drafts, retries, resets, and keeps keyboar
   await input.press('Enter');
   await expect(
     transcript.getByRole('button', { name: 'Rename Speaker 1' }),
-  ).toHaveCount(2);
+  ).toHaveCount(1);
   await transcript
     .getByRole('button', { name: 'Rename Speaker 1' })
     .first()
