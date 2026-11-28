@@ -5,6 +5,8 @@ export interface Segment {
   speaker: string;
   speakerId?: number;
   text: string;
+  /** Optional live interim/partial state; finalized segments omit or set false. */
+  partial?: boolean;
 }
 /** Only the cited sources, not the evaluator's entire selected context. */
 export interface CueSource {

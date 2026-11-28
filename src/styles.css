@@ -1176,7 +1176,10 @@ svg {
   font-size: 12.5px;
 }
 .transcript-segment {
-  padding: var(--space-12) 0;
+  padding: var(--space-16) 0;
+}
+.transcript-segment:first-child {
+  padding-top: var(--space-8);
 }
 .transcript-segment.is-cited {
   margin: var(--space-8) 0;
@@ -1193,8 +1196,9 @@ svg {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
+  color: var(--ink);
 }
 .transcript-segment-head time {
   margin-left: auto;
@@ -1205,10 +1209,44 @@ svg {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.transcript-segment p {
+.transcript-turn-body {
+  margin-top: var(--space-8);
+  max-width: 68ch;
+}
+.transcript-segment p,
+.transcript-paragraph {
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.65;
   margin-top: var(--space-4);
+}
+.transcript-turn-body .transcript-paragraph {
+  margin-top: 0;
+}
+.transcript-paragraph + .transcript-paragraph {
+  margin-top: var(--space-8);
+}
+.transcript-line {
+  border-radius: var(--radius-control);
+}
+.transcript-line.is-partial {
+  color: var(--muted);
+}
+.transcript-line.is-cited {
+  display: block;
+  margin: var(--space-8) 0;
+  padding: var(--space-8) var(--space-12);
+  background: var(--cue-asked-surface);
+  color: var(--ink);
+  border: 1.5px solid var(--accent-ink);
+  border-radius: var(--radius-panel);
+}
+.transcript-line-cited-time {
+  margin-right: var(--space-8);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .transcript-segment.is-echo {
   margin: var(--space-8) 0;

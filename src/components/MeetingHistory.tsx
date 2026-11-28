@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   ArrowDown,
@@ -41,6 +41,11 @@ import {
 } from '../lib/meetingHistory';
 import { clockTime } from '../lib/types';
 import { SpeakerChip } from './SpeakerChip';
+import {
+  formatTurnTime,
+  groupTranscriptTurns,
+  type GroupableLine,
+} from '../lib/transcriptTurns';
 import './meeting-history.css';
 
 function sourceDescription(meeting: KeptMeeting) {
@@ -799,51 +804,124 @@ export function MeetingHistory({
                 <p className="history-help">No transcript lines.</p>
               ) : visibleTranscript.length === 0 ? null : (
                 <div className="transcript">
-                  {visibleTranscript.map((line, index) => (
-                    <article
-                      key={`${line.atMs}-${index}`}
-                      className={`transcript-segment${line.echo ? ' is-echo' : ''}`}
-                    >
-                      <div className="transcript-segment-head">
-                        {line.speakerId !== undefined ? (
-                          <SpeakerChip
-                            speakerId={line.speakerId}
-                            label={
-                              selected.speakerNames?.[line.speakerId] ??
-                              `Speaker ${line.speakerId + 1}`
-                            }
-                            disabled={busy}
-                            isEditing={
-                              editingSpeaker?.key === `${line.atMs}-${index}` &&
-                              editingSpeaker.speakerId === line.speakerId
-                            }
-                            onStartEdit={() => {
-                              setError('');
-                              setEditingSpeaker({
-                                key: `${line.atMs}-${index}`,
-                                speakerId: line.speakerId!,
-                              });
-                            }}
-                            onCancelEdit={() => setEditingSpeaker(null)}
-                            onRename={submitSpeakerRename}
-                          />
-                        ) : (
-                          both && (
-                            <span>
-                              {line.label === 'them' ? 'Them' : 'You'}
+                  {groupTranscriptTurns(
+                    visibleTranscript.map(
+                      (
+                        line,
+                        index,
+                      ): GroupableLine & {
+                        line: (typeof visibleTranscript)[number];
+                      } => ({
+                        id: `${line.atMs}-${index}`,
+                        atMs: line.atMs,
+                        text: line.text,
+                        speaker:
+                          line.speakerId !== undefined
+                            ? (selected.speakerNames?.[line.speakerId] ??
+                              `Speaker ${line.speakerId + 1}`)
+                            : line.label === 'them'
+                              ? 'Them'
+                              : line.label === 'you'
+                                ? 'You'
+                                : '',
+                        speakerId: line.speakerId,
+                        source: line.label
+                          ? line.label
+                          : !both && line.speakerId === undefined
+                            ? 'single'
+                            : undefined,
+                        isEcho: !!line.echo,
+                        line,
+                      }),
+                    ),
+                  ).map((turn) => {
+                    if (turn.isEcho) {
+                      const { line } = turn.lines[0];
+                      return (
+                        <article
+                          key={turn.id}
+                          className="transcript-segment is-echo"
+                        >
+                          <div className="transcript-segment-head">
+                            {both && (
+                              <strong>
+                                {line.label === 'them' ? 'Them' : 'You'}
+                              </strong>
+                            )}
+                            <span className="transcript-echo-label">
+                              Likely echo
                             </span>
-                          )
-                        )}
-                        {line.echo && (
-                          <span className="transcript-echo-label">
-                            Likely echo
-                          </span>
-                        )}
-                        <time>{clockTime(line.atMs)}</time>
-                      </div>
-                      <p>{line.text}</p>
-                    </article>
-                  ))}
+                            <time>{clockTime(line.atMs)}</time>
+                          </div>
+                          <p>{line.text}</p>
+                        </article>
+                      );
+                    }
+                    const displaySpeaker =
+                      turn.speakerId !== undefined
+                        ? (selected.speakerNames?.[turn.speakerId] ??
+                          `Speaker ${turn.speakerId + 1}`)
+                        : turn.speaker;
+                    return (
+                      <article key={turn.id} className="transcript-segment">
+                        <div className="transcript-segment-head">
+                          {turn.speakerId !== undefined ? (
+                            <SpeakerChip
+                              speakerId={turn.speakerId}
+                              label={displaySpeaker}
+                              disabled={busy}
+                              isEditing={
+                                editingSpeaker?.key === turn.id &&
+                                editingSpeaker.speakerId === turn.speakerId
+                              }
+                              onStartEdit={() => {
+                                setError('');
+                                setEditingSpeaker({
+                                  key: turn.id,
+                                  speakerId: turn.speakerId!,
+                                });
+                              }}
+                              onCancelEdit={() => setEditingSpeaker(null)}
+                              onRename={submitSpeakerRename}
+                            />
+                          ) : (
+                            both && (
+                              <strong>
+                                {displaySpeaker || 'Unknown speaker'}
+                              </strong>
+                            )
+                          )}
+                          <time>
+                            {formatTurnTime(turn.startAtMs, turn.endAtMs)}
+                          </time>
+                        </div>
+                        <div className="transcript-turn-body">
+                          {turn.paragraphs.map((paragraph, pIndex) => (
+                            <p
+                              key={paragraph[0].id}
+                              className="transcript-paragraph"
+                              data-paragraph-index={pIndex}
+                            >
+                              {paragraph.map(
+                                ({ id: lineKey, line }, lIndex) => (
+                                  <Fragment key={lineKey}>
+                                    {lIndex > 0 ? ' ' : null}
+                                    <span
+                                      className="transcript-line"
+                                      data-at-ms={line.atMs}
+                                      title={clockTime(line.atMs)}
+                                    >
+                                      {line.text}
+                                    </span>
+                                  </Fragment>
+                                ),
+                              )}
+                            </p>
+                          ))}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </section>
