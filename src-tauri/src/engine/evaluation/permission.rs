@@ -575,6 +575,10 @@ impl Engine {
                 });
         if can_narrow {
             self.invalidate_evaluation();
+            // Evaluated repeat keys include cue wording; keep independent
+            // phrase-rule/Asked-you bookkeeping, not derived note text.
+            self.last_shown
+                .retain(|(key, _)| !key.starts_with("Evaluated:"));
             self.evaluated_cue = None;
             self.state.cue = None;
             self.unshown = None;

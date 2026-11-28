@@ -126,8 +126,10 @@ pub(crate) fn withdraw_visible_note_cue(engine: &mut Engine) {
         engine.state.cue.is_some(),
         "scripted note-backed cue was visible"
     );
+    assert_eq!(engine.growth().last_shown, 1);
     engine.set_notes(vec![]);
     assert!(engine.state.cue.is_none());
+    assert_eq!(engine.growth().last_shown, 0);
     said(engine, 3, "The fictional team has moved to maintenance.");
     settle(engine);
 }
