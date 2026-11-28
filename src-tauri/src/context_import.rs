@@ -168,6 +168,7 @@ mod tests {
                 title: "Gate sign".into(),
                 source_date: String::new(),
                 excerpt: "A sign might cost less.".into(),
+                original_chars: None,
                 revision: 1,
             }])
         }

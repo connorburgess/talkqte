@@ -295,6 +295,9 @@ export function ContextNotes({
       const parts = [
         outcome.added ? `${outcome.added} imported` : '',
         outcome.updated ? `${outcome.updated} updated` : '',
+        outcome.shortened
+          ? `${outcome.shortened} shortened to first 2,000 characters`
+          : '',
         outcome.unchanged ? `${outcome.unchanged} already imported` : '',
         outcome.rejected
           ? `${outcome.rejected} skipped (invalid source or no text)`
@@ -547,7 +550,20 @@ export function ContextNotes({
                       )}
                     />
                   )}
+                  {item.originalChars && (
+                    <span className="context-excerpt-chip small">
+                      Excerpt · 2,000 / {item.originalChars.toLocaleString()}{' '}
+                      chars
+                    </span>
+                  )}
                   <p>{item.excerpt}</p>
+                  {item.originalChars && (
+                    <p className="muted small">
+                      Excerpt only: kept first 2,000 of{' '}
+                      {item.originalChars.toLocaleString()} characters. The rest
+                      of the original note was not imported.
+                    </p>
+                  )}
                 </div>
                 <div className="context-item-actions">
                   {item.provider === 'history' && bridge.desktop && (
@@ -660,6 +676,8 @@ export function ContextNotes({
         {pickedFrom === 'granola' && picked && picked.notes.length > 0 && (
           <p className="small">
             Choose up to 10 notes per import. Keep up to 20 in this session.
+            Each imported note keeps up to 2,000 characters; longer notes are
+            shortened on import.
           </p>
         )}
         {picked && picked.skipped > 0 && (
@@ -745,6 +763,12 @@ export function ContextNotes({
                     <time className="muted small" dateTime={note.sourceDate}>
                       {note.sourceDate}
                     </time>
+                  )}
+                  {note.originalChars && (
+                    <span className="muted small">
+                      Shortened on import: keeps first 2,000 of{' '}
+                      {note.originalChars.toLocaleString()} characters
+                    </span>
                   )}
                   {note.preview && (
                     <span

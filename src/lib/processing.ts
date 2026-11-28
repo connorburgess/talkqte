@@ -9,6 +9,8 @@ export interface ProcessingNote {
   revision: number;
   title: string;
   sourceDate: string;
+  /** Original trimmed character count when shortened to 2,000 characters. */
+  originalChars?: number;
 }
 export type NoteSelection = Pick<
   ProcessingNote,

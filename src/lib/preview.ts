@@ -395,13 +395,24 @@ export function importContextNotes(
     unchanged: 0,
     overLimit: 0,
     rejected: 0,
+    shortened: 0,
   };
   for (const picked of pickedNotes) {
     if (!ids.includes(picked.sourceId)) continue;
     // An entered date fills only a Markdown or text note without one.
     const asks = pickedNotes !== exampleNotes;
-    const note = {
+    const trimmed = picked.excerpt.trim();
+    const chars = Array.from(trimmed);
+    const originalChars =
+      chars.length > 2000
+        ? chars.length
+        : picked.originalChars && picked.originalChars > 2000
+          ? picked.originalChars
+          : undefined;
+    const note: ContextItem = {
       ...picked,
+      excerpt: chars.slice(0, 2000).join(''),
+      ...(originalChars ? { originalChars } : {}),
       sourceDate: picked.sourceDate || (asks && dates[picked.sourceId]) || '',
     };
     if (note.sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate))
@@ -411,6 +422,7 @@ export function importContextNotes(
     else {
       contextItems.push(structuredClone(note));
       outcome.added++;
+      if (note.originalChars) outcome.shortened = (outcome.shortened ?? 0) + 1;
     }
   }
   emitContext();

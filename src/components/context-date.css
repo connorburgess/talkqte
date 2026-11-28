@@ -31,3 +31,12 @@
 .context-file-results p {
   margin-block: 4px;
 }
+
+.context-excerpt-chip {
+  display: inline-block;
+  margin: 4px 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--accent-ink);
+}

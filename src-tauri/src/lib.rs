@@ -2777,6 +2777,7 @@ mod auto_prior_context_tests {
             title: title.into(),
             source_date: "2026-11-02".into(),
             excerpt: format!("Notes for {title}"),
+            original_chars: None,
             revision: 1,
         }
     }
@@ -2788,6 +2789,7 @@ mod auto_prior_context_tests {
             title: title.into(),
             source_date: "2026-11-01".into(),
             excerpt: format!("File note for {title}"),
+            original_chars: None,
             revision: 1,
         }
     }

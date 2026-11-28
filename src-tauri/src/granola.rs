@@ -604,6 +604,9 @@ impl Connection {
                 title: note.title,
                 source_date: note.date,
                 preview: preview(&note.text),
+                // Granola's listing does not fetch full note text, so whether a
+                // note exceeds MAX_EXCERPT_CHARS is only known on fetch.
+                original_chars: None,
             })
             .collect();
         let skipped = (total - summaries.len()).saturating_add(remaining);
@@ -1846,13 +1849,18 @@ impl Connection {
         Ok(notes
             .into_iter()
             .filter(|note| selection.iter().any(|wanted| wanted == &note.id))
-            .map(|note| ContextItem {
-                provider: Provider::Granola,
-                source_id: note.id,
-                title: note.title,
-                source_date: note.date,
-                excerpt: note.text.trim().chars().take(MAX_EXCERPT_CHARS).collect(),
-                revision: note.revision,
+            .map(|note| {
+                let trimmed = note.text.trim();
+                let trimmed_chars = trimmed.chars().count();
+                ContextItem {
+                    provider: Provider::Granola,
+                    source_id: note.id,
+                    title: note.title,
+                    source_date: note.date,
+                    excerpt: trimmed.chars().take(MAX_EXCERPT_CHARS).collect(),
+                    original_chars: (trimmed_chars > MAX_EXCERPT_CHARS).then_some(trimmed_chars),
+                    revision: note.revision,
+                }
             })
             .collect())
     }

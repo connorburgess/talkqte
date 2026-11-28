@@ -1153,6 +1153,7 @@ fn attested_engine(f: &Fixture) -> (Engine, Arc<Link>, crate::context::ContextIt
         title: "Fictional workshop".into(),
         source_date: "2026-10-20".into(),
         excerpt: "The room cannot open before nine.".into(),
+        original_chars: None,
         revision: 1,
     };
     let link = f.link(Some(ClockSample {
@@ -1624,6 +1625,7 @@ fn ordinary_selected_shared_lifecycle_cases_cancel_real_link_and_reject_late_rep
             title: "Fictional workshop".into(),
             source_date: "2026-10-20".into(),
             excerpt: "The room cannot open before nine.".into(),
+            original_chars: None,
             revision: 1,
         };
         engine.set_notes(vec![note.clone()]);
@@ -1902,6 +1904,7 @@ fn ordinary_selected_pairs_with_public_js_worker_and_retires_late_delivery() {
             title: "Fictional workshop".into(),
             source_date: "2026-10-20".into(),
             excerpt: "The room cannot open before nine.".into(),
+            original_chars: None,
             revision: 1,
         };
         engine.set_notes(vec![note.clone()]);
@@ -2080,6 +2083,7 @@ fn bounded_history_pairs_with_public_js_without_old_only_or_note_dispatch() {
             title: "Fictional venue note".into(),
             source_date: "2026-10-20".into(),
             excerpt: "A note outside transcript approval.".into(),
+            original_chars: None,
             revision: 1,
         };
         engine.set_notes(vec![note.clone()]);
