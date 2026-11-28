@@ -82,12 +82,19 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
     '0 notes selected',
   );
 
-  // Ad-hoc session action clears prepared state cleanly.
+  // Ad-hoc session action clears prepared state cleanly and leaves no event title in status live regions.
   await page.getByRole('button', { name: 'Ad-hoc session' }).click();
   await expect(titleInput).toHaveCount(0);
   await expect(agenda.getByText('Prepared')).toHaveCount(0);
+  expect(
+    await page
+      .locator('[role="status"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.textContent ?? '').join('\n'),
+      ),
+  ).not.toContain('Garden supply planning');
 
-  // Turning the agenda off retires an unedited agenda-prepared title so Start does not send it silently.
+  // Turning the agenda off retires an unedited agenda-prepared title and leaves it absent from the entire DOM (including live regions).
   await agenda.getByRole('button', { name: /Garden supply planning/ }).click();
   await expect(titleInput).toHaveValue('Garden supply planning');
   await expect(page.locator('.calendar-meeting-title')).toContainText(
@@ -99,6 +106,9 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
   await agendaCheck.uncheck();
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await expect(titleInput).toHaveCount(0);
+  expect(
+    await page.evaluate(() => document.body.textContent ?? ''),
+  ).not.toContain('Garden supply planning');
 
   // Turning the agenda back on: prepare, then revoke permission -> retires agenda-derived title before Start.
   await page.getByRole('button', { name: 'Turn on agenda' }).click();
@@ -118,7 +128,7 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
     },
   );
   await expect(titleInput).toHaveValue('Garden supply planning');
-  // Real revocation retires the unedited agenda-derived title cleanly; Start sends no calendar title.
+  // Real revocation retires the unedited agenda-derived title cleanly; title is absent from DOM (including live regions) and Start sends no calendar title.
   await page.evaluate(() =>
     window.calendarTest.emitAgenda({
       permission: 'denied',
@@ -127,6 +137,9 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
     }),
   );
   await expect(titleInput).toHaveCount(0);
+  expect(
+    await page.evaluate(() => document.body.textContent ?? ''),
+  ).not.toContain('Garden supply planning');
   await page
     .getByRole('button', { name: 'Start live session', exact: true })
     .click();

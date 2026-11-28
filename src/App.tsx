@@ -889,7 +889,7 @@ function Notebook() {
     });
     setPendingTitle(event.title, 'agenda');
     setNotice(
-      `Prepared “${event.title}”. Press Start live session when ready.`,
+      'Calendar meeting prepared. Press Start live session when ready.',
     );
   };
   const clearPreparedMeeting = () => {
