@@ -2,6 +2,8 @@
 
 Open **Ask** during or after the current live session, or open one saved meeting in **Meetings**. Opening either surface sends nothing. **Send** authorizes the question, the disclosed whole available transcript and bounded prior conversation to the selected provider with your own key. This permission is separate from automatic cues. There is no repeated review modal, automatic retry or cross-meeting search.
 
+Questions accept 1–1,000 Unicode scalar values (an astral character counts once), with at least one non-whitespace character. Tabs and newlines are allowed; carriage returns, NUL and other control characters are rejected before a request begins. Byte/cost preflight reserves seven nested-JSON bytes per question character, a conservative bound even for controls that validation rejects, inside each actual provider envelope. The actual serialized request is checked again before credential access or transport.
+
 The inline disclosure names the provider/model, transcript line count and number of prior exchanges. **Transcript scope and cost** shows the frozen time range, omissions and conservative maximum estimate. **Use latest transcript** refreshes without sending. New speech does not silently extend an already prepared request. “Whole” means all lines in that available snapshot, not a guarantee that capture or transcription was complete or correct.
 
 ## Whole transcript or no request

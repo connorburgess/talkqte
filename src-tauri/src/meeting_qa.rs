@@ -255,10 +255,13 @@ impl Record {
         if selected.is_empty() {
             return Err("Wait for transcript lines before asking a question.".into());
         }
-        // A legal 1,000-character question can need 4,000 serialized bytes, and the
-        // provider embeds that JSON string again. Size the actual provider body
-        // with the most escaped allowed question before any credential access.
-        let body = request_body(&target, &selected, &conversation, &"\"".repeat(1000));
+        // A Unicode scalar needs at most six bytes in the inner JSON string
+        // (\u0000); nesting that JSON adds one escaped backslash, hence seven.
+        // Raw UTF-8 needs at most four, quotes/backslashes four, and allowed
+        // tabs/newlines three. NUL is rejected by begin(), but gives a universal
+        // conservative envelope bound even if the allowed alphabet changes.
+        // Serialize the actual provider envelope before any credential access.
+        let body = request_body(&target, &selected, &conversation, &"\0".repeat(1000));
         let bytes = serde_json::to_vec(&body)
             .map_err(|_| "Question unavailable.")?
             .len();
@@ -857,7 +860,9 @@ mod tests {
                 "\"".repeat(1000),
                 "a\t".repeat(500),
                 "a\n".repeat(500),
+                "a\t\n\\\"🪴".repeat(166) + "🪴\"\\a",
             ] {
+                assert_eq!(question.chars().count(), 1000);
                 let mut r = Record::default();
                 let target = ResolvedModel::from_curated(model);
                 let scope = r.prepare(&lines(3), target.clone()).unwrap();
@@ -865,6 +870,34 @@ mod tests {
                 let bytes = serde_json::to_vec(p.body()).unwrap().len();
                 assert!(bytes <= MAX_BYTES);
                 assert!(estimate(target.price.unwrap(), bytes) <= scope.worst_micro_usd);
+            }
+        }
+    }
+    #[test]
+    fn disallowed_controls_are_rejected_before_spending_or_consuming_the_scope() {
+        for model in [
+            &llm_provider::ANTHROPIC_MODELS[0],
+            &llm_provider::OPENAI_MODELS[0],
+            &llm_provider::GEMINI_MODELS[0],
+        ] {
+            let mut r = Record::default();
+            let target = ResolvedModel::from_curated(model);
+            let scope = r.prepare(&lines(3), target.clone()).unwrap();
+            // Rust's is_control covers C0, DEL and C1, including CR/NUL/U+0001.
+            for code in 0..=0x9f {
+                let c = char::from_u32(code).unwrap();
+                if c.is_control() && c != '\t' && c != '\n' {
+                    let question = format!("{}{}", "a".repeat(999), c);
+                    assert_eq!(question.chars().count(), 1000);
+                    assert_eq!(
+                        r.begin(&scope.ticket, &question, &target).err().as_deref(),
+                        Some("Ask a question of 1–1,000 characters.")
+                    );
+                    assert_eq!(r.count, 0);
+                    assert_eq!(r.reserved, 0);
+                    assert!(r.active.is_none());
+                    assert!(r.plan.is_some());
+                }
             }
         }
     }
