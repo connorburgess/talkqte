@@ -1042,3 +1042,164 @@ fn cancellation_during_key_access_sends_no_request() {
     }
     assert!(transport.sent().is_empty());
 }
+
+/// A capability-gap regression: production own-key registration has no
+/// selected-note mode, even when the person explicitly tries to review one.
+/// Keep this separate from generic evaluators that intentionally accept notes.
+#[test]
+fn production_own_key_review_rejects_imported_notes_for_every_provider() {
+    use crate::{
+        context::{ContextItem, Provider as ContextProvider},
+        engine::ProcessingError,
+        llm_provider::{self, CueProvider},
+        processing_reviews::Reviews,
+    };
+    struct NeverCalled;
+    impl crate::cue_evaluator::Evaluator for NeverCalled {
+        fn evaluate(
+            &mut self,
+            _: &Request,
+            _: &crate::cue_evaluator::Cancellation,
+        ) -> Result<String, Failure> {
+            panic!("reviewing an imported note must not dispatch or contact a provider");
+        }
+    }
+    for provider in CueProvider::ALL {
+        let mut engine = llm_provider::register_cue_engine(
+            NeverCalled,
+            provider,
+            llm_provider::default_cue_model(provider).id,
+            false,
+            None,
+            None,
+        );
+        engine.start().unwrap();
+        engine.set_notes(vec![ContextItem {
+            provider: ContextProvider::File,
+            source_id: "fictional-portfolio".into(),
+            title: "Fictional observatory project".into(),
+            source_date: "2026-11-01".into(),
+            excerpt: "The fictional calibration work reduced retries from eight to two.".into(),
+            revision: 7,
+        }]);
+        let snapshot = serde_json::to_value(
+            engine.processing_snapshot(crate::engine::CaptureState::Running, 1),
+        )
+        .unwrap();
+        assert_eq!(snapshot["processor"]["acceptsNotes"], false);
+        assert_eq!(snapshot["notes"].as_array().unwrap().len(), 1);
+        let mut reviews = Reviews::default();
+        assert_eq!(
+            reviews.prepare(
+                &engine,
+                ConversationScope::NewSpeechOnly,
+                &[(ContextProvider::File, "fictional-portfolio".into(), 7)],
+            ),
+            Err(ProcessingError::InvalidScope),
+            "{provider:?}: explicit review cannot widen the registered route"
+        );
+        assert!(!engine.has_processing_permission());
+        let id = reviews
+            .prepare(&engine, ConversationScope::NewSpeechOnly, &[])
+            .unwrap();
+        reviews.approve(&mut engine, &id).unwrap();
+        assert!(engine.has_processing_permission());
+        let approved = serde_json::to_value(
+            engine.processing_snapshot(crate::engine::CaptureState::Running, 2),
+        )
+        .unwrap();
+        assert_eq!(approved["processor"]["id"], provider.processor_id());
+        assert_eq!(approved["approved"]["notes"], json!([]));
+    }
+}
+
+/// Exercise the production registration, native review store, engine and real
+/// Anthropic serializer against a capturing fake transport, not a mock request.
+#[test]
+fn rejected_note_review_then_transcript_approval_sends_no_imported_note_on_wire() {
+    use crate::{
+        context::{ContextItem, Provider as ContextProvider},
+        cue_evaluator::SessionMode,
+        engine::ProcessingError,
+        llm_provider::{self, CueProvider},
+        processing_reviews::Reviews,
+    };
+    const NOTE_TEXT: &str = "Fictional calibration retries fell from eight to two.";
+    let transport = Scripted::default().answer(Ok((
+        200,
+        sse(
+            MODEL,
+            &decision("quiet", None, &["transcript:line-1"]),
+            "end_turn",
+        ),
+    )));
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| panic!("the scripted success must not reject a key")),
+        Arc::default(),
+    );
+    let mut engine = llm_provider::register_cue_engine(
+        adapter,
+        CueProvider::Anthropic,
+        MODEL,
+        false,
+        Some(EFFORT),
+        None,
+    );
+    engine.set_session_mode(SessionMode::Interview).unwrap();
+    engine.start().unwrap();
+    engine.set_notes(vec![ContextItem {
+        provider: ContextProvider::File,
+        source_id: "fictional-portfolio".into(),
+        title: "Fictional observatory project".into(),
+        source_date: "2026-11-01".into(),
+        excerpt: NOTE_TEXT.into(),
+        revision: 7,
+    }]);
+    let mut reviews = Reviews::default();
+    assert_eq!(
+        reviews.prepare(
+            &engine,
+            ConversationScope::NewSpeechOnly,
+            &[(ContextProvider::File, "fictional-portfolio".into(), 7)],
+        ),
+        Err(ProcessingError::InvalidScope)
+    );
+    assert!(transport.sent().is_empty());
+    let id = reviews
+        .prepare(&engine, ConversationScope::NewSpeechOnly, &[])
+        .unwrap();
+    reviews.approve(&mut engine, &id).unwrap();
+    let mut session = Session {
+        engine,
+        transport,
+        line: 0,
+    };
+    session.say("The fictional observatory team is discussing calibration work.");
+    session.settle();
+    let sent = session.transport.sent();
+    assert_eq!(
+        sent.len(),
+        1,
+        "a real serialized fake-transport call occurred"
+    );
+    let body = &sent[0].1;
+    let input: Value =
+        serde_json::from_str(body["messages"][0]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(input["sessionMode"], "interview");
+    assert_eq!(input["events"].as_array().unwrap().len(), 1);
+    assert_eq!(input["events"][0]["id"], "transcript:line-1");
+    assert_eq!(input["events"][0]["speaker"], "Speaker");
+    assert!(input.get("priorNotes").is_none());
+    assert!(input.get("inputContract").is_none());
+    assert!(!body.to_string().contains(NOTE_TEXT));
+    assert!(!body.to_string().contains("fictional-portfolio"));
+    assert_eq!(
+        session.engine.evaluation_status(),
+        Some(EvaluationStatus::Decided(
+            crate::engine::EvaluationOutcome::Quiet
+        ))
+    );
+}
