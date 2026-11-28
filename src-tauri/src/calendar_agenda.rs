@@ -60,6 +60,11 @@ pub fn included_ids(ids: Vec<String>) -> Result<Vec<String>, &'static str> {
     let mut unique = ids;
     unique.sort();
     unique.dedup();
+    // Leave room in the 64 KiB settings file for other bounded preferences;
+    // JSON escaping can otherwise double a valid opaque ID's byte length.
+    if serde_json::to_vec(&unique).map_or(true, |value| value.len() > 32 * 1024) {
+        return Err("The calendar selection is too large.");
+    }
     Ok(unique)
 }
 /// Malformed persisted filters fail closed. Missing/null intentionally means all.
@@ -474,7 +479,8 @@ impl Agenda {
             Err(_) => {
                 self.snapshot.sync_state = SyncState::Error;
                 self.snapshot.error = Some(READ_ERROR.into());
-                self.next_due = now + Duration::from_secs((15u64 << self.failures.min(5)).min(300));
+                self.next_due = now
+                    + Duration::from_secs([15, 30, 60, 120, 300][self.failures.min(4) as usize]);
                 self.failures = self.failures.saturating_add(1);
             }
         }

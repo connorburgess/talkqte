@@ -27,7 +27,8 @@ The existing narrow pre-call query may still inspect notes in its original windo
 
 Events and labels stay in memory. Only the agenda opt-in and selected calendar IDs
 persist in version-1 owner-only settings. Missing/null IDs mean all calendars;
-`[]` means none. Removed or malformed IDs never broaden selection. A filtered-out
+`[]` means none. Removed or malformed IDs never broaden selection. The encoded selection is
+bounded to 32 KiB to leave room for other preferences. A filtered-out
 calendar cannot contribute events. Reset clears the agenda and restores opt-in off.
 Calendar access itself sends nothing to providers. A title selected for a session
 can become a kept/exported title; saved content later explicitly approved as prior
@@ -44,7 +45,7 @@ and late results cannot repopulate it. Cached reads check authorization without
 requesting it. Only explicitly enabling the agenda may request Calendar permission.
 
 Store changes, day/timezone changes and wake notifications debounce for 500 ms.
-A five-minute fallback poll and 15/30/60/120/240/300-second error backoff provide
+A five-minute fallback poll and 15/30/60/120/300-second error backoff provide
 bounded retries. Failed reads retain the last successful same-scope cache with a
 fixed error message; data becomes stale after ten minutes of monotonic elapsed
 time. Background event queries pause during a live session. Manual refresh is

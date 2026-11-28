@@ -314,3 +314,35 @@ fn notification_bursts_debounce_and_deadline_rejects_late_success() {
     assert_eq!(a.snapshot.sync_state, SyncState::Error);
     assert_eq!(a.snapshot.last_updated_epoch_ms, Some(1_800_000_000_000));
 }
+
+#[test]
+fn oversized_escaped_selection_cannot_overflow_the_settings_budget() {
+    let ids = (0..100)
+        .map(|n| format!("{n}{}", "\"".repeat(500)))
+        .collect();
+    assert!(included_ids(ids).is_err());
+}
+#[test]
+fn repeated_errors_back_off_to_five_minutes_without_clearing_good_data() {
+    let (mut a, mut now) = configured();
+    complete(&mut a, now);
+    a.request(false, now);
+    for seconds in [15, 30, 60, 120, 300, 300] {
+        let t = a.begin(now, false).unwrap();
+        a.finish(
+            &t,
+            PermissionStatus::Connected,
+            Err(ReadError::Failed),
+            now,
+            1,
+        );
+        assert_eq!(a.snapshot.events.len(), 1);
+        a.tick(now + Duration::from_secs(seconds - 1), false, 0);
+        assert!(a
+            .begin(now + Duration::from_secs(seconds - 1), false)
+            .is_none());
+        now += Duration::from_secs(seconds);
+        a.tick(now, false, 0);
+    }
+    assert!(a.begin(now, false).is_some());
+}
