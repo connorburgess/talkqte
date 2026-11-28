@@ -106,8 +106,10 @@ export async function command(
       if (!current.live || current.status !== 'ended')
         throw 'Meeting notes can be written once a live session has ended. Nothing was sent.';
       const retry = Boolean((args as { retry?: boolean }).retry);
-      if (retry && (!validationFailed || sentAttempts !== 1 || customModel))
-        throw 'A retry cannot be bounded or is unavailable. Nothing was sent.';
+      if (retry && (!validationFailed || sentAttempts !== 1))
+        throw 'A retry is available only after a failed validation, at most once per meeting. Nothing was sent.';
+      if (retry && customModel)
+        throw 'A retry cannot be bounded within the $1.00 combined estimate because a request has unknown model pricing. Nothing was sent.';
       if ((!retry && phase !== 'none') || (retry && phase !== 'failed'))
         throw 'Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.';
       const include = (args as { includeNotes: boolean }).includeNotes;
@@ -159,6 +161,8 @@ export async function command(
         hold = false;
         await new Promise<void>((resolve) => (release = resolve));
       }
+      if (session().session !== current.session)
+        throw 'A new session has started, so these notes were not kept.';
       // Stop waiting while the key was being read: nothing is sent.
       if (cancelled) {
         await publish({ meetingNotes: priorPhase });

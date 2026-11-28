@@ -66,6 +66,7 @@ export function MeetingNotes({
     mounted.current && activeSession.current === sessionId;
   const sectionRef = useRef<HTMLElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
+  const failureMessage = useRef<HTMLParagraphElement>(null);
   const writeButton = useRef<HTMLButtonElement>(null);
   const session = useRef(phase);
   const handledTrigger = useRef(0);
@@ -167,7 +168,9 @@ export function MeetingNotes({
     } catch (failure) {
       if (!current(sessionId)) return;
       setError(message(failure, 'No notes were written.'));
-      requestAnimationFrame(() => writeButton.current?.focus());
+      requestAnimationFrame(() =>
+        (writeButton.current ?? failureMessage.current)?.focus(),
+      );
     } finally {
       if (current(sessionId)) setBusy(false);
     }
@@ -215,8 +218,15 @@ export function MeetingNotes({
       if (!current(sessionId)) return;
       setError(message(failure, 'No notes were written.'));
       const next = await meetingNotesResult().catch(() => null);
-      if (current(sessionId)) setResult(next);
-      requestAnimationFrame(() => reviewButton.current?.focus());
+      if (!current(sessionId)) return;
+      setResult(next);
+      requestAnimationFrame(() =>
+        (
+          reviewButton.current ??
+          failureMessage.current ??
+          sectionRef.current
+        )?.focus(),
+      );
     } finally {
       if (current(sessionId)) setBusy(false);
     }
@@ -271,6 +281,7 @@ export function MeetingNotes({
     <section
       ref={sectionRef}
       className="meeting-notes"
+      tabIndex={-1}
       aria-labelledby={`${id}-title`}
     >
       <div className="meeting-notes-head">
@@ -415,7 +426,12 @@ export function MeetingNotes({
       {phase === 'failed' && (
         <>
           {result?.failure && !error && (
-            <p role="alert" className="meeting-notes-error">
+            <p
+              ref={failureMessage}
+              tabIndex={-1}
+              role="alert"
+              className="meeting-notes-error"
+            >
               {result.failure}
             </p>
           )}
@@ -522,7 +538,12 @@ export function MeetingNotes({
       )}
 
       {error && (
-        <p role="alert" className="meeting-notes-error">
+        <p
+          ref={failureMessage}
+          tabIndex={-1}
+          role="alert"
+          className="meeting-notes-error"
+        >
           {error}
         </p>
       )}

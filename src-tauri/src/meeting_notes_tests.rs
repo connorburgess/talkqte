@@ -153,11 +153,11 @@ fn the_request_holds_the_transcript_and_only_the_chosen_extras() {
     assert!(!user.contains("L8"), "a blank line is not sent");
     assert!(!body.to_string().contains(notes));
     let plan = without.plan();
-    // The figures docs/meeting-notes.md shows for this meeting, in cents.
+    // Rounded estimates include the expanded grounding prompt and schema.
     let cents = |micro: u64| (micro + 5_000) / 10_000;
     assert_eq!(
         (cents(plan.likely_micro_usd), cents(plan.worst_micro_usd)),
-        (7, 34)
+        (7, 35)
     );
     assert_eq!(plan.transcript_lines, 7);
     assert_eq!(plan.note_lines, None);
@@ -833,6 +833,19 @@ fn openai_and_gemini_meeting_notes_reuse_same_contract_and_custom_models_omit_co
         system_prompt()
     );
     assert_eq!(body["generationConfig"]["responseJsonSchema"], *schema());
+    // Integer bounds survive the actual JSON serialization used by transport.
+    let wire: Value = serde_json::from_slice(&serde_json::to_vec(&body).unwrap()).unwrap();
+    assert_eq!(
+        wire["generationConfig"]["responseJsonSchema"]["properties"]["summary"]["maxItems"]
+            .as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        wire["generationConfig"]["responseJsonSchema"]["properties"]["summary"]["items"]
+            ["properties"]["lines"]["maxItems"]
+            .as_u64(),
+        Some(8)
+    );
 
     let gemini_sse = format!(
         "data: {}\n\n",

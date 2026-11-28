@@ -340,6 +340,7 @@ test('a second failed validation is final, preserves transcript and never offers
   );
   await page.getByRole('button', { name: 'Send final retry' }).click();
   await expect(notesSection(page)).toContainText('No retry is available');
+  await expect(notesSection(page).getByRole('alert')).toBeFocused();
   await expect(
     page.getByRole('button', { name: 'Review one retry' }),
   ).toHaveCount(0);
@@ -456,4 +457,49 @@ test('final retry review fits a narrow window and has no accessibility violation
     (await new AxeBuilder({ page }).include('.meeting-notes').analyze())
       .violations,
   ).toEqual([]);
+});
+
+test('unknown model pricing blocks retry planning without a second write', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.evaluate(async () => {
+    // Fictional model setting, no credential or provider access.
+    await window.__TAURI_INTERNALS__.invoke('set_notes_model_override', {
+      model: 'fictional-custom-notes-model',
+    });
+  });
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await expect(notesSection(page).getByRole('alert')).toContainText(
+    'unknown model pricing',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Send final retry' }),
+  ).toHaveCount(0);
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(1);
+});
+
+test('a replacement session drops a late retry result and its review', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await page.evaluate(() => window.meetingNotesTest.hold());
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await expect(notesSection(page)).toContainText('Writing meeting notes');
+  await page.evaluate(() =>
+    window.liveTest.publish({
+      session: 'fictional-replacement-session',
+      status: 'running',
+      meetingNotes: 'none',
+      transcript: [],
+    }),
+  );
+  await page.evaluate(() => window.meetingNotesTest.release());
+  await expect(notesSection(page)).toHaveCount(0);
+  await expect(
+    page.getByRole('textbox', { name: 'Notes to keep, editable' }),
+  ).toHaveCount(0);
 });
