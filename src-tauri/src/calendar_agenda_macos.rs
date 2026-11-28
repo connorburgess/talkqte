@@ -113,6 +113,18 @@ fn text(value: Option<Retained<NSString>>, max_units: usize) -> Option<String> {
     let value = value?;
     (value.len_utf16() <= max_units).then(|| value.to_string())
 }
+// EKSourceType values from EventKit/EKTypes.h. CalDAV and the legacy
+// MobileMe type do not establish a particular cloud account/provider.
+fn source_label(kind: isize) -> &'static str {
+    match kind {
+        0 => "On this Mac",
+        1 => "Exchange",
+        2 | 3 => "Synced calendar",
+        4 => "Subscribed",
+        5 => "Birthdays",
+        _ => "Apple Calendar",
+    }
+}
 fn object_date(epoch: i64) -> Option<Retained<AnyObject>> {
     unsafe { msg_send![class!(NSDate), dateWithTimeIntervalSince1970: epoch as f64] }
 }
@@ -222,16 +234,7 @@ pub(crate) fn read(store: &AnyObject, ticket: &Ticket) -> Result<Batch, ReadErro
             let kind: isize = source
                 .map(|source| msg_send![&*source, sourceType])
                 .unwrap_or(0);
-            let source_label = match kind {
-                0 => "On this Mac",
-                1 => "Exchange",
-                2 => "Synced calendar",
-                3 => "Subscribed",
-                4 => "iCloud",
-                5 => "Birthdays",
-                _ => "Apple Calendar",
-            }
-            .to_string();
+            let source_label = source_label(kind).to_string();
             let included = agenda::included(ticket.ids.as_deref(), &id);
             batch.calendars.push(CalendarSummary {
                 id,
@@ -385,6 +388,14 @@ pub(crate) fn read(store: &AnyObject, ticket: &Ticket) -> Result<Batch, ReadErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_types_never_invent_an_account_identity() {
+        assert_eq!(source_label(2), "Synced calendar");
+        assert_eq!(source_label(3), "Synced calendar");
+        assert_eq!(source_label(4), "Subscribed");
+        assert_eq!(source_label(5), "Birthdays");
+        assert_eq!(source_label(99), "Apple Calendar");
+    }
     #[test]
     fn all_day_exclusive_end_becomes_inclusive_across_dst() {
         autoreleasepool(|_| {
