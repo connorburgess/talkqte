@@ -116,6 +116,10 @@ fn the_companion_window_cannot_export_edit_import_connect_or_start_capture() {
         "allow-set-call-prompt",
         "allow-clear-call-prompt-apps",
         // Opt-in Calendar settings are the notebook's alone.
+        "allow-calendar-agenda",
+        "allow-set-calendar-agenda",
+        "allow-set-included-calendars",
+        "allow-refresh-calendar-agenda",
         "allow-calendar-settings",
         "allow-set-calendar-prompts",
         "allow-open-calendar-settings",

@@ -8010,6 +8010,60 @@ Cue processing stopped: -</pre>
                     settings are unavailable. / The calendar setting could not
                     be updated. Try again. / Could not open System Settings.
                   </p>
+
+                  <div class="sk-row-head" style="margin-top: 16px">
+                    <strong class="panel-h3"
+                      >Notebook Calendar agenda &amp; Live Schedule
+                      Glance</strong
+                    >
+                    <span class="mono-label" style="color: var(--g-muted)"
+                      >CalendarAgenda.tsx · CalendarSettings.tsx</span
+                    >
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 8px; font-size: 12px"
+                  >
+                    Separate default-off opt-in from pre-call prompts. Reads
+                    titles, times, and local calendar names from Apple
+                    Calendar’s local Mac cache (yesterday through +14 days;
+                    bounded at up to 100 calendars, 10,000 scanned items, and
+                    250 shown events); never uploads your calendar or reads
+                    attendees. Preparing a meeting fills an agenda-attributed
+                    editable session title locally with zero capture or provider
+                    calls (disabling or revoking retires an unedited
+                    agenda-derived title while preserving custom or separate
+                    pre-call titles).
+                  </p>
+                  <div class="panel-check" style="margin-top: 10px">
+                    <span class="panel-box is-checked">✓</span>
+                    <span>Show Apple Calendar agenda on Notebook Home</span>
+                  </div>
+                  <p
+                    class="panel-muted"
+                    style="margin-top: 6px; font-size: 12px"
+                  >
+                    Built states: Off (compact opt-in bar) · Loading (skeleton)
+                    · Unknown / undetermined permission recovery · Ready (7-day
+                    strip, All-day chips, NOW ongoing row with uniform 1.5px
+                    amber-ink border, Overlaps &amp; Video link tags, Prepared
+                    badge + Ad-hoc session escape) · Empty day · Results-limited
+                    notice (local caps: up to 100 calendars, 10,000 scanned
+                    items, or 250 shown events across yesterday through +14
+                    days, including empty-day &amp; Settings Select-all limit
+                    guidance) · All calendars hidden · Stale cache bar &amp;
+                    Refresh error with Retry · Permission denied / revoked
+                    recovery · Unavailable (hidden on Windows/Linux/lab) · Live
+                    Schedule Glance (Paused while live · cached HH:MM,
+                    stale/loading/unknown/revoked/all-hidden/results-limited
+                    honesty, synchronous revocation check, Escape focus return).
+                  </p>
+                  <div class="panel-check" style="margin-top: 8px">
+                    <span class="sk-btn"
+                      >Included calendars: Work (iCloud) · Design Studio
+                      (Google) · Garden Club (Outlook)</span
+                    >
+                  </div>
                 </div>
               </div>
             </article>

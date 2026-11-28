@@ -17,6 +17,16 @@ Use Rust for the application core, Tauri 2 for the desktop shell, and React with
 
 Tauri does not turn native audio capture into a solved problem. Its system webview avoids bundling Chromium, but actual memory, package size, responsiveness, and battery use must be measured during a live session. Transcription streams audio over the network instead of running inference on the device; its on-device cost has not been measured.
 
+## Calendar agenda boundary
+
+`calendar_agenda.rs` owns the separate default-off agenda, bounded projection,
+refresh tickets and cancellation. `calendar_agenda_macos.rs` projects EventKit
+metadata on a worker without event-note access. Main-only commands/events in
+`calendar_agenda_commands.rs` keep event lists out of session and companion
+snapshots. Selected calendar IDs persist as preferences; event metadata remains
+in memory. Pre-call prompts retain their independent opt-in and original window.
+See [scope, refresh behavior and native acceptance gaps](calendar-agenda.md).
+
 ## Explicit question boundary
 
 `meeting_qa.rs` owns bounded frozen transcript tickets, request budgets and validated source IDs; the engine owns each record and withdraws it on Stop/revoke/replacement. `meeting_qa_commands.rs` dispatches outside the engine lock over the existing fixed provider transports, then accepts the response and any auth-rejection side effect under that lock only for the still-current ticket. The companion can only request opening/focusing the main transcript/Ask panel; its capability cannot prepare, send, cancel or read questions/history. React never supplies a session identity or request destination. See [live questions](live-questions.md) for separate explicit Send permission, limits, retention and acceptance gaps.
