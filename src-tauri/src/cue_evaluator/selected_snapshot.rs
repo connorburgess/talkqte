@@ -538,7 +538,7 @@ mod own_key_projection_tests {
             },
             text: "Fictional project review underway.".into(),
         }];
-        for n in 0..5 {
+        for n in 0..8 {
             sources.push(Source {
                 id: format!("prior:file:fictional-{n}"),
                 revision: 7,
@@ -547,7 +547,7 @@ mod own_key_projection_tests {
                     date: String::new(),
                     title: "Fictional undated project".into(),
                 },
-                text: "x".repeat(if n == 4 { last_chars } else { 3000 }),
+                text: "x".repeat(if n == 7 { last_chars } else { 1900 }),
             });
         }
         Request::new(1, 1, sources, None)

@@ -1020,6 +1020,15 @@ test('narrow own-key review keeps unknown date explicit and recovers from change
   ).toHaveCount(0);
   await expect(page.getByText(/an approved note changed/)).toBeVisible();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  await send(page, { phase: 'unavailable', issue: 'inputLimit' });
+  await expect(
+    page.getByText(
+      /conversation and selected prior notes exceeded processing limits/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Review fewer prior notes or new speech only/),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,

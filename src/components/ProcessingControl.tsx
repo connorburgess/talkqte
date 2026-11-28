@@ -34,7 +34,7 @@ export const issueText = {
   scopeChanged:
     'Cues stopped: an approved note changed. Turn the model connection on again to continue.',
   inputLimit:
-    'Cues stopped: the conversation lines were too long to send. Nothing more will be sent until you turn the model connection on again.',
+    'Cues stopped: the conversation and selected prior notes exceeded processing limits. Review fewer prior notes or new speech only before enabling again.',
   misconfigured:
     'Cues are off: TALKQTE_CUE_MODEL or TALKQTE_CUE_EFFORT names an option this build does not have. Nothing can be sent.',
   authentication:

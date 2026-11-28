@@ -24,6 +24,7 @@ pub(crate) fn note() -> ContextItem {
         title: "Fictional observatory project".into(),
         source_date: String::new(),
         excerpt: NOTE.into(),
+        original_chars: None,
     }
 }
 pub(crate) fn approve(engine: &mut Engine, notes: bool) -> (Reviews, String) {
