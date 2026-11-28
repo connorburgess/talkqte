@@ -764,8 +764,20 @@ mod tests {
                 session: engine.state.session.clone()
             }
         );
+        let target = engine.meeting_qa.plan.as_ref().unwrap().1.clone();
+        let request = engine
+            .meeting_qa
+            .begin(&scope.ticket, "What was checked?", &target)
+            .unwrap();
+        assert!(engine
+            .meeting_qa
+            .finish(&request, "What was checked?".into(), &answer()));
         engine.end();
         let ended = engine.question_scope().unwrap();
+        assert_eq!(
+            ended.prior_pairs, 1,
+            "Stop keeps accepted context for a new explicit follow-up"
+        );
         assert_eq!(ended.lines.len(), 236);
         assert_eq!(ended.lines[0].id, "line-0");
     }

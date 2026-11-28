@@ -29,7 +29,7 @@ export function MeetingAsk({
     : (snapshot?.transcript ?? []);
   const identity = savedMeeting
     ? `saved-${savedId}-${savedRevision}`
-    : `current-${snapshot?.session}-${snapshot?.status}`;
+    : `current-${snapshot?.session}`;
   const latestScope = useRef<string | null>(null);
   const [scope, setScope] = useState<qa.QaScope | null>(null);
   const [entries, setEntries] = useState<qa.QaEntry[]>([]);
@@ -38,6 +38,7 @@ export function MeetingAsk({
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState('');
   const generation = useRef(0);
+  const priorStatus = useRef(snapshot?.status);
   const active = useRef<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const history = useRef<HTMLDivElement>(null);
@@ -94,6 +95,23 @@ export function MeetingAsk({
     }
     void refresh();
   }, [hasLines, identity, refresh]);
+  useEffect(() => {
+    const previous = priorStatus.current;
+    priorStatus.current = snapshot?.status;
+    if (
+      savedMeeting ||
+      previous === snapshot?.status ||
+      snapshot?.status !== 'ended'
+    )
+      return;
+    // Stop retires the pending answer, not accepted conversational history.
+    generation.current++;
+    const ticket = active.current;
+    active.current = null;
+    setBusy(false);
+    if (ticket) void qa.cancelQuestion(ticket).catch(() => {});
+    void refresh();
+  }, [snapshot?.status, savedId, refresh]);
   async function send() {
     if (!scope || busy || !question.trim()) return;
     const turn = generation.current;

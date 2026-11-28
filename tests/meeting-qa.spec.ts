@@ -402,3 +402,22 @@ test('over-limit scope disables Send and explains refusal without a tail fallbac
     ),
   ).toBe(0);
 });
+
+test('ending the current meeting retains accepted conversation for an explicit follow-up', async ({
+  page,
+}) => {
+  await open(page, 236);
+  await input(page).fill('What did we choose?');
+  await send(page).click();
+  await expect(page.locator('.ask-entry')).toHaveCount(1);
+  await expect(page.getByText(/plus 1 prior exchange/)).toBeVisible();
+  await page.evaluate(() => window.liveTest.publish({ status: 'ended' }));
+  await expect(page.locator('.ask-entry')).toHaveCount(1);
+  await expect(
+    page.getByText(/Uses all 236 available transcript lines/),
+  ).toBeVisible();
+  await expect(page.getByText(/plus 1 prior exchange/)).toBeVisible();
+  await input(page).fill('Why that choice?');
+  await send(page).click();
+  await expect(page.locator('.ask-entry')).toHaveCount(2);
+});
