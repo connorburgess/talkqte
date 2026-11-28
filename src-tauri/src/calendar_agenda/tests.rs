@@ -368,3 +368,40 @@ fn expired_initial_off_ticket_does_not_leave_phantom_loading() {
     a.request(true, now + QUERY_TIMEOUT);
     assert!(a.begin(now + QUERY_TIMEOUT, false).is_some());
 }
+
+#[test]
+fn unavailable_completions_clear_cache_but_old_tickets_cannot_clear_new_loading() {
+    for auth in [
+        PermissionStatus::Off,
+        PermissionStatus::Denied,
+        PermissionStatus::Unavailable,
+    ] {
+        let (mut a, now) = configured();
+        complete(&mut a, now);
+        a.request(false, now);
+        let old = a.begin(now, false).unwrap();
+        a.finish(&old, auth, Ok(batch(&old.horizon)), now, 1);
+        assert_eq!(a.snapshot.permission, auth);
+        assert_eq!(a.snapshot.sync_state, SyncState::Idle);
+        assert!(a.snapshot.events.is_empty());
+        assert!(a.snapshot.calendars.is_empty());
+        a.permission(PermissionStatus::Connected);
+        a.request(false, now);
+        let current = a.begin(now, false).unwrap();
+        let revision = a.snapshot.revision;
+        a.finish(&old, auth, Err(ReadError::Cancelled), now, 1);
+        assert_eq!(a.snapshot.revision, revision);
+        assert_eq!(a.snapshot.sync_state, SyncState::Loading);
+        assert_eq!(a.snapshot.permission, PermissionStatus::Connected);
+        assert!(a.begin(now, false).is_none());
+        a.finish(
+            &current,
+            PermissionStatus::Connected,
+            Ok(batch(&current.horizon)),
+            now,
+            1,
+        );
+        assert_eq!(a.snapshot.events.len(), 1);
+        assert_eq!(a.snapshot.sync_state, SyncState::Ready);
+    }
+}
