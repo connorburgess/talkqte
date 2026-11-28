@@ -17,7 +17,11 @@
 //! Keychain or the network.
 
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Mutex, time::Duration};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use zeroize::Zeroizing;
 
 #[cfg(target_os = "linux")]
@@ -441,6 +445,56 @@ struct Memo {
     present: Option<bool>,
     rejected: bool,
     verified: bool,
+    revision: u64,
+}
+
+/// In-memory identity only: never serialized, logged, or derived from key text.
+#[derive(Clone)]
+pub(crate) struct CredentialRevision {
+    owner: Arc<()>,
+    provider: Provider,
+    revision: u64,
+}
+
+/// A non-cloneable reader owned by one serial adapter or stream.
+/// Only its rejection handle can be shared; it cannot acquire credentials.
+pub(crate) struct RequestKey {
+    keys: &'static Keys,
+    provider: Provider,
+    revision: Arc<Mutex<Option<CredentialRevision>>>,
+}
+pub(crate) struct RequestRejection {
+    keys: &'static Keys,
+    revision: Arc<Mutex<Option<CredentialRevision>>>,
+}
+impl RequestKey {
+    pub fn rejection_handler(&self) -> RequestRejection {
+        RequestRejection {
+            keys: self.keys,
+            revision: self.revision.clone(),
+        }
+    }
+    pub fn get(&mut self) -> Result<Secret, KeyError> {
+        let result = self.keys.get_with_revision(self.provider);
+        let mut receipt = self
+            .revision
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *receipt = result.as_ref().ok().map(|(_, revision)| revision.clone());
+        result.map(|(key, _)| key)
+    }
+}
+impl RequestRejection {
+    pub fn mark_rejected(&self) {
+        let revision = self
+            .revision
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(revision) = revision {
+            self.keys.mark_rejected(&revision);
+        }
+    }
 }
 
 /// The key store plus what this app run has learned about each key.
@@ -448,6 +502,7 @@ pub struct Keys {
     store: Box<dyn SecretStore>,
     probe: Box<dyn Probe>,
     memo: Mutex<[Memo; 5]>,
+    owner: Arc<()>,
 }
 
 impl Keys {
@@ -456,6 +511,7 @@ impl Keys {
             store,
             probe,
             memo: Mutex::new([Memo::default(); 5]),
+            owner: Arc::new(()),
         }
     }
 
@@ -466,21 +522,27 @@ impl Keys {
     }
 
     fn present(&self, provider: Provider) -> Result<bool, KeyError> {
-        if let Some(present) = self.memo()[provider.index()].present {
+        let mut memo = self.memo();
+        self.present_locked(provider, &mut memo[provider.index()])
+    }
+
+    fn present_locked(&self, provider: Provider, memo: &mut Memo) -> Result<bool, KeyError> {
+        if let Some(present) = memo.present {
             return Ok(present);
         }
         let present = self
             .store
             .contains(provider.account())
             .map_err(store_error)?;
-        self.memo()[provider.index()].present = Some(present);
+        memo.present = Some(present);
         Ok(present)
     }
 
     fn key_status(&self, provider: Provider) -> (KeyStatus, bool) {
-        let present = self.present(provider);
+        let mut entries = self.memo();
+        let memo = &mut entries[provider.index()];
+        let present = self.present_locked(provider, memo);
         let no_store = present == Err(KeyError::NoStore);
-        let memo = self.memo()[provider.index()];
         let status = KeyStatus {
             state: match (present, memo.rejected) {
                 (Err(_), _) => KeyState::Unreadable,
@@ -531,33 +593,85 @@ impl Keys {
     /// not checked with the provider until the person asks.
     pub fn set(&self, provider: Provider, text: &str) -> Result<KeysStatus, KeyError> {
         let secret = validate(provider, text)?;
-        self.store
-            .set(provider.account(), &secret)
-            .map_err(store_error)?;
-        self.memo()[provider.index()] = Memo {
-            present: Some(true),
-            rejected: false,
-            verified: false,
-        };
+        {
+            let mut memo = self.memo();
+            let entry = &mut memo[provider.index()];
+            // Retire old work even if the platform write fails ambiguously.
+            entry.revision = entry.revision.checked_add(1).ok_or(KeyError::Store)?;
+            // A platform error can follow an actual mutation. Neither old
+            // authentication flag nor cached presence describes that result.
+            entry.verified = false;
+            entry.rejected = false;
+            entry.present = None;
+            self.store
+                .set(provider.account(), &secret)
+                .map_err(store_error)?;
+            entry.present = Some(true);
+            entry.rejected = false;
+        }
         Ok(self.status())
     }
 
     pub fn remove(&self, provider: Provider) -> Result<KeysStatus, KeyError> {
-        self.store.delete(provider.account()).map_err(store_error)?;
-        self.memo()[provider.index()] = Memo {
-            present: Some(false),
-            rejected: false,
-            verified: false,
-        };
+        {
+            let mut memo = self.memo();
+            let entry = &mut memo[provider.index()];
+            entry.revision = entry.revision.checked_add(1).ok_or(KeyError::Store)?;
+            // A platform error can follow an actual mutation. Neither old
+            // authentication flag nor cached presence describes that result.
+            entry.verified = false;
+            entry.rejected = false;
+            entry.present = None;
+            self.store.delete(provider.account()).map_err(store_error)?;
+            entry.present = Some(false);
+            entry.rejected = false;
+        }
         Ok(self.status())
     }
 
     /// The stored key, for the one request that uses it. Never returned to
     /// the webview.
     pub fn get(&self, provider: Provider) -> Result<Secret, KeyError> {
+        self.get_with_revision(provider).map(|(secret, _)| secret)
+    }
+
+    pub(crate) fn get_with_revision(
+        &self,
+        provider: Provider,
+    ) -> Result<(Secret, CredentialRevision), KeyError> {
+        // Store read and identity capture cannot straddle set/remove. Never
+        // retain this mutex during a provider request or response wait.
+        let mut memo = self.memo();
         let secret = self.store.get(provider.account()).map_err(store_error)?;
-        self.memo()[provider.index()].present = Some(secret.is_some());
-        secret.ok_or(KeyError::NotSet(provider))
+        let entry = &mut memo[provider.index()];
+        entry.present = Some(secret.is_some());
+        let revision = CredentialRevision {
+            owner: self.owner.clone(),
+            provider,
+            revision: entry.revision,
+        };
+        secret
+            .map(|secret| (secret, revision))
+            .ok_or(KeyError::NotSet(provider))
+    }
+
+    pub(crate) fn request_key(&'static self, provider: Provider) -> RequestKey {
+        RequestKey {
+            keys: self,
+            provider,
+            revision: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Metadata-only readiness fixtures inject an auth observation without
+    /// retrieving a fake or platform secret. Not available in production.
+    #[cfg(test)]
+    pub(crate) fn revision_for_test(&self, provider: Provider) -> CredentialRevision {
+        CredentialRevision {
+            owner: self.owner.clone(),
+            provider,
+            revision: self.memo()[provider.index()].revision,
+        }
     }
 
     pub fn is_set(&self, provider: Provider) -> bool {
@@ -567,26 +681,38 @@ impl Keys {
     /// Asks the provider whether the stored key works, with one read-only
     /// request. An unreachable provider changes nothing.
     pub fn test(&self, provider: Provider) -> Result<KeysStatus, KeyError> {
-        let secret = self.get(provider)?;
+        let (secret, revision) = self.get_with_revision(provider)?;
         let result = self.probe.check(provider, &secret);
         drop(secret);
-        match result {
-            ProbeResult::Accepted => {
-                let mut memo = self.memo();
-                memo[provider.index()].rejected = false;
-                memo[provider.index()].verified = true;
-            }
-            ProbeResult::Rejected => self.mark_rejected(provider),
-            ProbeResult::Unreachable => return Err(KeyError::Unreachable(provider)),
+        if result == ProbeResult::Unreachable {
+            return Err(KeyError::Unreachable(provider));
         }
+        self.apply_result(&revision, result);
         Ok(self.status())
     }
 
-    /// The provider refused the key during a session (401 or 403).
-    pub fn mark_rejected(&self, provider: Provider) {
+    fn apply_result(&self, revision: &CredentialRevision, result: ProbeResult) {
         let mut memo = self.memo();
-        memo[provider.index()].rejected = true;
-        memo[provider.index()].verified = false;
+        let entry = &mut memo[revision.provider.index()];
+        if !Arc::ptr_eq(&revision.owner, &self.owner) || revision.revision != entry.revision {
+            return;
+        }
+        match result {
+            ProbeResult::Accepted => {
+                entry.rejected = false;
+                entry.verified = true;
+            }
+            ProbeResult::Rejected => {
+                entry.rejected = true;
+                entry.verified = false;
+            }
+            ProbeResult::Unreachable => {}
+        }
+    }
+
+    /// The provider refused the key during a session (401 or 403).
+    pub(crate) fn mark_rejected(&self, revision: &CredentialRevision) {
+        self.apply_result(revision, ProbeResult::Rejected);
     }
 }
 
@@ -699,6 +825,229 @@ mod tests {
     const ELEVENLABS_HEX: &str = "0123456789abcdef0123456789abcdef";
     const OPENAI: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
     const GEMINI: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
+
+    #[test]
+    fn held_old_key_result_cannot_reject_or_verify_a_replacement() {
+        use std::sync::mpsc;
+        struct Held {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            answer: ProbeResult,
+        }
+        impl Probe for Held {
+            fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                self.answer
+            }
+        }
+        for answer in [ProbeResult::Rejected, ProbeResult::Accepted] {
+            let (entered, started) = mpsc::channel();
+            let (release, held) = mpsc::channel();
+            let keys = Arc::new(Keys::new(
+                Box::<MemoryStore>::default(),
+                Box::new(Held {
+                    entered,
+                    release: Mutex::new(held),
+                    answer,
+                }),
+            ));
+            keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+            let worker_keys = keys.clone();
+            let worker = std::thread::spawn(move || worker_keys.test(Provider::Anthropic));
+            started
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            keys.set(Provider::Anthropic, &format!("{ANTHROPIC}replacement"))
+                .unwrap();
+            release.send(()).unwrap();
+            let status = worker.join().unwrap().unwrap().anthropic;
+            assert_eq!(status.state, KeyState::Set);
+            assert!(
+                !status.verified,
+                "an old success cannot bless a replacement"
+            );
+        }
+    }
+
+    #[test]
+    fn credential_results_are_owner_provider_and_mutation_scoped() {
+        for (provider, text) in [
+            (Provider::Anthropic, ANTHROPIC),
+            (Provider::OpenAi, OPENAI),
+            (Provider::Gemini, GEMINI),
+            (Provider::Deepgram, DEEPGRAM),
+            (Provider::ElevenLabs, ELEVENLABS),
+        ] {
+            for mutation in ["unchanged", "replace", "remove", "readd", "same", "other"] {
+                for result in [ProbeResult::Rejected, ProbeResult::Accepted] {
+                    let (keys, _, _) = keys(ProbeResult::Unreachable);
+                    keys.set(provider, text).unwrap();
+                    let (_, revision) = keys.get_with_revision(provider).unwrap();
+                    match mutation {
+                        "replace" => {
+                            keys.set(provider, &format!("{text}replacement")).unwrap();
+                        }
+                        "remove" => {
+                            keys.remove(provider).unwrap();
+                        }
+                        "readd" => {
+                            keys.remove(provider).unwrap();
+                            keys.set(provider, text).unwrap();
+                        }
+                        "same" => {
+                            keys.set(provider, text).unwrap();
+                        }
+                        "other" => {
+                            let (other, value) = if provider == Provider::Anthropic {
+                                (Provider::OpenAi, OPENAI)
+                            } else {
+                                (Provider::Anthropic, ANTHROPIC)
+                            };
+                            keys.set(other, value).unwrap();
+                        }
+                        _ => {}
+                    }
+                    keys.apply_result(&revision, result);
+                    let current = matches!(mutation, "unchanged" | "other");
+                    let status = keys.status().of(provider);
+                    assert_eq!(
+                        status.state,
+                        if mutation == "remove" {
+                            KeyState::NotSet
+                        } else if current && result == ProbeResult::Rejected {
+                            KeyState::Rejected
+                        } else {
+                            KeyState::Set
+                        }
+                    );
+                    assert_eq!(status.verified, current && result == ProbeResult::Accepted);
+                    assert_eq!(
+                        keys.memo()[provider.index()].rejected,
+                        current && result == ProbeResult::Rejected
+                    );
+                    let (other_owner, _, _) = self::keys(ProbeResult::Unreachable);
+                    other_owner.set(provider, text).unwrap();
+                    other_owner.mark_rejected(&revision);
+                    assert_eq!(other_owner.status().of(provider).state, KeyState::Set);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn serial_request_callback_retains_its_read_receipt_not_the_latest_key() {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(NoNetwork),
+        )));
+        keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+        let mut old = keys.request_key(Provider::Anthropic);
+        old.get().unwrap();
+        keys.remove(Provider::Anthropic).unwrap();
+        keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+        old.rejection_handler().mark_rejected();
+        assert_eq!(keys.status().anthropic.state, KeyState::Set);
+        let mut current = keys.request_key(Provider::Anthropic);
+        current.get().unwrap();
+        keys.set(Provider::OpenAi, OPENAI).unwrap();
+        current.rejection_handler().mark_rejected();
+        assert_eq!(keys.status().anthropic.state, KeyState::Rejected);
+        assert_eq!(keys.status().openai.state, KeyState::Set);
+    }
+
+    #[test]
+    fn failed_or_ambiguous_store_writes_retire_old_results_without_verifying_any_key() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Faulty {
+            inner: MemoryStore,
+            fail: Arc<AtomicBool>,
+            write_before_error: bool,
+        }
+        impl SecretStore for Faulty {
+            fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
+                self.inner.get(account)
+            }
+            fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
+                let fail = self.fail.load(Ordering::Acquire);
+                if !fail || self.write_before_error {
+                    self.inner.set(account, secret)?;
+                }
+                if fail {
+                    Err(StoreError::Failed)
+                } else {
+                    Ok(())
+                }
+            }
+            fn delete(&self, account: &str) -> Result<(), StoreError> {
+                let fail = self.fail.load(Ordering::Acquire);
+                if !fail || self.write_before_error {
+                    self.inner.delete(account)?;
+                }
+                if fail {
+                    Err(StoreError::Failed)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for remove in [false, true] {
+            for write_before_error in [false, true] {
+                for (previous, answer) in [
+                    (ProbeResult::Accepted, ProbeResult::Accepted),
+                    (ProbeResult::Accepted, ProbeResult::Rejected),
+                    (ProbeResult::Rejected, ProbeResult::Accepted),
+                    (ProbeResult::Rejected, ProbeResult::Rejected),
+                ] {
+                    let fail = Arc::new(AtomicBool::new(false));
+                    let keys = Keys::new(
+                        Box::new(Faulty {
+                            inner: MemoryStore::default(),
+                            fail: fail.clone(),
+                            write_before_error,
+                        }),
+                        Box::new(NoNetwork),
+                    );
+                    keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+                    let (_, old) = keys.get_with_revision(Provider::Anthropic).unwrap();
+                    keys.apply_result(&old, previous);
+                    assert_eq!(
+                        keys.status().anthropic.verified,
+                        previous == ProbeResult::Accepted
+                    );
+                    fail.store(true, Ordering::Release);
+                    let result = if remove {
+                        keys.remove(Provider::Anthropic)
+                    } else {
+                        keys.set(Provider::Anthropic, &format!("{ANTHROPIC}replacement"))
+                    };
+                    assert!(matches!(result, Err(KeyError::Store)));
+                    fail.store(false, Ordering::Release);
+                    keys.apply_result(&old, answer);
+                    let status = keys.status().anthropic;
+                    assert!(
+                        !status.verified,
+                        "failed mutation cannot preserve or grant verification"
+                    );
+                    assert_eq!(
+                        status.state,
+                        if remove && write_before_error {
+                            KeyState::NotSet
+                        } else {
+                            KeyState::Set
+                        }
+                    );
+                    if !(remove && write_before_error) {
+                        // An actual fresh read may still reject the credential
+                        // that remained (or was written despite the error).
+                        let (_, fresh) = keys.get_with_revision(Provider::Anthropic).unwrap();
+                        keys.mark_rejected(&fresh);
+                        assert_eq!(keys.status().anthropic.state, KeyState::Rejected);
+                    }
+                }
+            }
+        }
+    }
 
     /// A store that records every call, so a test can see what was written.
     #[derive(Clone, Default)]
@@ -974,7 +1323,7 @@ mod tests {
             *probe.0.lock().unwrap(),
             [(Provider::ElevenLabs, ELEVENLABS.to_string())]
         );
-        keys.mark_rejected(Provider::ElevenLabs);
+        keys.mark_rejected(&keys.get_with_revision(Provider::ElevenLabs).unwrap().1);
         assert_eq!(keys.status().elevenlabs.state, KeyState::Rejected);
         let removed = keys.remove(Provider::ElevenLabs).unwrap();
         assert_eq!(removed.elevenlabs, not_set());
@@ -1016,7 +1365,7 @@ mod tests {
         assert!(status.any_missing); // Deepgram is not set.
         keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
         // A session refusal also marks it.
-        keys.mark_rejected(Provider::Deepgram);
+        keys.mark_rejected(&keys.get_with_revision(Provider::Deepgram).unwrap().1);
         assert_eq!(keys.status().deepgram.state, KeyState::Rejected);
         // Replacing clears it; removing clears it.
         let status = keys.set(Provider::Deepgram, DEEPGRAM).unwrap();
@@ -1192,7 +1541,7 @@ mod tests {
             ]
         );
 
-        keys.mark_rejected(Provider::OpenAi);
+        keys.mark_rejected(&keys.get_with_revision(Provider::OpenAi).unwrap().1);
         assert_eq!(keys.status().openai.state, KeyState::Rejected);
         keys.remove(Provider::OpenAi).unwrap();
         assert_eq!(keys.status().openai, not_set());

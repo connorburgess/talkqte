@@ -1257,6 +1257,12 @@ pub(crate) fn write_provider(
             return failed(failure, None);
         }
     };
+    // A held refusal is no longer an authentication observation once this
+    // explicitly reviewed attempt has been withdrawn. Credential revisions
+    // provide an additional, independent guard against replacement.
+    if cancelled() {
+        return failed(Failure::Cancelled, None);
+    }
     match reply.status {
         200 => {}
         401 | 403 => {
@@ -1266,6 +1272,11 @@ pub(crate) fn write_provider(
         400 if prepared.target.provider == CueProvider::Gemini
             && crate::gemini_api::is_invalid_api_key_400(reply.body) =>
         {
+            // The bounded error-body read may outlast withdrawal after the
+            // initial response check; do not publish its auth observation.
+            if cancelled() {
+                return failed(Failure::Cancelled, None);
+            }
             on_rejected();
             return failed(Failure::SignIn, Some(0));
         }

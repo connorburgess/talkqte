@@ -397,11 +397,13 @@ pub fn connected_engine(
     register_usage(usage.clone());
     let model_id = model.id.clone();
     let custom = model.custom;
+    let mut key_source = crate::provider_keys::global().request_key(Provider::OpenAi);
+    let rejected_source = key_source.rejection_handler();
     let adapter = OpenAiApi::new(
         model,
         Network,
-        Box::new(|| crate::provider_keys::global().get(Provider::OpenAi)),
-        Box::new(|| crate::provider_keys::global().mark_rejected(Provider::OpenAi)),
+        Box::new(move || key_source.get()),
+        Box::new(move || rejected_source.mark_rejected()),
         usage,
     );
     register_cue_engine(

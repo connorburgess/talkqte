@@ -31,6 +31,16 @@ See [scope, refresh behavior and native acceptance gaps](calendar-agenda.md).
 
 `meeting_qa.rs` owns frozen whole-transcript tickets, bounded conversational Q&A, request budgets and validated source IDs. The engine owns the current-session record and withdraws it on Stop/revoke/replacement. A separately managed saved-Ask record retains its cumulative ledger for the app process lifetime, independently of navigation and engine replacement. `meeting_qa_commands.rs` checks saved ID/revision and exact transcript content under the history mutation lock before begin/acceptance, nesting only store → saved record; it never holds these locks across key access, network or an async wait. Current results/auth effects are accepted under the engine lock; saved results/auth effects require the still-current saved snapshot. Provider-compatible serialized envelopes are bounded before credential access. The companion can only open/focus the notebook transcript/Ask panel, never prepare/send/read Ask. React supplies only a selected saved ID/revision, never transcript text, request destination or conversational evidence. See [live questions](live-questions.md) for explicit Send, omissions, retention and remaining acceptance.
 
+Provider authentication status additionally requires an opaque credential receipt
+from the original read. `provider_keys` serializes app-managed store mutations,
+credential reads and memo updates under its credential/memo mutex; network work
+runs after releasing it. Each provider has an independent revision and each store
+instance an independent owner identity. Late refusal/success cannot alter a newer
+credential's status. Cue adapters and speech streams retain their own acquisition
+receipt; Ask applies it only after source acceptance, and meeting notes preserve
+their existing cancellation gate. Receipts contain no key material, are never
+serialized, and add no credential cache. See [provider keys](provider-keys.md).
+
 ## Boundaries
 
 ### Current prototype

@@ -443,6 +443,83 @@ fn stop_waiting_after_sending_stops_reading_and_the_cost_is_unknown() {
 }
 
 #[test]
+fn withdrawn_notes_attempt_never_applies_late_auth_or_success() {
+    for model in [
+        &llm_provider::ANTHROPIC_MODELS[0],
+        &llm_provider::OPENAI_MODELS[0],
+        &llm_provider::GEMINI_MODELS[0],
+    ] {
+        for status in [200, 400, 401, 403] {
+            let (mut prepared, _) = first_case();
+            prepared.target = ResolvedModel::from_curated(model);
+            let cancelled = Cell::new(false);
+            let rejected = Cell::new(false);
+            let written = write_provider(
+                &prepared,
+                Secret::for_test(KEY),
+                || rejected.set(true),
+                &|| cancelled.get(),
+                |_, _| {
+                    cancelled.set(true);
+                    Ok(Reply {
+                        status,
+                        body: Box::new(std::io::Cursor::new(
+                            br#"{"error":{"details":[{"reason":"API_KEY_INVALID"}]}}"#.to_vec(),
+                        )),
+                    })
+                },
+                |_| panic!("withdrawn response must not be parsed"),
+            );
+            assert!(written.sent);
+            assert_eq!(written.result.unwrap_err(), Failure::Cancelled);
+            assert_eq!(written.spent_micro_usd, None);
+            assert!(!rejected.get());
+        }
+    }
+}
+
+#[test]
+fn withdrawal_during_gemini_error_body_read_cannot_reject_the_key() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct WithdrawOnRead {
+        cancelled: Arc<AtomicBool>,
+        body: std::io::Cursor<Vec<u8>>,
+    }
+    impl std::io::Read for WithdrawOnRead {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            self.cancelled.store(true, Ordering::Release);
+            std::io::Read::read(&mut self.body, bytes)
+        }
+    }
+    let (mut prepared, _) = first_case();
+    prepared.target = ResolvedModel::from_curated(&llm_provider::GEMINI_MODELS[0]);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let rejected = Cell::new(false);
+    let written = write_provider(
+        &prepared,
+        Secret::for_test(KEY),
+        || rejected.set(true),
+        &|| cancelled.load(Ordering::Acquire),
+        |_, _| {
+            Ok(Reply {
+                status: 400,
+                body: Box::new(WithdrawOnRead {
+                    cancelled: cancelled.clone(),
+                    body: std::io::Cursor::new(
+                        br#"{"error":{"details":[{"reason":"API_KEY_INVALID"}]}}"#.to_vec(),
+                    ),
+                }),
+            })
+        },
+        |_| panic!("authentication error is not a notes stream"),
+    );
+    assert!(written.sent);
+    assert_eq!(written.result.unwrap_err(), Failure::Cancelled);
+    assert_eq!(written.spent_micro_usd, None);
+    assert!(!rejected.get());
+}
+
+#[test]
 fn a_new_session_stops_the_last_sessions_request() {
     let mut engine = Engine::live();
     ended_session(&mut engine);

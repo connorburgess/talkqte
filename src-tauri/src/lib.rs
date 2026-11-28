@@ -3502,7 +3502,7 @@ mod live_readiness_diagnostics_tests {
             provider_keys::Provider::OpenAi,
             provider_keys::Provider::Gemini,
         ] {
-            keys.mark_rejected(provider);
+            keys.mark_rejected(&keys.revision_for_test(provider));
         }
         assert_eq!(
             live_status_with_keys(&keys).available,
