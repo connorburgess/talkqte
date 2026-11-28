@@ -740,7 +740,19 @@ function Notebook() {
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
   // Pre-filled meeting title from an opt-in calendar pre-call prompt or Calendar Home.
+  type PendingTitleOrigin = 'agenda' | 'precall' | 'manual' | null;
   const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
+  const [pendingTitleOrigin, setPendingTitleOrigin] =
+    useState<PendingTitleOrigin>(null);
+  const pendingTitleOriginRef = useRef<PendingTitleOrigin>(null);
+  const setPendingTitle = useCallback(
+    (title: string | null, origin: PendingTitleOrigin) => {
+      pendingTitleOriginRef.current = origin;
+      setPendingTitleOrigin(origin);
+      setMeetingTitle(title);
+    },
+    [],
+  );
   const [preparedCalendarEvent, setPreparedCalendarEvent] = useState<{
     occurrenceKey: string;
     title: string;
@@ -755,18 +767,24 @@ function Notebook() {
   const [nowEpochS, setNowEpochS] = useState(() =>
     Math.floor(Date.now() / 1000),
   );
-  const applyCalendarSnapshot = useCallback((next: CalendarAgendaSnapshot) => {
-    if (next.revision < calendarRevision.current) return;
-    calendarRevision.current = next.revision;
-    setCalendarSnap(next);
-    if (
-      !next.agendaEnabled ||
-      next.permission === 'denied' ||
-      next.permission === 'off'
-    ) {
-      setPreparedCalendarEvent(null);
-    }
-  }, []);
+  const applyCalendarSnapshot = useCallback(
+    (next: CalendarAgendaSnapshot) => {
+      if (next.revision < calendarRevision.current) return;
+      calendarRevision.current = next.revision;
+      setCalendarSnap(next);
+      if (
+        !next.agendaEnabled ||
+        next.permission === 'denied' ||
+        next.permission === 'off'
+      ) {
+        setPreparedCalendarEvent(null);
+        if (pendingTitleOriginRef.current === 'agenda') {
+          setPendingTitle(null, null);
+        }
+      }
+    },
+    [setPendingTitle],
+  );
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
@@ -869,14 +887,14 @@ function Notebook() {
       occurrenceKey: event.occurrenceKey,
       title: event.title,
     });
-    setMeetingTitle(event.title);
+    setPendingTitle(event.title, 'agenda');
     setNotice(
       `Prepared “${event.title}”. Press Start live session when ready.`,
     );
   };
   const clearPreparedMeeting = () => {
     setPreparedCalendarEvent(null);
-    setMeetingTitle(null);
+    setPendingTitle(null, null);
   };
   useEffect(() => {
     let disposed = false;
@@ -884,7 +902,7 @@ function Notebook() {
     void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
       setView('notebook');
       setPreparedCalendarEvent(null);
-      if (payload?.title) setMeetingTitle(payload.title);
+      if (payload?.title) setPendingTitle(payload.title, 'precall');
     })
       .then((unlisten) => {
         if (disposed) unlisten();
@@ -895,14 +913,13 @@ function Notebook() {
       disposed = true;
       stop?.();
     };
-  }, []);
+  }, [setPendingTitle]);
   const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
-    setPreparedCalendarEvent(null);
     setScheduleGlanceOpen(false);
     const explicitTitle = meetingTitle === null ? undefined : meetingTitle;
     void run(async () => {
@@ -913,7 +930,8 @@ function Notebook() {
           'start_live_session',
           explicitTitle !== undefined ? { title: explicitTitle } : undefined,
         );
-        setMeetingTitle(null);
+        setPreparedCalendarEvent(null);
+        setPendingTitle(null, null);
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -2385,11 +2403,14 @@ function Notebook() {
                         <div className="calendar-meeting-title">
                           <label htmlFor="pre-call-title">
                             Meeting title
-                            {preparedCalendarEvent && (
+                            {pendingTitleOrigin === 'agenda' && (
                               <span className="muted">
                                 {' '}
                                 · Prepared from Apple Calendar
                               </span>
+                            )}
+                            {pendingTitleOrigin === 'manual' && (
+                              <span className="muted"> · Custom title</span>
                             )}
                           </label>
                           <div className="calendar-meeting-title-row">
@@ -2399,20 +2420,24 @@ function Notebook() {
                               maxLength={120}
                               value={meetingTitle}
                               disabled={busy}
-                              onChange={(e) => setMeetingTitle(e.target.value)}
+                              onChange={(e) => {
+                                setPreparedCalendarEvent(null);
+                                setPendingTitle(e.target.value, 'manual');
+                              }}
                             />
                             <button
                               type="button"
                               className="secondary-button"
                               disabled={busy}
                               onClick={() => {
-                                setMeetingTitle('');
                                 setPreparedCalendarEvent(null);
+                                setPendingTitle('', 'manual');
                               }}
                             >
                               Clear
                             </button>
-                            {preparedCalendarEvent && (
+                            {(pendingTitleOrigin === 'agenda' ||
+                              pendingTitleOrigin === 'manual') && (
                               <button
                                 type="button"
                                 className="text-button"
@@ -3838,6 +3863,9 @@ function Notebook() {
                   setNameError('');
                   setPreparedCalendarEvent(null);
                   setScheduleGlanceOpen(false);
+                  if (pendingTitleOriginRef.current === 'agenda') {
+                    setPendingTitle(null, null);
+                  }
                   setSettingsEpoch((epoch) => epoch + 1);
                 }}
               />

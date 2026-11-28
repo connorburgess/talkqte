@@ -55,7 +55,7 @@ function agendaStatusLabel(snapshot: CalendarAgendaSnapshot): string {
       ? `Connected · stale cache (last updated ${formatClockTime(snapshot.lastUpdatedEpochMs)})`
       : 'Connected · stale cache';
   }
-  const limitSuffix = snapshot.truncated ? ' · limited to 250 events' : '';
+  const limitSuffix = snapshot.truncated ? ' · results limited' : '';
   const count = snapshot.calendars.filter((c) => c.included).length;
   if (snapshot.calendars.length > 0) {
     return `Connected · ${count} of ${snapshot.calendars.length} calendars shown${limitSuffix}`;
@@ -326,8 +326,9 @@ export function CalendarSettings({
             </h2>
             <p>
               Reads titles, times, and local calendar names from Apple
-              Calendar’s local Mac cache (yesterday through 14 days ahead, up to
-              250 events). Google Calendar, iCloud, and Outlook appear only if
+              Calendar’s local Mac cache (yesterday through 14 days ahead;
+              bounded at up to 100 calendars, 10,000 scanned items, and 250
+              shown events). Google Calendar, iCloud, and Outlook appear only if
               already synced in Apple Calendar. Never uploads your calendar or
               reads attendees. Your chosen calendar filter IDs save locally in
               Settings; preparing a meeting fills the editable session title
@@ -419,9 +420,12 @@ export function CalendarSettings({
                   agenda.permission === 'connected' &&
                   agenda.truncated && (
                     <p className="calendar-truncated-note" role="status">
-                      Results are limited to the first 250 events (yesterday
-                      through +14 days). Hide calendars you do not need below to
-                      narrow the list.
+                      Results are limited by local agenda caps (up to 100
+                      calendars, 10,000 scanned items, or 250 shown events
+                      across yesterday through +14 days). Hide calendars you do
+                      not need below to narrow the list; if Apple Calendar has
+                      more than 100 calendars, Select all only covers the 100
+                      returned here.
                     </p>
                   )}
                 {agenda.agendaEnabled &&

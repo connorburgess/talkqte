@@ -10,6 +10,8 @@ import {
 import {
   addDays,
   buildWeekWindow,
+  CALENDAR_RESULTS_LIMITED_DETAIL,
+  CALENDAR_RESULTS_LIMITED_SHORT,
   clampDate,
   eventsForDate,
   formatClockTime,
@@ -552,10 +554,7 @@ export function CalendarAgenda({
 
               {snapshot.truncated && (
                 <div className="calendar-truncated-note" role="status">
-                  <span>
-                    Results limited to the first 250 events (yesterday through
-                    +14 days) from Apple Calendar. Later events may not appear.
-                  </span>
+                  <span>{CALENDAR_RESULTS_LIMITED_DETAIL}</span>
                   <button
                     type="button"
                     className="text-button calendar-settings-link"
@@ -759,7 +758,7 @@ export function LiveScheduleGlance({
       ) : displayTimed.length === 0 && allDay.length === 0 ? (
         <p className="calendar-agenda-none">
           {snapshot.truncated
-            ? 'No more meetings shown on today’s cached schedule. Results are limited to the first 250 events (yesterday through +14 days), so later meetings may not appear.'
+            ? `No more meetings shown on today’s cached schedule. ${CALENDAR_RESULTS_LIMITED_SHORT}`
             : 'No more meetings on today’s cached schedule.'}
         </p>
       ) : (
@@ -804,8 +803,7 @@ export function LiveScheduleGlance({
           </ul>
           {snapshot.truncated && (
             <p className="calendar-agenda-footnote" role="status">
-              Results limited to the first 250 events (yesterday through +14
-              days); later meetings may not appear.
+              {CALENDAR_RESULTS_LIMITED_SHORT}
             </p>
           )}
         </>

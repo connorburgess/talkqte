@@ -87,7 +87,83 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
   await expect(titleInput).toHaveCount(0);
   await expect(agenda.getByText('Prepared')).toHaveCount(0);
 
+  // Turning the agenda off retires an unedited agenda-prepared title so Start does not send it silently.
+  await agenda.getByRole('button', { name: /Garden supply planning/ }).click();
+  await expect(titleInput).toHaveValue('Garden supply planning');
+  await expect(page.locator('.calendar-meeting-title')).toContainText(
+    'Prepared from Apple Calendar',
+  );
+  await agenda
+    .getByRole('button', { name: 'Calendar settings', exact: true })
+    .click();
+  await agendaCheck.uncheck();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(titleInput).toHaveCount(0);
+
+  // Turning the agenda back on: prepare, then revoke permission -> retires agenda-derived title before Start.
+  await page.getByRole('button', { name: 'Turn on agenda' }).click();
+  await expect(agenda).toBeVisible();
+  await agenda.getByRole('button', { name: /Garden supply planning/ }).click();
+  await expect(titleInput).toHaveValue('Garden supply planning');
+  // Stale lower-revision snapshot cannot retire the prepared title.
+  const currentRev = await page.evaluate(() => window.calendarTest.agenda());
+  await page.evaluate(
+    (staleSnap) => window.calendarTest.emitRawAgenda(staleSnap),
+    {
+      ...currentRev,
+      revision: currentRev.revision - 1,
+      agendaEnabled: false,
+      permission: 'denied' as const,
+      events: [],
+    },
+  );
+  await expect(titleInput).toHaveValue('Garden supply planning');
+  // Real revocation retires the unedited agenda-derived title cleanly; Start sends no calendar title.
+  await page.evaluate(() =>
+    window.calendarTest.emitAgenda({
+      permission: 'denied',
+      syncState: 'idle',
+      events: [],
+    }),
+  );
+  await expect(titleInput).toHaveCount(0);
+  await page
+    .getByRole('button', { name: 'Start live session', exact: true })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.captureTest.liveStarts))
+    .toEqual([{}]);
+  await page
+    .getByRole('button', { name: 'Stop live session', exact: true })
+    .click();
+
+  // Recover connection: editing a prepared title makes it a user-authored custom title preserved across disable.
+  await page.evaluate(() => window.calendarTest.setGrantResult('connected'));
+  await page.evaluate(() =>
+    window.calendarTest.emitAgenda({
+      permission: 'connected',
+      syncState: 'ready',
+    }),
+  );
+  await page.getByRole('button', { name: 'Refresh calendar agenda' }).click();
+  await agenda.getByRole('button', { name: /Signage wording review/ }).click();
+  await titleInput.fill('Signage review — north gate');
+  await expect(page.locator('.calendar-meeting-title')).toContainText(
+    'Custom title',
+  );
+  await expect(page.locator('.calendar-meeting-title')).not.toContainText(
+    'Prepared from Apple Calendar',
+  );
+  await agenda
+    .getByRole('button', { name: 'Calendar settings', exact: true })
+    .click();
+  await agendaCheck.uncheck();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await expect(titleInput).toHaveValue('Signage review — north gate');
+
   // Turning the agenda off does not erase a separate pre-call prompt pending title.
+  await page.getByRole('button', { name: 'Ad-hoc session' }).click();
+  await page.getByRole('button', { name: 'Turn on agenda' }).click();
   await page.evaluate(() =>
     window.calendarTest.triggerStart('Pre-call Weekly Sync'),
   );
@@ -101,7 +177,7 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
   await page.getByRole('button', { name: 'Turn on agenda' }).click();
   await expect(agenda).toBeVisible();
 
-  // Prepare another meeting, edit its title, and start live session -> collapses calendar Home.
+  // Prepare another meeting, edit its title, start live session -> collapses calendar Home and keeps started title even if revoked mid-session.
   await agenda.getByRole('button', { name: /Signage wording review/ }).click();
   await titleInput.fill('Signage review — north gate');
   await page
@@ -109,11 +185,21 @@ test('Calendar agenda is off by default, independent of pre-call prompts, and pr
     .click();
   await expect
     .poll(() => page.evaluate(() => window.captureTest.liveStarts))
-    .toEqual([{ title: 'Signage review — north gate' }]);
+    .toEqual([{}, { title: 'Signage review — north gate' }]);
   await expect(agenda).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Stop live session', exact: true }),
   ).toBeEnabled();
+  await page.evaluate(() =>
+    window.calendarTest.emitAgenda({
+      permission: 'denied',
+      syncState: 'idle',
+      events: [],
+    }),
+  );
+  await expect(
+    page.getByText('Meeting: Signage review — north gate'),
+  ).toBeVisible();
 });
 
 test('date navigation, week strip keyboard nav, empty day, and truncated disclosure work within horizon', async ({
@@ -155,18 +241,24 @@ test('date navigation, week strip keyboard nav, empty day, and truncated disclos
     agenda.getByRole('button', { name: 'Previous day' }),
   ).toBeDisabled();
 
-  // Truncated 250-event disclosure renders accurately on both event days and empty days.
-  await page.evaluate(() =>
-    window.calendarTest.emitAgenda({ truncated: true }),
-  );
+  // Truncated disclosure covers 100-calendar, 10,000-scanned-item, and 250-event caps
+  // honestly — even with only a few visible events (e.g. >100 calendars cap).
+  await page.evaluate(() => {
+    const snap = window.calendarTest.agenda();
+    return window.calendarTest.emitAgenda({
+      truncated: true,
+      events: snap.events.slice(0, 3),
+    });
+  });
   await expect(agenda).toContainText(
-    'Results limited to the first 250 events (yesterday through +14 days) from Apple Calendar. Later events may not appear.',
+    'Results are limited by local agenda caps (up to 100 calendars, 10,000 scanned items, or 250 shown events across yesterday through +14 days). Some calendars or events may not appear.',
   );
+  await expect(agenda).not.toContainText('first 250 events');
   await expect(
     agenda.getByRole('button', { name: 'Filter calendars', exact: true }),
   ).toBeVisible();
 
-  // On an empty day while truncated, copy does not falsely claim no meetings exist
+  // On an empty day while truncated (e.g. candidate/event cap), copy does not falsely claim no meetings exist
   // and keeps the single results-limited disclosure below without repeating it.
   await todayBtn.click();
   await agenda.getByRole('button', { name: 'Next day' }).click();
@@ -174,10 +266,10 @@ test('date navigation, week strip keyboard nav, empty day, and truncated disclos
   await expect(agenda).toContainText('No meetings shown for');
   await expect(agenda).not.toContainText('No meetings scheduled for');
   await expect(agenda).toContainText(
-    'Results limited to the first 250 events (yesterday through +14 days) from Apple Calendar. Later events may not appear.',
+    'Results are limited by local agenda caps (up to 100 calendars, 10,000 scanned items, or 250 shown events across yesterday through +14 days). Some calendars or events may not appear.',
   );
 
-  // Settings reflects results-limited status and Filter calendars link navigates straight to Capture & prompts.
+  // Settings reflects results-limited status (including >100 calendars Select-all limit) and Filter calendars navigates to Capture & prompts.
   await agenda
     .getByRole('button', { name: 'Filter calendars', exact: true })
     .click();
@@ -186,12 +278,14 @@ test('date navigation, week strip keyboard nav, empty day, and truncated disclos
   });
   await expect(settingsRegion).toBeVisible();
   await expect(settingsRegion.getByRole('status').first()).toContainText(
-    'limited to 250 events',
+    'results limited',
   );
+  await expect(settingsRegion).not.toContainText('first 250 events');
   await expect(settingsRegion).toContainText(
-    'Hide calendars you do not need below to narrow the list.',
+    'Select all only covers the 100 returned here.',
   );
   await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Refresh calendar agenda' }).click();
   await page.evaluate(() =>
     window.calendarTest.emitAgenda({ truncated: false }),
   );
@@ -296,13 +390,14 @@ test('Live session keeps Stop/consent primary, shows paused-while-live Schedule 
     page.getByRole('button', { name: 'Stop live session', exact: true }),
   ).toBeEnabled();
 
-  // Results-limited disclosure appears inside Schedule glance on both populated and empty days.
+  // Results-limited disclosure appears inside Schedule glance on both populated and empty days without over-claiming first-250.
   await page.evaluate(() =>
     window.calendarTest.emitAgenda({ truncated: true, pausedWhileLive: true }),
   );
   await expect(glance).toContainText(
-    'Results limited to the first 250 events (yesterday through +14 days); later meetings may not appear.',
+    'Results are limited (up to 100 calendars, 10,000 scanned items, or 250 shown events); some calendars or meetings may not appear.',
   );
+  await expect(glance).not.toContainText('first 250 events');
   await page.evaluate(() =>
     window.calendarTest.emitAgenda({
       truncated: true,
@@ -311,7 +406,7 @@ test('Live session keeps Stop/consent primary, shows paused-while-live Schedule 
     }),
   );
   await expect(glance).toContainText(
-    'No more meetings shown on today’s cached schedule. Results are limited to the first 250 events',
+    'No more meetings shown on today’s cached schedule. Results are limited (up to 100 calendars, 10,000 scanned items, or 250 shown events)',
   );
 
   // Loading, unknown (permission: off), and all-hidden states stay honest inside Schedule glance.

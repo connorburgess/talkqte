@@ -8,6 +8,12 @@ export type CalendarPermissionStatus =
 export type CalendarSyncState =
   'idle' | 'loading' | 'refreshing' | 'ready' | 'error';
 
+export const CALENDAR_RESULTS_LIMITED_DETAIL =
+  'Results are limited by local agenda caps (up to 100 calendars, 10,000 scanned items, or 250 shown events across yesterday through +14 days). Some calendars or events may not appear.';
+
+export const CALENDAR_RESULTS_LIMITED_SHORT =
+  'Results are limited (up to 100 calendars, 10,000 scanned items, or 250 shown events); some calendars or meetings may not appear.';
+
 export interface CalendarSourceSummary {
   id: string;
   title: string;
