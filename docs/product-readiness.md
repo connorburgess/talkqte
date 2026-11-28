@@ -362,3 +362,7 @@ The first signed fallback build refused `read_context_file_path` before parsing 
 ### Selected-note dispatch verification
 
 The [attested diagnostic path](selected-note-attestation.md) requires an exact one-note grant (or explicit zero-note control), credential-free scope readiness, and private note-projection equality at SDK entry. Offline source/tests do not establish native execution or model use. Next blocker: independent exact-delta review, named hosted Rust execution, reviewed native/JS/runner artifact composition, then separately authorized same-process source review and diagnostic acceptance. Earlier import-only screenshots remain insufficient evidence of processing inclusion.
+
+### Meeting-notes recovery acceptance
+
+The notes recovery slice has fictional offline coverage for 236 short source segments, unchanged one-to-eight citation bounds, an explicit final retry review, conservative combined estimates and stale-result fencing. It does not establish why a particular real reply failed, provider acceptance, semantic citation accuracy or actual billed spend. Next blocker: with a fictional meeting and separately authorized provider access, inspect a failed validation and an explicitly confirmed recovery on each supported provider; verify final native keyboard/VoiceOver focus, cancellation and exact line grounding. Keep human usefulness, native and release gates open.

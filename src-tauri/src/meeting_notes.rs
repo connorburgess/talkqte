@@ -1,11 +1,11 @@
 //! Meeting notes written by a model, with the person's own Anthropic key,
 //! after a live session has ended.
 //!
-//! This is one explicit request per meeting, never automatic. The notebook
+//! This is an explicit request after a meeting, never automatic. The notebook
 //! first shows a plan: what will be sent (the session's transcript and, only
 //! if the person ticks it, their own notes), to whom, and an estimate of size
-//! and cost. Nothing is sent until the person confirms. There is no retry, no
-//! fallback model and no other service.
+//! and cost. A failed validation alone can be reviewed for one final retry,
+//! within a combined $1 worst-case estimate. No automatic resend or fallback.
 //!
 //! The system prompt, the reply schema, the bounds and the fictional cases
 //! the tests use all live in `scripts/fixtures/meeting-notes.json`. The reply
@@ -41,7 +41,7 @@ use std::{
 const CONTRACT: &str = include_str!("../../scripts/fixtures/meeting-notes.json");
 
 /// The model used for notes unless the person chooses another in Settings.
-/// Notes are one request per meeting and are what people keep, so the
+/// Notes are explicitly requested and are what people keep, so the
 /// default is the most careful of the models the cue path already lists.
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// Shared by adaptive thinking and the reply; reaching it is a failure.
@@ -100,6 +100,29 @@ pub fn schema() -> &'static Value {
     &contract().schema
 }
 
+/// Anthropic's supported schema subset excludes maxItems. Keep its explicit
+/// descriptions and prompt limits, and apply the same strict local validator.
+/// OpenAI and Gemini receive the canonical array bounds as well.
+fn provider_schema(provider: CueProvider) -> Value {
+    fn compatible(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                object.remove("maxItems");
+                for child in object.values_mut() {
+                    compatible(child);
+                }
+            }
+            Value::Array(values) => values.iter_mut().for_each(compatible),
+            _ => {}
+        }
+    }
+    let mut value = schema().clone();
+    if provider == CueProvider::Anthropic {
+        compatible(&mut value);
+    }
+    value
+}
+
 /// The notes model chosen in Settings; saved in the settings file.
 fn chosen() -> &'static Mutex<&'static str> {
     static CHOSEN: Mutex<&'static str> = Mutex::new(DEFAULT_MODEL);
@@ -150,6 +173,8 @@ pub enum Refusal {
     AlreadySent,
     Writing,
     SpendCap,
+    RetryUnavailable,
+    RetryUnpriced,
     KeyNotSet,
     KeyRejected,
     KeyUnreadable,
@@ -168,6 +193,8 @@ impl Refusal {
             Self::AlreadySent => "alreadySent",
             Self::Writing => "writing",
             Self::SpendCap => "spendCap",
+            Self::RetryUnavailable => "retryUnavailable",
+            Self::RetryUnpriced => "retryUnpriced",
             Self::KeyNotSet => "keyNotSet",
             Self::KeyRejected => "keyRejected",
             Self::KeyUnreadable => "keyUnreadable",
@@ -185,9 +212,11 @@ impl Refusal {
             (Self::Empty, _) => "This session has no transcript to write notes from. Nothing was sent.",
             (Self::TooLong, _) => "This meeting's transcript is longer than one request can take (about two hours of talk), so notes cannot be written for it. Nothing was sent.",
             (Self::NotEnded, _) => "Meeting notes can be written once a live session has ended. Nothing was sent.",
-            (Self::AlreadySent, _) => "Notes were already requested for this meeting. Each meeting gets one request. Nothing was sent.",
+            (Self::AlreadySent, _) => "Notes were already requested for this meeting. Only a failed validation can be reviewed for one retry. Nothing was sent.",
+            (Self::RetryUnavailable, _) => "A retry is available only after a failed validation, at most once per meeting. Nothing was sent.",
+            (Self::RetryUnpriced, _) => "A retry cannot be bounded within the $1.00 combined estimate because a request has unknown model pricing. Nothing was sent.",
             (Self::Writing, _) => "Notes for this meeting are already being written. Nothing else was sent.",
-            (Self::SpendCap, _) => "At its worst, this request could cost more than the $1.00 limit for one meeting's notes. A lower-cost model for meeting notes in Settings may fit. Nothing was sent.",
+            (Self::SpendCap, _) => "At its worst, this request plus any prior notes request could cost more than the $1.00 limit for this meeting's notes. A lower-cost model for meeting notes in Settings may fit. Nothing was sent.",
             (Self::KeyNotSet, CueProvider::Anthropic) => "Add your Anthropic API key in Settings to write meeting notes. Nothing was sent.",
             (Self::KeyNotSet, CueProvider::OpenAi) => "Add your OpenAI API key in Settings to write meeting notes. Nothing was sent.",
             (Self::KeyNotSet, CueProvider::Gemini) => "Add your Gemini API key in Settings to write meeting notes. Nothing was sent.",
@@ -290,7 +319,7 @@ impl Failure {
 
     pub fn message_for(self, provider: CueProvider) -> String {
         let name = provider.name();
-        let after = "No notes were written, and nothing else will be sent for this meeting.";
+        let after = "No notes were written. Nothing will be sent automatically.";
         match self {
             Self::Cancelled => {
                 format!("Cancelled. What was already sent may still be billed. {after}")
@@ -545,7 +574,7 @@ impl Prepared {
                 "messages": [{"role": "user", "content": self.user}],
                 "output_config": {
                     "effort": EFFORT,
-                    "format": {"type": "json_schema", "schema": schema()},
+                    "format": {"type": "json_schema", "schema": provider_schema(self.target.provider)},
                 },
                 "stream": true,
             }),
@@ -553,12 +582,15 @@ impl Prepared {
                 &self.target.id,
                 system_prompt(),
                 &self.user,
-                schema(),
+                &provider_schema(self.target.provider),
                 MAX_TOKENS,
             ),
-            CueProvider::Gemini => {
-                crate::gemini_api::notes_body(system_prompt(), &self.user, schema(), MAX_TOKENS)
-            }
+            CueProvider::Gemini => crate::gemini_api::notes_body(
+                system_prompt(),
+                &self.user,
+                &provider_schema(self.target.provider),
+                MAX_TOKENS,
+            ),
         }
     }
 
@@ -1306,6 +1338,13 @@ pub struct Record {
     custom_model: bool,
     /// Stop waiting for the request in flight, if one is.
     in_flight: Option<Arc<AtomicBool>>,
+    sent_attempts: u8,
+    validation_failed: bool,
+    // Reserve the full estimate even when actual usage is missing or smaller.
+    reserved_micro_usd: u64,
+    unpriced_sent: bool,
+    pending: Option<(Option<u64>, Option<&'static str>, bool)>,
+    generation: u64,
 }
 
 /// The most text a kept set of notes may hold after editing.
@@ -1338,9 +1377,60 @@ impl Record {
 
     /// Records the request now in flight, so Stop waiting reaches it.
     pub fn begin(&mut self, prepared: &Prepared) {
+        self.generation = self.generation.saturating_add(1);
+        self.pending = Some((
+            prepared.worst_micro_usd_opt(),
+            self.provider_name,
+            self.custom_model,
+        ));
         self.provider_name = Some(prepared.target.provider.name());
         self.custom_model = prepared.target.custom;
         self.in_flight = Some(prepared.cancel_flag());
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn retry_available(&self) -> bool {
+        self.validation_failed
+            && self.sent_attempts == 1
+            && self.in_flight.is_none()
+            && self.pending.is_none()
+    }
+
+    pub fn reserved_micro_usd(&self) -> u64 {
+        self.reserved_micro_usd
+    }
+
+    pub fn check_retry(&self, prepared: &Prepared) -> Result<(), Refusal> {
+        if !self.retry_available() {
+            return Err(Refusal::RetryUnavailable);
+        }
+        let worst = prepared
+            .worst_micro_usd_opt()
+            .ok_or(Refusal::RetryUnpriced)?;
+        if self.unpriced_sent {
+            return Err(Refusal::RetryUnpriced);
+        }
+        if self.reserved_micro_usd.saturating_add(worst) > SPEND_CAP_MICRO_USD {
+            return Err(Refusal::SpendCap);
+        }
+        Ok(())
+    }
+
+    /// Nothing left the device: restore the prior failure and provider metadata.
+    pub fn abandon(&mut self) -> Phase {
+        self.cancel();
+        if let Some((_, provider, custom)) = self.pending.take() {
+            self.provider_name = provider;
+            self.custom_model = custom;
+        }
+        if self.sent_attempts == 0 {
+            Phase::None
+        } else {
+            Phase::Failed
+        }
     }
 
     /// Stop waiting: the request in flight stops, or is never sent.
@@ -1362,6 +1452,15 @@ impl Record {
         spent: Option<u64>,
     ) -> Phase {
         self.in_flight = None;
+        self.sent_attempts = self.sent_attempts.saturating_add(1);
+        if let Some((Some(worst), _, _)) = self.pending.take() {
+            self.reserved_micro_usd = self.reserved_micro_usd.saturating_add(worst);
+        } else {
+            self.unpriced_sent = true;
+        }
+        self.validation_failed = matches!(result, Err(Failure::Invalid(_)));
+        self.failure = None;
+        self.draft = None;
         self.spent_micro_usd = if self.custom_model { None } else { spent };
         match result {
             Ok(draft) => {

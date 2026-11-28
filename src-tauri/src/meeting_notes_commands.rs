@@ -18,6 +18,8 @@ pub struct PlanReply {
     /// when known and non-zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     cue_spent_micro_usd: Option<u64>,
+    retry: bool,
+    prior_reserved_micro_usd: u64,
 }
 
 /// Reply from `write_meeting_notes` with provider and custom-model flags.
@@ -45,6 +47,7 @@ pub struct NotesResult {
     spent_micro_usd: Option<u64>,
     provider_name: &'static str,
     custom_model: bool,
+    retry_available: bool,
 }
 
 /// What a notes request would send and cost. Sends nothing.
@@ -52,16 +55,20 @@ pub struct NotesResult {
 pub fn meeting_notes_plan(
     state: tauri::State<AppState>,
     include_notes: bool,
+    retry: Option<bool>,
 ) -> Result<PlanReply, String> {
     let runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
-    let plan = runtime
-        .engine
-        .meeting_notes_plan_view(include_notes)
-        .map_err(|refusal| {
-            refusal
-                .message_for(llm_provider::cue_provider())
-                .to_string()
-        })?;
+    let retry = retry.unwrap_or(false);
+    let plan = if retry {
+        runtime.engine.meeting_notes_retry_plan(include_notes)
+    } else {
+        runtime.engine.meeting_notes_plan_view(include_notes)
+    }
+    .map_err(|refusal| {
+        refusal
+            .message_for(llm_provider::cue_provider())
+            .to_string()
+    })?;
     let cue_spent_micro_usd = llm_provider::cue_usage()
         .filter(|usage| usage.provider == plan.provider)
         .and_then(|usage| usage.spent_micro_usd)
@@ -69,10 +76,12 @@ pub fn meeting_notes_plan(
     Ok(PlanReply {
         plan,
         cue_spent_micro_usd,
+        retry,
+        prior_reserved_micro_usd: runtime.engine.meeting_notes().reserved_micro_usd(),
     })
 }
 
-/// Sends this session's one notes request, after the person confirmed the
+/// Sends an initial request or one reviewed validation retry, with the
 /// plan named by `fingerprint`, and returns the checked notes. Input that
 /// differs from that plan is refused and nothing is sent.
 #[tauri::command]
@@ -81,17 +90,28 @@ pub async fn write_meeting_notes(
     state: tauri::State<'_, AppState>,
     include_notes: bool,
     fingerprint: String,
+    retry: Option<bool>,
 ) -> Result<DraftReply, String> {
-    let (prepared, session) = {
+    let (prepared, session, generation) = {
         let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
         let active_provider = llm_provider::cue_provider();
-        let prepared = runtime
-            .engine
-            .begin_meeting_notes(include_notes, &fingerprint)
-            .map_err(|refusal| refusal.message_for(active_provider).to_string())?;
+        let prepared = if retry.unwrap_or(false) {
+            runtime
+                .engine
+                .begin_meeting_notes_retry(include_notes, &fingerprint)
+        } else {
+            runtime
+                .engine
+                .begin_meeting_notes(include_notes, &fingerprint)
+        }
+        .map_err(|refusal| refusal.message_for(active_provider).to_string())?;
         let session = runtime.engine.session();
         crate::publish(&app, &mut runtime);
-        (prepared, session)
+        (
+            prepared,
+            session,
+            runtime.engine.meeting_notes().generation(),
+        )
     };
     let provider = prepared.target().provider;
     let custom_model = prepared.target().custom;
@@ -112,13 +132,17 @@ pub async fn write_meeting_notes(
     let result = match outcome {
         // Nothing was sent: the key could not be used.
         Ok(Err(refusal)) => {
-            runtime.engine.abandon_meeting_notes(session);
+            runtime
+                .engine
+                .abandon_meeting_notes_attempt(session, generation);
             crate::publish(&app, &mut runtime);
             return Err(refusal.message_for(provider).to_string());
         }
         // Stop waiting came before anything was sent.
         Ok(Ok(written)) if !written.sent => {
-            runtime.engine.abandon_meeting_notes(session);
+            runtime
+                .engine
+                .abandon_meeting_notes_attempt(session, generation);
             crate::publish(&app, &mut runtime);
             return Err(match written.result {
                 Err(Failure::Cancelled) => meeting_notes::Refusal::Cancelled.message().into(),
@@ -128,8 +152,9 @@ pub async fn write_meeting_notes(
         }
         Ok(Ok(written)) => {
             let result = written.result;
-            let current = runtime.engine.finish_meeting_notes_for(
+            let current = runtime.engine.finish_meeting_notes_attempt(
                 session,
+                generation,
                 provider,
                 result.clone(),
                 written.spent_micro_usd,
@@ -144,9 +169,13 @@ pub async fn write_meeting_notes(
         // not known.
         Err(_) => {
             let failure = Failure::Unavailable;
-            runtime
-                .engine
-                .finish_meeting_notes_for(session, provider, Err(failure), None);
+            runtime.engine.finish_meeting_notes_attempt(
+                session,
+                generation,
+                provider,
+                Err(failure),
+                None,
+            );
             crate::publish(&app, &mut runtime);
             Err(failure)
         }
@@ -180,6 +209,7 @@ pub fn meeting_notes_result(state: tauri::State<AppState>) -> Result<NotesResult
         spent_micro_usd: record.spent_micro_usd(),
         provider_name: record.provider_name(),
         custom_model: record.custom_model(),
+        retry_available: record.retry_available(),
     })
 }
 

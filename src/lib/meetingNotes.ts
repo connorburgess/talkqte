@@ -25,6 +25,8 @@ export interface MeetingNotesPlan {
   cueSpentMicroUsd?: number;
   /** Names exactly what would be sent; the request must match it. */
   fingerprint: string;
+  retry?: boolean;
+  priorReservedMicroUsd?: number;
 }
 
 export interface CitedLine {
@@ -51,6 +53,7 @@ export interface MeetingNotesDraft {
 }
 
 export interface MeetingNotesResult {
+  retryAvailable?: boolean;
   draft?: MeetingNotesDraft;
   failure?: string;
   kept?: string;
@@ -120,18 +123,26 @@ const unavailable = () =>
     ),
   );
 
-export function meetingNotesPlan(includeNotes: boolean) {
+export function meetingNotesPlan(includeNotes: boolean, retry = false) {
   if (!desktop) return unavailable();
-  return invoke<MeetingNotesPlan>('meeting_notes_plan', { includeNotes });
+  return invoke<MeetingNotesPlan>('meeting_notes_plan', {
+    includeNotes,
+    retry,
+  });
 }
 
 /** Sends this meeting's one request, only if what would be sent still
  * matches the confirmed plan; resolves when the notes are checked. */
-export function writeMeetingNotes(includeNotes: boolean, fingerprint: string) {
+export function writeMeetingNotes(
+  includeNotes: boolean,
+  fingerprint: string,
+  retry = false,
+) {
   if (!desktop) return unavailable();
   return invoke<MeetingNotesDraft>('write_meeting_notes', {
     includeNotes,
     fingerprint,
+    retry,
   });
 }
 

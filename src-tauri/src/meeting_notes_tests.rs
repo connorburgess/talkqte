@@ -138,7 +138,10 @@ fn the_request_holds_the_transcript_and_only_the_chosen_extras() {
     assert_eq!(body["max_tokens"], MAX_TOKENS);
     assert_eq!(body["stream"], true);
     assert_eq!(body["system"], system_prompt());
-    assert_eq!(body["output_config"]["format"]["schema"], *schema());
+    assert_eq!(
+        body["output_config"]["format"]["schema"],
+        provider_schema(CueProvider::Anthropic)
+    );
     assert_eq!(body["output_config"]["effort"], "medium");
     // Adaptive thinking by default; no fallback model, no other tool.
     assert!(body.get("thinking").is_none());
@@ -150,11 +153,11 @@ fn the_request_holds_the_transcript_and_only_the_chosen_extras() {
     assert!(!user.contains("L8"), "a blank line is not sent");
     assert!(!body.to_string().contains(notes));
     let plan = without.plan();
-    // The figures docs/meeting-notes.md shows for this meeting, in cents.
+    // Rounded estimates include the expanded grounding prompt and schema.
     let cents = |micro: u64| (micro + 5_000) / 10_000;
     assert_eq!(
         (cents(plan.likely_micro_usd), cents(plan.worst_micro_usd)),
-        (7, 34)
+        (7, 35)
     );
     assert_eq!(plan.transcript_lines, 7);
     assert_eq!(plan.note_lines, None);
@@ -359,7 +362,7 @@ fn every_failure_is_shown_as_failed_and_nothing_is_retried() {
         assert_eq!(was_rejected, rejected);
         assert_eq!(transport.0.lock().unwrap().sent.len(), 1);
         let message = expected.message();
-        assert!(message.contains("nothing else will be sent for this meeting"));
+        assert!(message.contains("Nothing will be sent automatically."));
         assert!(!message.contains("Sam") && !message.contains(KEY));
     }
 }
@@ -389,7 +392,7 @@ fn offline_sends_nothing_and_keeps_the_meetings_request() {
         .begin_meeting_notes(false, &again.fingerprint)
         .is_ok());
     assert!(UNSENT_OFFLINE.contains("nothing was sent"));
-    assert!(!UNSENT_OFFLINE.contains("nothing else will be sent"));
+    assert!(!UNSENT_OFFLINE.contains("Nothing will be sent automatically"));
 }
 
 #[test]
@@ -830,6 +833,19 @@ fn openai_and_gemini_meeting_notes_reuse_same_contract_and_custom_models_omit_co
         system_prompt()
     );
     assert_eq!(body["generationConfig"]["responseJsonSchema"], *schema());
+    // Integer bounds survive the actual JSON serialization used by transport.
+    let wire: Value = serde_json::from_slice(&serde_json::to_vec(&body).unwrap()).unwrap();
+    assert_eq!(
+        wire["generationConfig"]["responseJsonSchema"]["properties"]["summary"]["maxItems"]
+            .as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        wire["generationConfig"]["responseJsonSchema"]["properties"]["summary"]["items"]
+            ["properties"]["lines"]["maxItems"]
+            .as_u64(),
+        Some(8)
+    );
 
     let gemini_sse = format!(
         "data: {}\n\n",
@@ -995,4 +1011,271 @@ fn resolved_speaker_names_flow_into_meeting_notes_and_validate_renamed_owners() 
     let other_prepared =
         prepare_for_with_speakers(target, &engine.state.transcript, None, &names).unwrap();
     assert_ne!(prepared.fingerprint(), other_prepared.fingerprint());
+}
+
+/// Short ASR fragments, not a real interview. Rendering may group turns, but
+/// citations must continue to address the original 236 source segments.
+fn fragmented_transcript() -> Vec<Segment> {
+    (0..236)
+        .map(|index| Segment {
+            id: format!("fictional-{index}"),
+            at_ms: index * 1_000,
+            speaker: "Speaker 1".into(),
+            speaker_id: None,
+            text: format!("Fictional fragment {index}."),
+        })
+        .collect()
+}
+
+#[test]
+fn fragmented_meeting_keeps_citation_bounds_without_repair_or_duplicate_padding() {
+    let prepared = prepare(opus(), &fragmented_transcript(), None).unwrap();
+    assert_eq!(prepared.plan().transcript_lines, 236);
+    let reply = |lines: Vec<String>| {
+        json!({
+            "summary":[{"text":"A fictional project was discussed.","lines":lines}],
+            "decisions":[],"actions":[],"openQuestions":[]
+        })
+        .to_string()
+    };
+    assert!(validate(
+        &reply((229..=236).map(|n| format!("L{n}")).collect()),
+        &prepared
+    )
+    .is_ok());
+    assert_eq!(
+        validate(&reply(vec![]), &prepared).unwrap_err(),
+        Invalid::Uncited
+    );
+    assert_eq!(
+        validate(
+            &reply((228..=236).map(|n| format!("L{n}")).collect()),
+            &prepared
+        )
+        .unwrap_err(),
+        Invalid::Uncited
+    );
+    assert_eq!(
+        validate(&reply(vec!["L1".into(); 9]), &prepared).unwrap_err(),
+        Invalid::Uncited
+    );
+    assert_eq!(
+        validate(&reply(vec!["L237".into()]), &prepared).unwrap_err(),
+        Invalid::UnknownLine
+    );
+    assert_eq!(
+        validate(&reply(vec!["L1-L8".into()]), &prepared).unwrap_err(),
+        Invalid::UnknownLine
+    );
+}
+
+#[test]
+fn provider_schema_bounds_match_supported_subsets_without_changing_local_validation() {
+    for section in ["summary", "decisions", "actions", "openQuestions"] {
+        let canonical = &schema()["properties"][section];
+        assert_eq!(
+            canonical["maxItems"],
+            if section == "summary" { 5 } else { 20 }
+        );
+        assert_eq!(canonical["items"]["properties"]["lines"]["maxItems"], 8);
+        let anthropic = provider_schema(CueProvider::Anthropic);
+        let projected = &anthropic["properties"][section];
+        assert!(projected.get("maxItems").is_none());
+        assert!(projected["items"]["properties"]["lines"]
+            .get("maxItems")
+            .is_none());
+        assert_eq!(projected["items"]["properties"]["lines"]["minItems"], 1);
+        assert!(projected["items"]["properties"]["lines"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("eight"));
+    }
+    assert_eq!(provider_schema(CueProvider::OpenAi), *schema());
+    assert_eq!(provider_schema(CueProvider::Gemini), *schema());
+}
+
+fn failed_fragmented_session() -> (Engine, u64, Prepared) {
+    let mut engine = Engine::live();
+    engine.start().unwrap();
+    let session = engine.session();
+    engine.advance(235_000);
+    for segment in fragmented_transcript() {
+        engine.ingest(session, segment).unwrap();
+    }
+    engine.end();
+    let plan = engine.meeting_notes_plan(false).unwrap();
+    let prepared = engine
+        .begin_meeting_notes(false, &plan.fingerprint)
+        .unwrap();
+    assert!(engine.finish_meeting_notes(session, Err(Failure::Invalid(Invalid::Uncited)), None));
+    (engine, session, prepared)
+}
+
+#[test]
+fn validation_failure_requires_fresh_explicit_review_and_allows_only_one_sent_retry() {
+    let (mut engine, session, first) = failed_fragmented_session();
+    assert!(engine.meeting_notes().retry_available());
+    // Normal Generate cannot silently retry a failed request.
+    assert_eq!(
+        engine
+            .begin_meeting_notes(false, &first.fingerprint())
+            .unwrap_err(),
+        Refusal::AlreadySent
+    );
+    let plan = engine.meeting_notes_retry_plan(false).unwrap();
+    assert_ne!(plan.fingerprint, first.fingerprint());
+    engine
+        .update_notes("Changed fictional editor notes".into())
+        .unwrap();
+    // An explicitly excluded editor change does not change what would be sent.
+    let retry = engine
+        .begin_meeting_notes_retry(false, &plan.fingerprint)
+        .unwrap();
+    assert_eq!(retry.body(), first.body());
+    assert_eq!(
+        engine.meeting_notes_retry_plan(false).unwrap_err(),
+        Refusal::Writing
+    );
+    assert!(engine.finish_meeting_notes(session, Err(Failure::Invalid(Invalid::Uncited)), Some(1)));
+    assert!(!engine.meeting_notes().retry_available());
+    assert_eq!(
+        engine.meeting_notes_retry_plan(false).unwrap_err(),
+        Refusal::RetryUnavailable
+    );
+    assert_eq!(
+        engine.meeting_notes().reserved_micro_usd(),
+        first.worst_micro_usd() * 2
+    );
+}
+
+#[test]
+fn unsent_retry_restores_failure_and_new_review_fences_late_worker_callbacks() {
+    let (mut engine, session, _) = failed_fragmented_session();
+    let failure = engine.meeting_notes().failure().unwrap().to_string();
+    let reserved = engine.meeting_notes().reserved_micro_usd();
+    let plan = engine.meeting_notes_retry_plan(true).unwrap();
+    engine.update_notes("Fictional added notes".into()).unwrap();
+    assert_eq!(
+        engine
+            .begin_meeting_notes_retry(true, &plan.fingerprint)
+            .unwrap_err(),
+        Refusal::Changed
+    );
+    let plan = engine.meeting_notes_retry_plan(true).unwrap();
+    let pending = engine
+        .begin_meeting_notes_retry(true, &plan.fingerprint)
+        .unwrap();
+    let old = engine.meeting_notes().generation();
+    engine.cancel_meeting_notes();
+    assert!(pending.cancel_flag().load(Ordering::Acquire));
+    engine.abandon_meeting_notes_attempt(session, old);
+    assert_eq!(engine.state.meeting_notes, Phase::Failed);
+    assert_eq!(engine.meeting_notes().failure(), Some(failure.as_str()));
+    assert_eq!(engine.meeting_notes().reserved_micro_usd(), reserved);
+    assert!(engine.meeting_notes().retry_available());
+    assert_eq!(
+        engine
+            .begin_meeting_notes_retry(true, &plan.fingerprint)
+            .unwrap_err(),
+        Refusal::Changed
+    );
+    let fresh = engine.meeting_notes_retry_plan(true).unwrap();
+    engine
+        .begin_meeting_notes_retry(true, &fresh.fingerprint)
+        .unwrap();
+    let current = engine.meeting_notes().generation();
+    engine.abandon_meeting_notes_attempt(session, old);
+    assert!(!engine.finish_meeting_notes_attempt(
+        session,
+        old,
+        CueProvider::Anthropic,
+        Err(Failure::Unavailable),
+        None
+    ));
+    assert_eq!(engine.state.meeting_notes, Phase::Writing);
+    assert!(engine.finish_meeting_notes_attempt(
+        session,
+        current,
+        CueProvider::Anthropic,
+        Err(Failure::Invalid(Invalid::Uncited)),
+        None
+    ));
+    assert!(!engine.meeting_notes().retry_available());
+    engine.start().unwrap();
+    assert!(!engine.finish_meeting_notes_attempt(
+        session,
+        current,
+        CueProvider::Anthropic,
+        Err(Failure::Unavailable),
+        None
+    ));
+}
+
+#[test]
+fn recovery_reserves_worst_case_not_reported_usage_and_blocks_unknown_pricing() {
+    let mut prepared = prepare(opus(), &fragmented_transcript(), None).unwrap();
+    let mut record = Record::default();
+    record.begin(&prepared);
+    record.finish(Err(Failure::Invalid(Invalid::Uncited)), Some(0));
+    let reserved = record.reserved_micro_usd();
+    assert!(reserved > 0);
+    prepared.target.price = Some([100.0, 100.0, 100.0, 100.0]);
+    assert_eq!(record.check_retry(&prepared), Err(Refusal::SpendCap));
+    prepared.target.price = None;
+    assert_eq!(record.check_retry(&prepared), Err(Refusal::RetryUnpriced));
+    let mut unpriced = Record::default();
+    unpriced.begin(&prepared);
+    unpriced.finish(Err(Failure::Invalid(Invalid::Uncited)), None);
+    prepared.target.price = Some([0.1, 0.1, 0.1, 0.1]);
+    assert_eq!(unpriced.check_retry(&prepared), Err(Refusal::RetryUnpriced));
+    // Any non-validation failure stays final, even with a known zero bill.
+    for failure in [
+        Failure::Cancelled,
+        Failure::Unreachable,
+        Failure::SignIn,
+        Failure::UsageLimit,
+        Failure::Refused,
+        Failure::OutputLimit,
+        Failure::Unavailable,
+    ] {
+        let mut record = Record::default();
+        record.begin(&prepared);
+        record.finish(Err(failure), Some(0));
+        assert!(!record.retry_available());
+        assert_eq!(
+            record.check_retry(&prepared),
+            Err(Refusal::RetryUnavailable)
+        );
+    }
+}
+
+#[test]
+fn successful_retry_clears_failure_and_cannot_be_repeated_after_discard() {
+    let (mut engine, session, _) = failed_fragmented_session();
+    let plan = engine.meeting_notes_retry_plan(false).unwrap();
+    let prepared = engine
+        .begin_meeting_notes_retry(false, &plan.fingerprint)
+        .unwrap();
+    let text = json!({"summary":[{"text":"A fictional project was discussed.","lines":["L236"]}],"decisions":[],"actions":[],"openQuestions":[]});
+    let (markdown, items) = validate(&text.to_string(), &prepared).unwrap();
+    assert!(engine.finish_meeting_notes(
+        session,
+        Ok(Draft {
+            markdown,
+            items,
+            spent_micro_usd: Some(1)
+        }),
+        Some(1)
+    ));
+    assert!(engine.meeting_notes().failure().is_none());
+    assert!(!engine.meeting_notes().retry_available());
+    assert_eq!(
+        engine.meeting_notes_retry_plan(false).unwrap_err(),
+        Refusal::RetryUnavailable
+    );
+    engine.discard_meeting_notes();
+    assert_eq!(
+        engine.meeting_notes_retry_plan(false).unwrap_err(),
+        Refusal::RetryUnavailable
+    );
 }

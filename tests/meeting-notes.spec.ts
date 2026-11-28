@@ -75,7 +75,7 @@ test('generated notes are checked, editable and join the export only when kept',
     page.getByRole('heading', { name: 'Check, edit, then keep or discard' }),
   ).toBeFocused();
   await expect(notesSection(page)).toContainText(
-    'Estimated cost: about $0.04.',
+    'Latest request estimated cost: about $0.04.',
   );
   await page.getByText('Where each item came from').click();
   await expect(notesSection(page)).toContainText(`transcript 00:05 “${LINE}”`);
@@ -112,14 +112,14 @@ test('generated notes are checked, editable and join the export only when kept',
   ).toHaveLength(1);
 });
 
-test('a failed request is shown as failed and not offered again', async ({
+test('a validation failure hides unchecked output and offers a separate retry review', async ({
   page,
 }) => {
   await openNative(page);
   await session(page, 'ended');
   await page.evaluate(() =>
     window.meetingNotesTest.failNext(
-      'The notes that came back failed a check (an action item named an owner that its lines do not mention), so none are shown. No notes were written, and nothing else will be sent for this meeting.',
+      'The notes that came back failed a check (an action item named an owner that its lines do not mention), so none are shown. No notes were written. Nothing will be sent automatically.',
     ),
   );
   await writeButton(page).click();
@@ -130,6 +130,9 @@ test('a failed request is shown as failed and not offered again', async ({
     page.getByRole('textbox', { name: 'Notes to keep, editable' }),
   ).toHaveCount(0);
   await expect(writeButton(page)).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Review one retry' }),
+  ).toBeVisible();
 });
 
 test('a key problem sends nothing and leaves the request available', async ({
@@ -263,4 +266,241 @@ test('uses the selected provider and omits cost estimates for custom notes model
   await expect(notesSection(page)).toContainText(
     'Estimated cost unavailable for custom model; check OpenAI Platform.',
   );
+});
+
+const INVALID =
+  'The notes that came back failed a check (an item cited no line, or too many), so none are shown. No notes were written. Nothing will be sent automatically.';
+async function failFragmentedMeeting(page: Page) {
+  await openNative(page);
+  await page.evaluate(() =>
+    window.liveTest.publish({
+      live: true,
+      status: 'ended',
+      meetingNotes: 'none',
+      transcript: Array.from({ length: 236 }, (_, index) => ({
+        id: `fictional-${index}`,
+        atMs: index * 1000,
+        speaker: 'Speaker 1',
+        text: `Fictional fragment ${index}.`,
+      })),
+      cue: null,
+    }),
+  );
+  await page.evaluate(
+    (message) => window.meetingNotesTest.failNext(message),
+    INVALID,
+  );
+  await writeButton(page).click();
+  await expect(
+    page.getByRole('button', { name: 'Review one retry' }),
+  ).toBeVisible();
+}
+
+test('236 fragments: reviewing and cancelling a retry sends nothing; confirmation sends once', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  const review = page.getByRole('button', { name: 'Review one retry' });
+  await review.click();
+  await expect(
+    page.getByRole('heading', { name: 'Review the final retry' }),
+  ).toBeFocused();
+  await expect(notesSection(page)).toContainText('236 transcript lines');
+  await expect(notesSection(page)).toContainText('without your notes');
+  await expect(notesSection(page)).toContainText(
+    'Combined worst-case estimate: $0.67',
+  );
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(1);
+  await page.getByRole('button', { name: 'Cancel review' }).click();
+  await expect(review).toBeFocused();
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(1);
+  await review.click();
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await expect(
+    page.getByRole('textbox', { name: 'Notes to keep, editable' }),
+  ).toBeVisible();
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(2);
+  await expect(review).toHaveCount(0);
+});
+
+test('a second failed validation is final, preserves transcript and never offers a third request', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await page.evaluate(
+    (message) => window.meetingNotesTest.failNext(message),
+    INVALID,
+  );
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await expect(notesSection(page)).toContainText('No retry is available');
+  await expect(notesSection(page).getByRole('alert')).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: 'Review one retry' }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(() => window.liveTest.session().transcript.length),
+  ).toBe(236);
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(2);
+});
+
+test('retry scope changes invalidate review and require another explicit review', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page
+    .getByRole('checkbox', { name: 'Include my notes in retry' })
+    .check();
+  await page.evaluate(() =>
+    window.liveTest.publish({ notes: 'Fictional reminder.' }),
+  );
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await expect(notesSection(page)).toContainText('with 1 lines of your notes');
+  await page.evaluate(() =>
+    window.liveTest.publish({
+      notes: 'Fictional updated reminder.\nSecond line.',
+    }),
+  );
+  await expect(
+    page.getByRole('button', { name: 'Send final retry' }),
+  ).toHaveCount(0);
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(1);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await expect(notesSection(page)).toContainText('with 2 lines of your notes');
+});
+
+test('a stale retry confirmation never silently replans or resends', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await page.evaluate(() =>
+    window.meetingNotesTest.refuseNext(
+      'What would be sent has changed since you looked. Review it again. Nothing was sent.',
+    ),
+  );
+  const before = (await commands(page)).filter(
+    (c) => c === 'meeting_notes_plan',
+  ).length;
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await expect(notesSection(page).getByRole('alert')).toContainText(
+    'Nothing was sent.',
+  );
+  expect(
+    (await commands(page)).filter((c) => c === 'meeting_notes_plan'),
+  ).toHaveLength(before);
+  await expect(
+    page.getByRole('button', { name: 'Send final retry' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Review one retry' }),
+  ).toBeFocused();
+});
+
+test('unsent retry cancellation restores the failure and permits a fresh review', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await page.evaluate(() => window.meetingNotesTest.hold());
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await page.getByRole('button', { name: 'Stop waiting' }).click();
+  await expect(notesSection(page).getByRole('alert')).toContainText(
+    'Stopped before anything was sent.',
+  );
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Review the final retry' }),
+  ).toBeFocused();
+});
+
+test('transport failure offers transcript review but no validation retry', async ({
+  page,
+}) => {
+  await openNative(page);
+  await session(page, 'ended');
+  await page.evaluate(() =>
+    window.meetingNotesTest.failNext(
+      'The provider did not finish in time. No notes were written. Nothing will be sent automatically.',
+    ),
+  );
+  await writeButton(page).click();
+  await expect(notesSection(page)).toContainText('No retry is available');
+  await expect(
+    page.getByRole('button', { name: 'Review one retry' }),
+  ).toHaveCount(0);
+});
+
+test('final retry review fits a narrow window and has no accessibility violations', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - innerWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  const { default: AxeBuilder } = await import('@axe-core/playwright');
+  expect(
+    (await new AxeBuilder({ page }).include('.meeting-notes').analyze())
+      .violations,
+  ).toEqual([]);
+});
+
+test('unknown model pricing blocks retry planning without a second write', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByText('Custom model ID & meeting notes model').click();
+  await page
+    .getByLabel('Custom meeting notes model ID (optional)')
+    .fill('fictional-custom-notes-model');
+  await page.getByRole('button', { name: 'Save notes model' }).click();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await expect(notesSection(page).getByRole('alert')).toContainText(
+    'unknown model pricing',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Send final retry' }),
+  ).toHaveCount(0);
+  expect(
+    (await commands(page)).filter((c) => c === 'write_meeting_notes'),
+  ).toHaveLength(1);
+});
+
+test('a replacement session drops a late retry result and its review', async ({
+  page,
+}) => {
+  await failFragmentedMeeting(page);
+  await page.getByRole('button', { name: 'Review one retry' }).click();
+  await page.evaluate(() => window.meetingNotesTest.hold());
+  await page.getByRole('button', { name: 'Send final retry' }).click();
+  await expect(notesSection(page)).toContainText('Writing meeting notes');
+  await page.evaluate(() =>
+    window.liveTest.publish({
+      session: 'fictional-replacement-session',
+      status: 'running',
+      meetingNotes: 'none',
+      transcript: [],
+    }),
+  );
+  await page.evaluate(() => window.meetingNotesTest.release());
+  await expect(notesSection(page)).toHaveCount(0);
+  await expect(
+    page.getByRole('textbox', { name: 'Notes to keep, editable' }),
+  ).toHaveCount(0);
 });
