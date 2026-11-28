@@ -82,8 +82,7 @@ pub async fn question_scope(
                         id: format!("saved-line-{index}"),
                         at_ms: line.at_ms,
                         text: line.text.clone(),
-                    })
-                    .collect(),
+                    }),
                 source,
                 false,
                 llm_provider::resolved_cue_model(),

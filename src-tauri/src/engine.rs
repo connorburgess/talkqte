@@ -844,14 +844,11 @@ impl Engine {
             return Err("Start a live session and wait for transcript lines before asking.".into());
         }
         self.meeting_qa.prepare_source(
-            self.meeting
-                .iter()
-                .map(|line| crate::meeting_qa::Line {
-                    id: line.id.clone(),
-                    at_ms: line.at_ms,
-                    text: line.text.clone(),
-                })
-                .collect(),
+            self.meeting.iter().map(|line| crate::meeting_qa::Line {
+                id: line.id.clone(),
+                at_ms: line.at_ms,
+                text: line.text.clone(),
+            }),
             crate::meeting_qa::Source::Current {
                 session: self.state.session.clone(),
             },

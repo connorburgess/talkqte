@@ -187,14 +187,11 @@ impl Record {
         target: ResolvedModel,
     ) -> Result<Scope, String> {
         self.prepare_source(
-            lines
-                .iter()
-                .map(|l| Line {
-                    id: l.id.clone(),
-                    at_ms: l.at_ms,
-                    text: l.text.clone(),
-                })
-                .collect(),
+            lines.iter().map(|l| Line {
+                id: l.id.clone(),
+                at_ms: l.at_ms,
+                text: l.text.clone(),
+            }),
             Source::Current {
                 session: "test".into(),
             },
@@ -204,7 +201,7 @@ impl Record {
     }
     pub fn prepare_source(
         &mut self,
-        selected: Vec<Line>,
+        lines: impl IntoIterator<Item = Line>,
         source: Source,
         truncated: bool,
         target: ResolvedModel,
@@ -239,11 +236,18 @@ impl Record {
             conversation.push(pair);
         }
         conversation.reverse();
-        let bytes = serde_json::to_vec(&selected)
-            .map_err(|_| "Transcript unavailable.")?
-            .len();
-        if bytes > MAX_BYTES {
-            return Err("This whole transcript exceeds the 128 KiB Ask request limit. No excerpt or request was sent. Export the transcript to review it outside Ask.".into());
+        let mut selected = Vec::new();
+        let mut transcript_bytes: usize = 2;
+        for line in lines {
+            let size = serde_json::to_vec(&line)
+                .map_err(|_| "Transcript unavailable.")?
+                .len()
+                + 1;
+            if transcript_bytes.saturating_add(size) > MAX_BYTES {
+                return Err("This whole transcript exceeds the 128 KiB Ask request limit. No excerpt or request was sent. Export the transcript to review it outside Ask.".into());
+            }
+            transcript_bytes += size;
+            selected.push(line);
         }
         if selected.is_empty() {
             return Err("Wait for transcript lines before asking a question.".into());
@@ -709,6 +713,36 @@ mod tests {
             .prepare_source(vec![], source, true, target())
             .unwrap_err()
             .contains("beginning"));
+    }
+    #[test]
+    fn oversized_projection_stops_reading_before_cloning_the_rest_of_the_source() {
+        let visited = std::cell::Cell::new(0);
+        let input = (0..50_000).map(|index| {
+            visited.set(visited.get() + 1);
+            Line {
+                id: format!("fictional-{index}"),
+                at_ms: index,
+                text: "🪴".repeat(1000),
+            }
+        });
+        let mut record = Record::default();
+        assert!(record
+            .prepare_source(
+                input,
+                Source::Current {
+                    session: "fictional".into()
+                },
+                false,
+                target()
+            )
+            .is_err());
+        assert!(
+            visited.get() < 40,
+            "bounded projection must not clone the whole oversized source"
+        );
+        assert!(record.plan.is_none());
+        assert_eq!(record.count, 0);
+        assert_eq!(record.reserved, 0);
     }
     #[test]
     fn current_and_ended_engine_scopes_include_the_early_fact() {
