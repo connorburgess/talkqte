@@ -111,6 +111,7 @@ mod tests {
             title: title.into(),
             source_date: "2026-11-02".into(),
             excerpt: "Robin will label the watering cans.".into(),
+            original_chars: None,
             revision: UPDATED,
         })
         .collect()

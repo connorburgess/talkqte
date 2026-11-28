@@ -325,6 +325,7 @@ impl Refresh {
             total.unchanged += outcome.unchanged;
             total.over_limit += outcome.over_limit;
             total.rejected += outcome.rejected;
+            total.shortened += outcome.shortened;
         }
         total
     }
@@ -837,6 +838,7 @@ mod tests {
             title: "Garden volunteers check-in".into(),
             source_date: "2026-11-02".into(),
             excerpt: excerpt.into(),
+            original_chars: None,
             revision,
         }
     }

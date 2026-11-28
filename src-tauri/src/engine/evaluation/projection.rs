@@ -89,6 +89,9 @@ pub struct NoteSummary {
     pub source: NoteSelection,
     pub title: String,
     pub source_date: String,
+    /// Original trimmed character count when shortened to `MAX_EXCERPT_CHARS`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_chars: Option<usize>,
 }
 
 impl From<&ContextItem> for NoteSummary {
@@ -101,6 +104,7 @@ impl From<&ContextItem> for NoteSummary {
             },
             title: item.title.clone(),
             source_date: item.source_date.clone(),
+            original_chars: item.original_chars,
         }
     }
 }
@@ -617,6 +621,7 @@ mod tests {
             title: "Garden guide".into(),
             source_date: "2026-11-01".into(),
             excerpt: "PRIVATE_EXCERPT_SENTINEL".into(),
+            original_chars: None,
         }
     }
     fn approve(e: &mut Engine, notes: &[ContextItem]) {
@@ -927,5 +932,20 @@ mod tests {
                 assert_eq!(resumed.issue, Some(Issue::Worker));
             }
         }
+    }
+
+    #[test]
+    fn projection_preserves_shortened_excerpt_metadata_without_leaking_excerpt_or_widening_wire() {
+        let (mut e, _) = engine(false);
+        let short = note(Provider::File, "short");
+        let mut shortened = note(Provider::File, "long");
+        shortened.original_chars = Some(5_420);
+        e.set_notes(vec![short, shortened]);
+        let snapshot = e.processing_snapshot(CaptureState::Running, 1);
+        assert_eq!(snapshot.notes.len(), 2);
+        let serialized = serde_json::to_value(&snapshot.notes).unwrap();
+        assert!(serialized[0].get("originalChars").is_none());
+        assert_eq!(serialized[1]["originalChars"], serde_json::json!(5_420));
+        assert!(serialized[1].get("excerpt").is_none());
     }
 }

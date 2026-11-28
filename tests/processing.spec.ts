@@ -870,3 +870,45 @@ test('explicit zero-note control still requires owner review and rejects selecti
   await expect(button).toBeDisabled();
   expect(await calls(page, 'approve_processing_scope')).toEqual([]);
 });
+
+test('shortened prior notes disclose original-versus-excerpt length across choose, review, and approved views', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    notes: [
+      initial.notes[0],
+      {
+        ...initial.notes[1],
+        originalChars: 5420,
+      },
+    ],
+  });
+  await page.getByRole('button', { name: 'Review processing' }).click();
+  await expect(
+    page.getByText(
+      'Imported file · 2026-11-02 · prior note · first 2,000 of 5,420 chars only',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Granola · 2026-11-01 · prior note', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await page.getByRole('button', { name: 'Review selected sources' }).click();
+  await expect(
+    page.getByText(
+      'Imported file · 2026-11-02 · prior note · first 2,000 of 5,420 chars only',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Enable for this session' }).click();
+  await page.getByText('Approved sources for this session').click();
+  await expect(
+    page.getByText(
+      'Imported file · 2026-11-02 · prior note · first 2,000 of 5,420 chars only',
+      { exact: true },
+    ),
+  ).toBeVisible();
+});

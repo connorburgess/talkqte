@@ -116,6 +116,10 @@ pub struct NoteSummary {
     pub title: String,
     pub source_date: String,
     pub preview: String,
+    /// Original trimmed character count when the note exceeds
+    /// `context::MAX_EXCERPT_CHARS` and will be shortened on import.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_chars: Option<usize>,
 }
 
 /// The notes read from one file, served through the context contract.
@@ -243,6 +247,7 @@ impl FileSource {
                 title: title.unwrap_or_else(|| document.name.trim().to_string()),
                 source_date: date.unwrap_or_default(),
                 excerpt: body,
+                original_chars: None,
                 revision: document.revision,
             }],
             skipped: 0,
@@ -280,6 +285,7 @@ impl FileSource {
                 title: note.title,
                 source_date: note.date,
                 excerpt: note.text,
+                original_chars: None,
                 revision: note.revision,
             })
             .collect();
@@ -295,23 +301,26 @@ impl FileSource {
     pub fn summaries(&self) -> Vec<NoteSummary> {
         self.notes
             .iter()
-            .map(|note| NoteSummary {
-                source_id: note.source_id.trim().to_string(),
-                title: if note.title.trim().is_empty() {
-                    "Untitled note".into()
-                } else {
-                    note.title.trim().to_string()
-                },
-                source_date: note.source_date.clone(),
-                preview: {
-                    let trimmed = note.excerpt.trim();
-                    let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
-                    if trimmed.chars().count() > PREVIEW_CHARS {
+            .map(|note| {
+                let trimmed = note.excerpt.trim();
+                let trimmed_chars = trimmed.chars().count();
+                let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
+                NoteSummary {
+                    source_id: note.source_id.trim().to_string(),
+                    title: if note.title.trim().is_empty() {
+                        "Untitled note".into()
+                    } else {
+                        note.title.trim().to_string()
+                    },
+                    source_date: note.source_date.clone(),
+                    preview: if trimmed_chars > PREVIEW_CHARS {
                         format!("{short}…")
                     } else {
                         short
-                    }
-                },
+                    },
+                    original_chars: (trimmed_chars > crate::context::MAX_EXCERPT_CHARS)
+                        .then_some(trimmed_chars),
+                }
             })
             .collect()
     }
@@ -833,27 +842,33 @@ mod tests {
 
     #[test]
     fn a_long_note_keeps_the_existing_excerpt_title_and_preview_limits() {
-        let text = format!(
-            "# {}\n{}",
-            "Long title ".repeat(40),
-            "Seedlings. ".repeat(600)
-        );
+        let body = "Seedlings. ".repeat(600);
+        let expected_original = body.trim().chars().count();
+        let text = format!("# {}\n{body}", "Long title ".repeat(40));
         let source = document(FileKind::Markdown, &text).unwrap();
-        assert!(source.summaries()[0].preview.ends_with('…'));
-        assert_eq!(
-            source.summaries()[0].preview.chars().count(),
-            PREVIEW_CHARS + 1
-        );
+        let summary = &source.summaries()[0];
+        assert!(summary.preview.ends_with('…'));
+        assert_eq!(summary.preview.chars().count(), PREVIEW_CHARS + 1);
+        assert_eq!(summary.original_chars, Some(expected_original));
         let ids = vec!["file-fictional".to_string()];
         let fetched = fetch_entered(source, &[("file-fictional", "2026-10-21")]);
         let mut store = ContextStore::default();
-        store.merge(Provider::File, &ids, fetched);
+        let outcome = store.merge(Provider::File, &ids, fetched);
+        assert_eq!((outcome.added, outcome.shortened), (1, 1));
         let note = &store.items()[0];
         assert_eq!(
             note.excerpt.chars().count(),
             crate::context::MAX_EXCERPT_CHARS
         );
+        assert_eq!(note.original_chars, Some(expected_original));
         assert_eq!(note.title.chars().count(), crate::context::MAX_TITLE_CHARS);
+        // A note that fits within the excerpt limit omits original_chars.
+        let short_source = document(
+            FileKind::Markdown,
+            &format!("# Fits\n{}", "a".repeat(crate::context::MAX_EXCERPT_CHARS)),
+        )
+        .unwrap();
+        assert_eq!(short_source.summaries()[0].original_chars, None);
     }
 
     #[cfg(unix)]

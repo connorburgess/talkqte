@@ -228,6 +228,8 @@ export interface ContextItem {
   title: string;
   sourceDate: string;
   excerpt: string;
+  /** Original trimmed character count when shortened to 2,000 characters. */
+  originalChars?: number;
   revision: number;
   /** True when TalkQTE pre-selected this kept meeting for the session. */
   autoSelected?: boolean;
@@ -238,6 +240,8 @@ export interface NoteSummary {
   /** Empty when a Markdown or plain-text file gives no date. */
   sourceDate: string;
   preview: string;
+  /** Original trimmed character count when the note exceeds 2,000 characters. */
+  originalChars?: number;
 }
 export interface PickedNotes {
   fileName: string;
@@ -253,6 +257,8 @@ export interface MergeOutcome {
   unchanged: number;
   overLimit: number;
   rejected: number;
+  /** Added or updated notes shortened to the 2,000-character excerpt limit. */
+  shortened?: number;
 }
 export interface LiveStatus {
   available: boolean;
