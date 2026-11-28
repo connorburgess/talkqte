@@ -208,7 +208,7 @@ Provider access and capabilities can change; recheck them when implementing each
 ## Explicit current-session questions
 
 - [x] Build bounded transcript-only Ask with explicit per-question Send, provider/scope disclosure, source links, cancellation and in-memory session history. Offline lifecycle and fictional browser checks are acceptance for these boundaries only; see [live questions](docs/live-questions.md).
-- [ ] Validate live grounded synthesis and honest insufficient evidence, native dock focus/keyboard/assistive access, measured cost/latency and whole-session retrieval before claiming dependable meeting Q&A. No saved-meeting or imported-note Q&A in this slice.
+- [ ] Validate live grounded synthesis and honest insufficient evidence, native dock focus/keyboard/assistive access, measured cost/latency before claiming dependable meeting Q&A. Whole available current/one selected saved transcript and bounded prior Q&A are supported within explicit serialized/cost limits, with no tail fallback; imported notes and cross-meeting retrieval remain excluded.
 
 ## Other later candidates
 
@@ -241,3 +241,9 @@ Support joining Google Meet on a phone and receiving prompts during the call. Ob
 - [ ] **M5** Test platform-specific prompt surfaces, background behavior, accessibility, battery use, and permission denial before making capability claims.
 
 Speech-to-text transcribes speech; it does not produce reliable summaries or understand meeting intent on its own. Semantic summaries and conversational search need a separate model or an explicitly limited rules-based implementation.
+
+Own-key selected-note follow-up (unvalidated capability): the explicit-review
+implementation is described in [scope guidance](docs/own-key-cues.md#explicitly-approved-prior-note-snapshots).
+Default Start excludes notes. No item is checked off: next acceptance is exact-head
+hosted native/fake-wire validation and a separately authorized fictional native
+source-withdrawal journey, followed by live usefulness assessment.

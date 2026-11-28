@@ -78,12 +78,54 @@ one.
   32-to-64-character hexadecimal key. Whitespace around a pasted key is removed;
   anything else is refused without quoting what was pasted.
 - Whether a key was checked or rejected is kept in memory for the app run.
+- Authentication observations are tied to an opaque, in-memory revision of the
+  credential actually read. App-managed replacement/removal (including re-adding
+  the same text) retires old observations. A delayed refusal cannot reject a
+  replacement, and a delayed successful check cannot mark it verified. Other
+  providers' changes do not retire a still-current credential's result.
+- Credential reads, app-managed writes and conditional status updates share one
+  synchronization boundary. No lock is held during a provider response
+  wait. Revisions contain no key text or digest and never cross IPC, persist, or
+  appear in diagnostics. Existing cancellation/source-withdrawal checks apply
+  before the revision check; an already-sent request cannot be recalled.
+- A failed store write or removal also retires older observations and clears
+  cached presence, verification and rejection, including when the platform may have changed the item before
+  returning an error. It does not infer success or verify any credential. A
+  fresh read can obtain a new receipt for whatever the store actually contains.
 - Checking whether a key is set does not unlock the Linux keyring: it searches
   the items' attributes only. Reading a key for a session or a check may show
   the keyring's own unlock prompt.
 - macOS may ask the person to allow TalkQTE to use a key it stored, for
   example after a development rebuild changes the app's signature. This has
   not been checked on a signed build.
+
+### Credential result ownership
+
+The cue adapter owns a non-cloneable credential reader and a separate rejection
+handle. `Worker` moves that adapter into one thread: `evaluate(&mut self)` runs
+serially, and cancellation keeps it occupied until the transport returns.
+Reconfiguration builds a new adapter and receipt cell. Each Deepgram/ElevenLabs
+stream similarly owns its reader; reconnecting constructs a new stream source.
+A later generation cannot overwrite an older generation's receipt. The reader's
+mutable access also prevents concurrent acquisition through the same reader.
+
+The lock order is the credential memo followed by the platform store during a
+read or app-managed mutation. The read releases both before capturing its
+receipt in the adapter cell, and the rejection handle releases the cell before
+acquiring the memo. Conditional identity comparison and status mutation happen
+under that same memo guard. Store implementations never call back into `Keys`.
+No provider request, socket handshake or response wait holds these locks.
+Ask validates source/attempt acceptance under its existing state lock before
+applying a credential result. Notes, cue adapters and streams check their
+withdrawal flags before applying auth observations (including after bounded
+Gemini error-body reads). Key operations do not acquire those source/attempt
+locks. There is no reverse nested acquisition.
+
+Offline fake transports exercise old/new generations held simultaneously,
+current-credential rejection, withdrawn work and failed/ambiguous store
+mutations. Changes made directly in the OS credential store are outside this
+app-managed receipt guarantee; native store failure/recovery still needs
+separate platform acceptance.
 
 ## Commands
 
@@ -152,6 +194,14 @@ real Keychain or network. Not yet checked: the real Keychain on a signed
 build, Credential Manager and GNOME Keyring in a person's desktop session
 (including the keyring's unlock prompt), KWallet, and either provider's real
 response to the check.
+
+Revision regressions use held fake authentication results and memory-only keys:
+replacement, removal/re-addition, same-text saves, unrelated-provider changes,
+late success, wrong-store receipts and genuinely current rejection. Ask completion
+also requires its original source/ticket; speech handshake regressions cover
+replacement and abort. These are offline boundaries, not real-provider or native
+credential-store acceptance. App revisions track writes made through TalkQTE;
+they do not supply an OS version for a credential replaced by another application.
 
 ## Repeated macOS access prompts
 

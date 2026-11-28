@@ -24,7 +24,7 @@ The intended flow is relevant context, an opportunity to respond, then the cue c
 
 ## Explicit live questions
 
-Alongside passive cues, the person can explicitly ask about recent discussion in the notebook while capture continues. This owner-authorized first slice uses the disclosed bounded current-session transcript excerpt only, with a normal Send action, grounded synthesis/citations or insufficient evidence. It does not promise whole-meeting knowledge, saved-meeting search or model accuracy. It preserves cue timing and Stop independently. See [live questions](docs/live-questions.md).
+Alongside passive cues, the person can explicitly ask about the whole available current or one selected saved meeting transcript, with bounded accepted Q&A for follow-ups. A normal Send action authorizes each request separately. Oversized or truncated sources are refused rather than silently using a tail. Prior answers are conversational context, never evidence; only supplied transcript lines may be cited. This does not promise complete capture, cross-meeting search or model accuracy. Cue timing and Stop remain independent. See [live questions](docs/live-questions.md).
 
 ## Goal and first proof
 
@@ -126,3 +126,12 @@ Release identity and supported operation remain open. Retention defaults are imp
 ## Evidence checkpoint — 27 November 2026
 
 This reconciliation reviews merged main [`a26d6ff`](https://github.com/connorburgess/talkqte/commit/a26d6ff9bed0c1555e3fc6540a1d8a1d4a89d908), not a release qualification. Meeting organization/filter changes ([PR469](https://github.com/connorburgess/talkqte/pull/469)), notebook readiness polish ([PR470](https://github.com/connorburgess/talkqte/pull/470)), prior-context availability guidance ([PR471](https://github.com/connorburgess/talkqte/pull/471)) and interview mode ([PR472](https://github.com/connorburgess/talkqte/pull/472)) remain pending integration at this checkpoint. Their proposed controls and tests are not merged capability. Native two-sided call/Stop/accessibility acceptance and human participation/listening comparisons remain open.
+
+## Approved prior context on own-key cues
+
+Default Start shares no imported notes. An explicit in-session prior-note review
+can add only exact approved snapshots to bounded current speech for Anthropic,
+OpenAI or Gemini cues. This adds no retrieval or verified identity: unknown dates
+remain unknown and every state-changing proposal needs fresh cited speech.
+Native/provider acceptance and semantic usefulness remain separate gates. See
+[own-key scope](docs/own-key-cues.md#explicitly-approved-prior-note-snapshots).

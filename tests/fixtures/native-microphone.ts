@@ -6,6 +6,7 @@ import * as contextFixture from './native-context';
 import * as providerKeysFixture from './native-provider-keys';
 import * as meetingNotesFixture from './native-meeting-notes';
 import * as meetingQaFixture from './native-meeting-qa';
+import * as calendarAgendaFixture from './native-calendar-agenda';
 import * as historyFixture from './native-meeting-history';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { emit } from '@tauri-apps/api/event';
@@ -522,6 +523,7 @@ async function startLive(options?: {
     approved: autoApprove ? { conversation: 'newSpeechOnly', notes: [] } : null,
     scopeRevision: processing.scopeRevision + 1,
   });
+  calendarAgendaFixture.setLiveRunning(true);
 }
 async function say(text: string, question?: string) {
   const id = `t1-0-${session.transcript.length}`;
@@ -582,6 +584,8 @@ mockIPC(
       return providerKeysFixture.command(command, args);
     if (meetingQaFixture.commands.includes(command))
       return meetingQaFixture.command(command, args, session);
+    if (calendarAgendaFixture.commands.includes(command))
+      return calendarAgendaFixture.command(command, args);
     if (meetingNotesFixture.commands.includes(command))
       return meetingNotesFixture.command(command, args, publish, () => session);
     if (historyFixture.commands.includes(command)) {
@@ -994,6 +998,7 @@ mockIPC(
         };
         updatesState.checkAtLaunch = true;
         calendarSettings = { enabled: false, status: 'off' };
+        calendarAgendaFixture.reset();
         historyFixture.resetAfterSessionKeep();
         if (
           historyFixture.refreshAutoContext(
@@ -1145,6 +1150,7 @@ mockIPC(
           enabled,
           status: enabled ? calendarGrantResult : 'off',
         };
+        calendarAgendaFixture.setPromptsEnabled(enabled);
         return structuredClone(calendarSettings);
       }
       case 'open_calendar_settings':
@@ -1213,6 +1219,7 @@ mockIPC(
       case 'stop_live_session':
         await send({ status: 'stopping', canStart: false, activity: 'quiet' });
         await endLivePublish();
+        calendarAgendaFixture.setLiveRunning(false);
         return;
       case 'set_live_cues_paused':
         if (rejectCuePause) {
@@ -1370,6 +1377,12 @@ declare global {
       }) => void;
       settingsOpened: () => number;
       triggerStart: (title: string) => Promise<void>;
+      agenda: typeof calendarAgendaFixture.testApi.agenda;
+      agendaCalls: typeof calendarAgendaFixture.testApi.agendaCalls;
+      setAgendaEvents: typeof calendarAgendaFixture.testApi.setAgendaEvents;
+      setNextAgendaError: typeof calendarAgendaFixture.testApi.setNextAgendaError;
+      emitAgenda: typeof calendarAgendaFixture.testApi.emitAgenda;
+      emitRawAgenda: typeof calendarAgendaFixture.testApi.emitRawAgenda;
     };
     captureTest: {
       send: typeof sendProcessing;
@@ -1475,12 +1488,14 @@ window.calendarTest = {
   answers: () => structuredClone(calendarPromptAnswers),
   setGrantResult: (next) => {
     calendarGrantResult = next;
+    calendarAgendaFixture.setGrant(next);
   },
   setSettings: (next) => {
     calendarSettings = structuredClone(next);
   },
   settingsOpened: () => calendarSettingsOpened,
   triggerStart: (title: string) => emit('calendar-prompt:start', { title }),
+  ...calendarAgendaFixture.testApi,
 };
 window.captureTest = {
   presence: () => structuredClone(presence),

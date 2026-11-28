@@ -61,15 +61,19 @@
         Direction C. Fictional content; static illustrations of implemented
         controls, never live model evidence. Interactive acceptance uses the
         rendered React app. <a href="index.html">Brand specimens</a> ·
-        <a href="../live-questions.md">Scope and acceptance limits</a>
+        <a href="../live-questions.md">Scope and acceptance limits</a> ·
+        <a href="whole-meeting-ask.html"
+          >Whole current/saved and follow-up states</a
+        >
       </p>
       <article>
         <h2>Ready to ask · bounded scope</h2>
         <section class="meeting-ask sample">
-          <h2>Ask about recent discussion</h2>
+          <h2>Ask about this meeting</h2>
           <p class="muted">
-            Answers use a limited excerpt of this session, not the whole
-            meeting. Model answers can be wrong; check the cited lines.
+            Answers use the whole available selected transcript within explicit
+            byte and cost limits. Model answers can be wrong; check the cited
+            lines.
           </p>
           <p class="muted">
             Ask for a recap, an explanation or what the recent discussion
@@ -83,16 +87,19 @@
             ></textarea>
             <div class="ask-scope">
               <p>
-                Send to Anthropic · selected model. Uses the latest 24 lines
-                available at 4:12.
+                Send to Anthropic · selected model. Uses all 24 available
+                transcript lines from this session, plus 0 prior exchanges.
               </p>
               <details>
                 <summary>Transcript scope and cost</summary>
                 <p>
-                  2:10–4:12 only. Earlier discussion is not included. No saved
-                  notes, imported context or previous answers are sent. Sending
-                  authorizes this question and this excerpt separately from
-                  automatic cues. Provider account terms apply.
+                  Whole available transcript: 2:10–4:12. A complete request must
+                  fit 128 KiB and its cost limit; no tail fallback. Up to three
+                  accepted Q&amp;A pairs within 12 KiB may clarify follow-ups,
+                  never provide independent evidence. Saved notes, imported
+                  context and other meetings are excluded. Sending authorizes
+                  this question and this disclosed scope separately from
+                  automatic cues.
                 </p>
               </details>
             </div>
@@ -124,13 +131,13 @@
         </section>
       </article>
       <article>
-        <h2>Insufficient evidence · excluded beginning</h2>
+        <h2>Insufficient evidence · unstated owner</h2>
         <section class="meeting-ask sample">
-          <h3>What did we decide at the start?</h3>
+          <h3>Who owns the greenhouse check?</h3>
           <p class="ask-answer-label">Model answer · insufficient evidence</p>
           <p>
-            I cannot tell what was decided at the start: that discussion is
-            outside the supplied recent excerpt.
+            The supplied transcript does not state who owns the greenhouse
+            check. I cannot infer an owner from the model’s earlier answer.
           </p>
         </section>
       </article>
@@ -171,7 +178,7 @@
           <p class="ask-answer-label">Model answer</p>
           <p>
             The team favored Saturday because the greenhouse is available then.
-            The excerpt supports the date preference but does not identify an
+            The transcript supports the date preference but does not identify an
             owner or a weather backup. Those details are unknown rather than
             inferred.
           </p>

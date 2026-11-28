@@ -86,6 +86,10 @@ pub struct Settings {
     pub call_prompt_not_for: Vec<String>,
     /// Opt-in macOS Calendar pre-call prompts: off until turned on.
     pub calendar_prompts: bool,
+    /// Separate wider local agenda opt-in; selected opaque calendar IDs persist.
+    pub calendar_agenda: bool,
+    /// None means all; an explicit empty set means no calendars.
+    pub calendar_selected_ids: Option<Vec<String>>,
     /// Closing the notebook leaves TalkQTE in the menu bar instead of
     /// quitting. Off until the person turns it on.
     pub keep_running_in_menu_bar: bool,
@@ -127,6 +131,8 @@ impl Default for Settings {
             call_prompt_auto_start: false,
             call_prompt_not_for: Vec::new(),
             calendar_prompts: false,
+            calendar_agenda: false,
+            calendar_selected_ids: None,
             keep_running_in_menu_bar: false,
             after_session_keep: AfterSessionKeep::Auto,
             check_for_updates_at_launch: true,
@@ -252,6 +258,8 @@ pub fn parse(bytes: &[u8]) -> Settings {
         call_prompt_auto_start,
         call_prompt_not_for,
         calendar_prompts: field(&object, "calendarPrompts", defaults.calendar_prompts),
+        calendar_agenda: field(&object, "calendarAgenda", defaults.calendar_agenda),
+        calendar_selected_ids: crate::calendar_agenda::parse_ids(object.get("calendarSelectedIds")),
         keep_running_in_menu_bar: field(
             &object,
             "keepRunningInMenuBar",
@@ -289,6 +297,8 @@ pub fn render(settings: &Settings) -> Vec<u8> {
             "notFor": settings.call_prompt_not_for,
         },
         "calendarPrompts": settings.calendar_prompts,
+        "calendarAgenda": settings.calendar_agenda,
+        "calendarSelectedIds": settings.calendar_selected_ids,
         "keepRunningInMenuBar": settings.keep_running_in_menu_bar,
         "afterSessionKeep": settings.after_session_keep,
         "checkForUpdatesAtLaunch": settings.check_for_updates_at_launch,
@@ -595,11 +605,42 @@ mod tests {
             call_prompt_auto_start: true,
             call_prompt_not_for: vec!["us.zoom.xos".into(), "com.apple.Safari".into()],
             calendar_prompts: true,
+            calendar_agenda: true,
+            calendar_selected_ids: Some(vec!["fictional-calendar".into()]),
             keep_running_in_menu_bar: true,
             after_session_keep: AfterSessionKeep::Ask,
             check_for_updates_at_launch: false,
             auto_prior_context: false,
         }
+    }
+
+    #[test]
+    fn agenda_filters_persist_exactly_and_reset_without_event_content() {
+        let folder = folder();
+        let (store, _) = Store::open(Some(folder.file()), false);
+        store.record(|settings| {
+            settings.calendar_agenda = true;
+            settings.calendar_selected_ids = Some(vec!["fictional-removed-calendar".into()]);
+        });
+        let (_, saved) = Store::open(Some(folder.file()), false);
+        assert!(saved.calendar_agenda);
+        assert_eq!(
+            saved.calendar_selected_ids,
+            Some(vec!["fictional-removed-calendar".into()])
+        );
+        store.record(|settings| settings.calendar_selected_ids = Some(vec![]));
+        let (_, empty) = Store::open(Some(folder.file()), false);
+        assert_eq!(empty.calendar_selected_ids, Some(vec![]));
+        store.reset().unwrap();
+        let (_, reset) = Store::open(Some(folder.file()), false);
+        assert!(!reset.calendar_agenda);
+        assert_eq!(reset.calendar_selected_ids, None);
+        let legacy = parse(br#"{"version":1,"calendarPrompts":true}"#);
+        assert!(legacy.calendar_prompts);
+        assert!(!legacy.calendar_agenda);
+        assert_eq!(legacy.calendar_selected_ids, None);
+        let invalid = parse(br#"{"version":1,"calendarSelectedIds":["ok",false]}"#);
+        assert_eq!(invalid.calendar_selected_ids, Some(vec![]));
     }
 
     #[test]
@@ -643,7 +684,9 @@ mod tests {
             [
                 "afterSessionKeep",
                 "autoPriorContext",
+                "calendarAgenda",
                 "calendarPrompts",
+                "calendarSelectedIds",
                 "callPrompt",
                 "checkForUpdatesAtLaunch",
                 "companionPosition",

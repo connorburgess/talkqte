@@ -1,5 +1,5 @@
 //! Selected-snapshot projections: v1 remains inert; v2 is used only by the
-//! explicit API lab mode. Legacy prompt_input continues to reject prior notes.
+//! explicitly reviewed lab and own-key modes. Legacy prompt_input still rejects prior notes.
 use super::{Failure, Provenance, Request};
 use serde_json::{json, Value};
 
@@ -13,6 +13,20 @@ fn selected_text(value: &str) -> bool {
 }
 
 impl Request {
+    /// Production own-key projection. Notes can enter a Request only through
+    /// the engine's exact reviewed grant; zero notes preserves legacy bytes.
+    pub fn own_key_prompt_input(&self) -> Result<String, Failure> {
+        if self
+            .sources
+            .iter()
+            .any(|s| matches!(s.provenance, Provenance::PriorNote { .. }))
+        {
+            self.selected_prior_context_input()
+        } else {
+            self.prompt_input()
+        }
+    }
+
     /// Serialize only the immutable sources the native permission bridge gave
     /// this request. Revision strings are opaque local versions, not a claim
     /// that a provider verified the snapshot as current.
@@ -503,6 +517,95 @@ mod unknown_date_projection_tests {
         assert_eq!(
             request.selected_snapshot_input(),
             Err(Failure::InvalidInput)
+        );
+    }
+}
+
+#[cfg(test)]
+mod own_key_projection_tests {
+    use super::*;
+    use crate::{
+        context::Provider,
+        cue_evaluator::{SessionMode, Source},
+    };
+    fn bounded_request(last_chars: usize) -> Request {
+        let mut sources = vec![Source {
+            id: "transcript:current".into(),
+            revision: 0,
+            provenance: Provenance::Transcript {
+                at_ms: 100,
+                speaker: "Speaker".into(),
+            },
+            text: "Fictional project review underway.".into(),
+        }];
+        for n in 0..8 {
+            sources.push(Source {
+                id: format!("prior:file:fictional-{n}"),
+                revision: 7,
+                provenance: Provenance::PriorNote {
+                    provider: Provider::File,
+                    date: String::new(),
+                    title: "Fictional undated project".into(),
+                },
+                text: "x".repeat(if n == 7 { last_chars } else { 1900 }),
+            });
+        }
+        Request::new(1, 1, sources, None)
+            .unwrap()
+            .with_session_mode(SessionMode::Interview)
+            .unwrap()
+    }
+    #[test]
+    fn selected_unknown_dates_and_interview_count_toward_exact_serialized_boundary() {
+        let base = bounded_request(1).own_key_prompt_input().unwrap().len();
+        let tail = 1 + SELECTED_SNAPSHOT_INPUT_BYTES - base;
+        assert!(tail < crate::cue_evaluator::MAX_SOURCE_BYTES);
+        let at = bounded_request(tail).own_key_prompt_input().unwrap();
+        assert_eq!(at.len(), SELECTED_SNAPSHOT_INPUT_BYTES);
+        let value: Value = serde_json::from_str(&at).unwrap();
+        assert_eq!(value["sessionMode"], "interview");
+        assert!(value["priorNotes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n["date"].is_null()));
+        assert_eq!(
+            bounded_request(tail + 1).own_key_prompt_input(),
+            Err(Failure::InvalidInput)
+        );
+        // Multibyte and JSON escapes are counted as serialized UTF-8 bytes,
+        // not character counts or unescaped source bytes.
+        let mut changed = bounded_request(tail);
+        changed
+            .sources
+            .last_mut()
+            .unwrap()
+            .text
+            .replace_range(0..1, "é");
+        assert_eq!(changed.own_key_prompt_input(), Err(Failure::InvalidInput));
+        let mut escaped = bounded_request(tail);
+        escaped
+            .sources
+            .last_mut()
+            .unwrap()
+            .text
+            .replace_range(0..1, "\"");
+        assert_eq!(escaped.own_key_prompt_input(), Err(Failure::InvalidInput));
+    }
+    #[test]
+    fn zero_notes_preserve_transcript_only_bytes_and_legacy_serializer_still_rejects_notes() {
+        let selected = bounded_request(1);
+        assert_eq!(selected.prompt_input(), Err(Failure::InvalidInput));
+        let speech = Request::new(1, 1, vec![selected.sources[0].clone()], None)
+            .unwrap()
+            .with_session_mode(SessionMode::Interview)
+            .unwrap();
+        assert_eq!(speech.own_key_prompt_input(), speech.prompt_input());
+        assert!(
+            serde_json::from_str::<Value>(&speech.own_key_prompt_input().unwrap())
+                .unwrap()
+                .get("priorNotes")
+                .is_none()
         );
     }
 }

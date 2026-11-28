@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Meeting Ask · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/tokens.css" />
+    <style>
+      body {
+        font: 16px/1.5 system-ui;
+        margin: 32px auto;
+        padding: 0 20px;
+        max-width: 760px;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      section {
+        margin-block: 32px;
+        min-width: 0;
+      }
+      p {
+        max-width: 68ch;
+      }
+      button,
+      textarea {
+        font: inherit;
+        color: inherit;
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        padding: 10px;
+        min-height: 44px;
+        box-sizing: border-box;
+        max-width: 100%;
+      }
+      textarea {
+        width: 100%;
+        min-height: 80px;
+      }
+      button:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--accent-ink);
+        outline-offset: 3px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      article {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .primary {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      button:disabled {
+        opacity: 0.5;
+      }
+      a {
+        color: var(--accent-ink);
+      }
+      .error {
+        border: 1px solid var(--border);
+        padding: 12px;
+        border-radius: var(--radius-control);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Ask about this meeting</h1>
+    <p>
+      Implemented states, fictional content and authored model stand-ins. These
+      specimens are not native or model-quality evidence.
+    </p>
+    <section>
+      <h2>Whole current transcript · ready</h2>
+      <label for="current">Your question</label
+      ><textarea id="current">What did we decide at the beginning?</textarea>
+      <div class="actions">
+        <button class="primary">Send</button
+        ><button>Use latest transcript</button>
+      </div>
+      <p class="muted">
+        Send to selected provider · selected model. Uses all 236 available
+        transcript lines from this session, plus 0 prior exchanges. Model
+        answers can be wrong.
+      </p>
+    </section>
+    <section>
+      <h2>Follow-up · three exchanges included</h2>
+      <article>
+        <h3>What did we choose?</h3>
+        <p class="muted">Model answer · authored stand-in</p>
+        <p>The fictional greenhouse team chose the Saturday check.</p>
+        <button>Transcript 0:01</button>
+      </article>
+      <label for="follow">Your question</label
+      ><textarea id="follow">Why that choice?</textarea>
+      <div class="actions">
+        <button class="primary">Send</button><button>Clear conversation</button>
+      </div>
+      <p>
+        Latest three accepted pairs, up to 12 KiB; 1 earlier exchange is
+        excluded. Prior answers clarify follow-ups; only transcript lines are
+        evidence.
+      </p>
+    </section>
+    <section>
+      <h2>Saved meeting · exact revision</h2>
+      <p>
+        Uses all available transcript lines from this saved meeting. Citations
+        belong to its exact saved ID and revision; opening a changed revision
+        clears old chat and citations.
+      </p>
+      <button>View transcript</button>
+      <p class="muted">
+        Saved Ask: 20 sends and $1 cumulative reserved estimates across all
+        saved meetings until the app restarts. Navigation and clearing chat do
+        not reset allowances.
+      </p>
+    </section>
+    <section>
+      <h2>Answering · cancellation</h2>
+      <div class="actions">
+        <button disabled>Answering…</button><button>Cancel answer</button>
+      </div>
+      <p role="status">
+        Waiting for a model answer. A sent request may still be billed after
+        cancellation.
+      </p>
+    </section>
+    <section>
+      <h2>Empty saved transcript</h2>
+      <p>
+        No transcript in this saved meeting. Saved notes are not used as
+        transcript evidence. Opening Ask sends nothing.
+      </p>
+    </section>
+    <section>
+      <h2>Whole source unavailable or over limit</h2>
+      <p class="error">
+        This whole transcript exceeds the 128 KiB Ask request limit. No excerpt
+        or request was sent. Export the transcript to review it outside Ask.
+      </p>
+      <button disabled>Send</button>
+      <p>
+        Truncated current sources are refused too. There is no silent tail
+        fallback or automatic multi-request retrieval.
+      </p>
+    </section>
+    <section>
+      <h2>Error · editable retry</h2>
+      <p class="error">
+        The selected saved meeting changed or is unavailable. Reopen it before
+        asking. No answer was added.
+      </p>
+      <p>
+        Failed requests retain reserved cost. Recovery always needs another
+        explicit Send; there is no automatic retry.
+      </p>
+    </section>
+    <p>
+      <a href="index.html">Back to specimen index</a> ·
+      <a href="../live-questions.md">Scope, cost and remaining acceptance</a>
+    </p>
+  </body>
+</html>

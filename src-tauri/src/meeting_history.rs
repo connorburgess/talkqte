@@ -37,7 +37,10 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 /// The folder under Application Support.
@@ -975,6 +978,7 @@ pub struct Store {
     availability: Mutex<Availability>,
     /// Serializes every change, so two writes never interleave.
     lock: Mutex<()>,
+    question_withdrawal: Mutex<Option<(String, Arc<AtomicBool>)>>,
 }
 
 impl Store {
@@ -990,6 +994,7 @@ impl Store {
             root,
             availability: Mutex::new(availability),
             lock: Mutex::new(()),
+            question_withdrawal: Mutex::new(None),
         }
     }
 
@@ -998,6 +1003,34 @@ impl Store {
         use tauri::Manager;
         let root = app.path().app_data_dir().ok().map(|dir| dir.join(DIR));
         Self::open(root, lab_run())
+    }
+
+    /// Called only inside with_question_snapshot: registration and mutation
+    /// share the store lock, while withdrawing a request never waits on it.
+    pub(crate) fn track_question(&self, id: &str, flag: Arc<AtomicBool>) -> Result<(), Error> {
+        let Ok(mut active) = self.question_withdrawal.lock() else {
+            flag.store(true, Ordering::Release);
+            return Err(Error::Unreadable);
+        };
+        if let Some((_, old)) = active.replace((id.into(), flag)) {
+            old.store(true, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    fn withdraw_question(&self, id: Option<&str>) {
+        let Ok(mut active) = self.question_withdrawal.lock() else {
+            return;
+        };
+        if !active
+            .as_ref()
+            .is_some_and(|(selected, _)| id.is_none_or(|id| id == selected))
+        {
+            return;
+        }
+        if let Some((_, flag)) = active.take() {
+            flag.store(true, Ordering::Release);
+        }
     }
 
     pub fn availability(&self) -> Availability {
@@ -1196,6 +1229,28 @@ impl Store {
             return Err(Error::Missing);
         }
         let _guard = self.lock.lock();
+        self.open_meeting_locked(id)
+    }
+
+    /// Short snapshot/acceptance work under the mutation lock, never network I/O.
+    pub(crate) fn with_question_snapshot<T>(
+        &self,
+        id: &str,
+        revision: u64,
+        work: impl FnOnce(&Meeting) -> T,
+    ) -> Result<T, Error> {
+        if !valid_id(id) {
+            return Err(Error::Missing);
+        }
+        let _guard = self.lock.lock().map_err(|_| Error::Unreadable)?;
+        let meeting = self.open_meeting_locked(id)?;
+        if meeting.revision != revision {
+            return Err(Error::Invalid);
+        }
+        Ok(work(&meeting))
+    }
+
+    fn open_meeting_locked(&self, id: &str) -> Result<Meeting, Error> {
         let root = self.root.clone().ok_or(Error::Off)?;
         let folder = match self.read_index(&root) {
             Ok((entries, _)) => {
@@ -1238,6 +1293,7 @@ impl Store {
             archived: false,
             content,
         };
+        self.withdraw_question(Some(&meeting.id));
         Self::write_meeting(&root, &meeting)?;
         entries.insert(0, meeting.summary());
         if let Err(error) = Self::write_index(&root, &entries, &folders) {
@@ -1271,6 +1327,7 @@ impl Store {
             return Err(Error::Invalid);
         }
         meeting.revision += 1;
+        self.withdraw_question(Some(&meeting.id));
         Self::write_meeting(&root, &meeting)?;
         entries[position] = meeting.summary();
         Self::write_index(&root, &entries, &folders)?;
@@ -1396,6 +1453,7 @@ impl Store {
         };
         let summary = meeting.summary();
         entries.insert(insert, summary.clone());
+        self.withdraw_question(Some(&meeting.id));
         Self::write_meeting(&root, &meeting)?;
         Self::write_index(&root, &entries, &folders)?;
         Ok(summary)
@@ -1471,6 +1529,7 @@ impl Store {
             if let Some(mut meeting) = meeting {
                 meeting.folder = Some(new_name.clone());
                 meeting.revision += 1;
+                self.withdraw_question(Some(&meeting.id));
                 Self::write_meeting(&root, &meeting)?;
                 entries[index] = meeting.summary();
             } else {
@@ -1514,6 +1573,7 @@ impl Store {
             if let Some(mut meeting) = meeting {
                 meeting.folder = None;
                 meeting.revision += 1;
+                self.withdraw_question(Some(&meeting.id));
                 Self::write_meeting(&root, &meeting)?;
                 entries[index] = meeting.summary();
             } else {
@@ -1652,6 +1712,7 @@ impl Store {
         };
         entries.remove(position);
         let prepared = Self::prepare_index(&root, &entries, &folders)?;
+        self.withdraw_question(Some(id));
         let folder = root.join(id);
         if folder.exists() {
             fs::remove_dir_all(&folder).map_err(|_| Error::Write)?;
@@ -1668,6 +1729,7 @@ impl Store {
         let count = self
             .read_index(&root)
             .map_or(0, |(entries, _)| entries.len());
+        self.withdraw_question(None);
         if root.exists() {
             fs::remove_dir_all(&root).map_err(|_| Error::Write)?;
         }

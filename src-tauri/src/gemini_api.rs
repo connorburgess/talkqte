@@ -8,10 +8,10 @@
 
 use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request};
 use crate::llm_provider::{
-    check_cue_spend_cap, cue_schema, cue_system_prompt, finish_no_reply, model_echo_matches,
-    read_refusal_prefix, register_cue_engine, register_usage, token_cost_micro_usd, CueProvider,
-    CueUsageTracker, DecisionValidator, NoReply, OnScreen, Outcome, Reply, ResolvedModel,
-    MAX_LINE_BYTES, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MAX_TEXT_BYTES, SPEND_CAP_MICRO_USD,
+    check_cue_spend_cap, cue_schema, finish_no_reply, model_echo_matches, read_refusal_prefix,
+    register_cue_engine, register_usage, token_cost_micro_usd, CueProvider, CueUsageTracker,
+    DecisionValidator, NoReply, OnScreen, Outcome, Reply, ResolvedModel, MAX_LINE_BYTES,
+    MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MAX_TEXT_BYTES, SPEND_CAP_MICRO_USD,
 };
 use crate::provider_keys::{KeyError, Provider, Secret};
 use serde_json::{json, Value};
@@ -98,7 +98,7 @@ impl Transport for Network {
 pub fn cue_body(input: &str, on_screen: OnScreen) -> Value {
     json!({
         "systemInstruction": {
-            "parts": [{"text": cue_system_prompt()}]
+            "parts": [{"text": crate::llm_provider::cue_system_prompt_for_input(input)}]
         },
         "contents": [{
             "role": "user",
@@ -318,14 +318,15 @@ impl<T: Transport> Evaluator for GeminiApi<T> {
         if stream_url(&self.model.id).is_err() {
             return Err(Failure::EvaluatorUnavailable);
         }
-        let input = request.prompt_input()?;
+        let input = request.own_key_prompt_input()?;
         let on_screen = OnScreen::of(request);
         let body = cue_body(&input, on_screen).to_string();
         if body.len() > MAX_REQUEST_BYTES {
             return Err(Failure::InvalidInput);
         }
-        let prompt_bytes =
-            cue_system_prompt().len() + input.len() + cue_schema(on_screen).to_string().len();
+        let prompt_bytes = crate::llm_provider::cue_system_prompt_for_input(&input).len()
+            + input.len()
+            + cue_schema(on_screen).to_string().len();
         let worst = check_cue_spend_cap(
             &self.usage,
             self.model.price,
@@ -423,11 +424,13 @@ pub fn connected_engine(
     register_usage(usage.clone());
     let model_id = model.id.clone();
     let custom = model.custom;
+    let mut key_source = crate::provider_keys::global().request_key(Provider::Gemini);
+    let rejected_source = key_source.rejection_handler();
     let adapter = GeminiApi::new(
         model,
         Network,
-        Box::new(|| crate::provider_keys::global().get(Provider::Gemini)),
-        Box::new(|| crate::provider_keys::global().mark_rejected(Provider::Gemini)),
+        Box::new(move || key_source.get()),
+        Box::new(move || rejected_source.mark_rejected()),
         usage,
     );
     register_cue_engine(

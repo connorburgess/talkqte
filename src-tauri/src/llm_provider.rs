@@ -608,6 +608,28 @@ pub fn reply_problem(value: &Value, request: &Request) -> bool {
     }
 }
 
+/// Only the Rust-selected note projection adds this instruction. The legacy
+/// transcript-only system prompt remains byte-identical for default Start.
+pub fn cue_system_prompt_for_input(input: &str) -> &'static str {
+    let selected = serde_json::from_str::<Value>(input)
+        .ok()
+        .is_some_and(|v| v["inputContract"] == "selected-prior-context-v2");
+    if !selected {
+        return cue_system_prompt();
+    }
+    static SELECTED: OnceLock<String> = OnceLock::new();
+    SELECTED.get_or_init(|| {
+        let contract: Value = serde_json::from_str(CUE_CONTRACT).expect("cue contract");
+        format!(
+            "{}{}",
+            cue_system_prompt(),
+            contract["prompts"]["selectedNotesRule"]
+                .as_str()
+                .expect("selected notes rule")
+        )
+    })
+}
+
 /// Tracks consecutive unusable cue replies across requests in a session.
 #[derive(Default)]
 pub struct DecisionValidator {
@@ -845,7 +867,7 @@ pub fn cue_data_policy_for(
         )
     };
     format!(
-        "Sends to {}: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. {} Pause cues stops these requests but not the audio to {audio_provider}; Off and Stop end both. Model {}. It never sends {} audio, the full transcript, your notes, imported notes or focus lines. {} handles what is sent under your API account's terms ({}); lines already sent cannot be recalled. If it fails, no other service is used.",
+        "Sends to {}: up to six recent transcript lines and any lines the cue on screen cites, the cue on screen, up to four earlier cues with how each ended, and your session name if you set one. It sends after new lines, at most once every two seconds and one request at a time, until you turn this off, stop the session, or a failure stops it, so nearly every transcript line is sent, a few at a time. {} Pause cues stops these requests but not the audio to {audio_provider}; Off and Stop end both. Model {}. Imported notes are off by default. Explicit review may add exact selected copies; removing the last approved note returns to new speech only. It never sends {} audio, the full transcript, manual notes or focus lines. {} handles what is sent under your API account's terms ({}); lines already sent cannot be recalled. If it fails, no other service is used.",
         provider.cue_account_scope(),
         cap_text,
         model_id,
@@ -882,12 +904,11 @@ pub fn register_cue_engine<E: Evaluator>(
         ProcessingLocation::Hosted {
             service: provider.cue_destination().into(),
         },
-        "own-key-cues-v1".into(),
+        "own-key-cues-selected-notes-v2".into(),
         ProcessorDisclosure::new(provider.disclosure_name().into(), policy)
             .expect("the fixed disclosure is within its bound"),
     )
-    .expect("the fixed configuration is valid")
-    .without_notes();
+    .expect("the fixed configuration is valid");
     if let Some(effort) = effort {
         config = config.with_effort(effort.into());
     }

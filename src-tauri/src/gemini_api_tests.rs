@@ -4,10 +4,204 @@
 
 use super::*;
 use crate::cue_evaluator::{Action, ExistingCue, Provenance, Source, Worker};
+use crate::llm_provider::cue_system_prompt;
 use crate::llm_provider::{curated_model, CueProvider, REQUEST_CAP};
 use std::{collections::VecDeque, sync::Mutex};
 
 const KEY: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
+
+#[test]
+fn real_adapter_401_uses_the_original_credential_revision() {
+    use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
+    struct Offline;
+    impl Probe for Offline {
+        fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+            panic!("no provider probe");
+        }
+    }
+    struct Rotating {
+        keys: &'static Keys,
+        replace: bool,
+    }
+    impl Transport for Rotating {
+        fn post(&mut self, _: &str, _: &Secret, _: &[u8], _: Duration) -> Result<Reply, NoReply> {
+            if self.replace {
+                self.keys
+                    .set(Provider::Gemini, &format!("{KEY}replacement"))
+                    .unwrap();
+            }
+            Ok(Reply {
+                status: 401,
+                body: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+            })
+        }
+    }
+    for replace in [false, true] {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(Offline),
+        )));
+        keys.set(Provider::Gemini, KEY).unwrap();
+        let mut key_source = keys.request_key(Provider::Gemini);
+        let rejected_source = key_source.rejection_handler();
+        let model = built_in_model();
+        let usage = Arc::new(CueUsageTracker::new(CueProvider::Gemini, &model.id, false));
+        let adapter = GeminiApi::new(
+            model,
+            Rotating { keys, replace },
+            Box::new(move || key_source.get()),
+            Box::new(move || rejected_source.mark_rejected()),
+            usage,
+        );
+        let mut worker = Worker::start(adapter, crate::llm_provider::DEADLINE).unwrap();
+        let request = request(None);
+        worker.submit(request.clone()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = worker.poll(&request) {
+                assert_eq!(result.unwrap_err(), Failure::SignIn);
+                break;
+            }
+            assert!(std::time::Instant::now() < until, "fake 401 did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            keys.status().of(Provider::Gemini).state,
+            if replace {
+                KeyState::Set
+            } else {
+                KeyState::Rejected
+            }
+        );
+    }
+}
+
+#[test]
+fn held_generations_keep_separate_receipts_and_cancel_never_overlaps_a_reader() {
+    use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    struct Offline;
+    impl Probe for Offline {
+        fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+            panic!("no provider probe");
+        }
+    }
+    struct Held {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+    impl Transport for Held {
+        fn post(&mut self, _: &str, _: &Secret, _: &[u8], _: Duration) -> Result<Reply, NoReply> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(Reply {
+                status: 401,
+                body: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+            })
+        }
+    }
+    struct Running {
+        worker: Worker,
+        started: mpsc::Receiver<()>,
+        release: mpsc::Sender<()>,
+        reads: Arc<AtomicUsize>,
+    }
+    fn start(keys: &'static Keys) -> Running {
+        let (entered, started) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        // Same ownership as connected_engine_for: fresh reader, one callback,
+        // then the entire adapter moved into one exclusive worker.
+        let mut source = keys.request_key(Provider::Gemini);
+        let rejection = source.rejection_handler();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let count = reads.clone();
+        let model = built_in_model();
+        let usage = Arc::new(CueUsageTracker::new(CueProvider::Gemini, &model.id, false));
+        let adapter = GeminiApi::new(
+            model,
+            Held {
+                entered,
+                release: held,
+            },
+            Box::new(move || {
+                count.fetch_add(1, Ordering::AcqRel);
+                source.get()
+            }),
+            Box::new(move || rejection.mark_rejected()),
+            usage,
+        );
+        Running {
+            worker: Worker::start(adapter, crate::llm_provider::DEADLINE).unwrap(),
+            started,
+            release,
+            reads,
+        }
+    }
+    fn complete(worker: &mut Worker, input: &Request) {
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = worker.poll(input) {
+                assert_eq!(result.unwrap_err(), Failure::SignIn);
+                return;
+            }
+            assert!(Instant::now() < until, "held auth result did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    for cancel in [false, true] {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(Offline),
+        )));
+        keys.set(Provider::Gemini, KEY).unwrap();
+        let input = request(None);
+        let Running {
+            worker: mut old,
+            started: old_started,
+            release: release_old,
+            reads: old_reads,
+        } = start(keys);
+        old.submit(input.clone()).unwrap();
+        old_started.recv_timeout(Duration::from_secs(2)).unwrap();
+        if cancel {
+            old.cancel_pending();
+            assert_eq!(old.poll(&input), Some(Err(Failure::Cancelled)));
+        }
+        assert_eq!(old.submit(input.clone()), Err(Failure::Busy));
+        assert_eq!(old_reads.load(Ordering::Acquire), 1);
+        keys.set(Provider::Gemini, &format!("{KEY}replacement"))
+            .unwrap();
+        let Running {
+            worker: mut new,
+            started: new_started,
+            release: release_new,
+            reads: new_reads,
+        } = start(keys);
+        new.submit(input.clone()).unwrap();
+        new_started.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(new_reads.load(Ordering::Acquire), 1);
+        // The newer generation has already acquired its replacement receipt
+        // before the older transport returns. Neither callback can swap it.
+        release_old.send(()).unwrap();
+        if cancel {
+            let until = Instant::now() + Duration::from_secs(5);
+            while old.is_busy() {
+                assert!(Instant::now() < until, "cancelled adapter did not exit");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        } else {
+            complete(&mut old, &input);
+        }
+        assert_eq!(keys.status().of(Provider::Gemini).state, KeyState::Set);
+        assert_eq!(old_reads.load(Ordering::Acquire), 1);
+        release_new.send(()).unwrap();
+        complete(&mut new, &input);
+        assert_eq!(keys.status().of(Provider::Gemini).state, KeyState::Rejected);
+    }
+}
 
 #[derive(Default)]
 struct Script {
@@ -356,4 +550,66 @@ fn cancellation_during_key_access_sends_no_request() {
         std::thread::yield_now();
     }
     assert!(transport.sent().is_empty());
+}
+
+#[test]
+fn production_approved_selected_notes_reach_gemini_wire_with_unknown_date_and_interview_mode() {
+    let model = built_in_model();
+    let model_id = model.id.clone();
+    let transport = Scripted::default().answer(Ok((
+        200,
+        sse(
+            &model_id,
+            &decision("quiet", None, &["transcript:line-1"]),
+            false,
+        ),
+    )));
+    let transport = transport
+        .answer(Ok((
+            200,
+            sse(
+                &model_id,
+                &decision(
+                    "show",
+                    Some("Earlier calibration reduced retries"),
+                    &["transcript:line-2", "prior:file:fictional-portfolio"],
+                ),
+                false,
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse(
+                &model_id,
+                &decision("quiet", None, &["transcript:line-3"]),
+                false,
+            ),
+        )));
+    let usage = Arc::new(CueUsageTracker::new(CueProvider::Gemini, &model_id, false));
+    let adapter = GeminiApi::new(
+        model,
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| panic!("scripted success")),
+        usage,
+    );
+    let mut engine =
+        crate::own_key_selected_tests::selected_engine(adapter, CueProvider::Gemini, &model_id);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 1);
+    let body = &sent[0].2;
+    crate::own_key_selected_tests::check_wire(
+        body["contents"][0]["parts"][0]["text"].as_str().unwrap(),
+        body["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap(),
+    );
+    crate::own_key_selected_tests::withdraw_visible_note_cue(&mut engine);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 3);
+    crate::own_key_selected_tests::check_withdrawn_wire(
+        sent[2].2["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .unwrap(),
+    );
 }

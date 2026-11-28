@@ -118,13 +118,16 @@ pub async fn write_meeting_notes(
     let key_provider = provider.key_provider();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let keys = provider_keys::global();
-        let read = keys.get(key_provider);
+        let read = keys.get_with_revision(key_provider);
+        let revision = read.as_ref().ok().map(|(_, revision)| revision.clone());
         let status = keys.status();
         let key_status = status.of(key_provider);
         let rejected = key_status.state == KeyState::Rejected;
-        let key = meeting_notes::key(read, rejected)?;
+        let key = meeting_notes::key(read.map(|(key, _)| key), rejected)?;
         Ok::<_, meeting_notes::Refusal>(meeting_notes::write_network(key, &prepared, || {
-            keys.mark_rejected(key_provider)
+            if let Some(revision) = revision {
+                keys.mark_rejected(&revision)
+            }
         }))
     })
     .await;

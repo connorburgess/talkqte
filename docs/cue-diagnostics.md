@@ -33,8 +33,10 @@ In the standard own-key path, Start registers the selected keyed provider and
 approves new speech with no prior notes. Missing provider keys leave phrase rules
 available. Capture, cue pause, processing permission, provider failures and the
 companion visibility setting remain separate controls. The own-key model input
-contains bounded recent speech and the selected session mode; imported notes
-are excluded. Importing or selecting a note does not put it into this route.
+contains bounded recent speech and the selected session mode. Imported notes
+are excluded by default; only a separate **Review prior-note sharing** approval
+adds exact copies to the bounded selected projection. Importing or automatic
+selection alone does not authorize transmission.
 
 The development `selected-prior-v2` route is separate and requires its own
 explicit selection/review. On the historical `c993d2c` source, its native selected

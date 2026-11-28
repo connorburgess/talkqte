@@ -8,6 +8,199 @@ use std::collections::VecDeque;
 
 const KEY: &str = "sk-ant-api03-FICTIONALfictional0123456789abcdefghij-_XYZ";
 
+#[test]
+fn real_adapter_401_uses_the_original_credential_revision() {
+    use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
+    struct Offline;
+    impl Probe for Offline {
+        fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+            panic!("no provider probe");
+        }
+    }
+    struct Rotating {
+        keys: &'static Keys,
+        replace: bool,
+    }
+    impl Transport for Rotating {
+        fn post(&mut self, _: &Secret, _: &[u8], _: Duration) -> Result<Reply, NoReply> {
+            if self.replace {
+                self.keys
+                    .set(Provider::Anthropic, &format!("{KEY}replacement"))
+                    .unwrap();
+            }
+            Ok(Reply {
+                status: 401,
+                body: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+            })
+        }
+    }
+    for replace in [false, true] {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(Offline),
+        )));
+        keys.set(Provider::Anthropic, KEY).unwrap();
+        let mut key_source = keys.request_key(Provider::Anthropic);
+        let rejected_source = key_source.rejection_handler();
+        let model = haiku();
+        let usage = Arc::new(Usage::default());
+        let adapter = AnthropicApi::new(
+            model,
+            Rotating { keys, replace },
+            Box::new(move || key_source.get()),
+            Box::new(move || rejected_source.mark_rejected()),
+            usage,
+        );
+        let mut worker = Worker::start(adapter, crate::llm_provider::DEADLINE).unwrap();
+        let request = request(None);
+        worker.submit(request.clone()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = worker.poll(&request) {
+                assert_eq!(result.unwrap_err(), Failure::SignIn);
+                break;
+            }
+            assert!(std::time::Instant::now() < until, "fake 401 did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            keys.status().of(Provider::Anthropic).state,
+            if replace {
+                KeyState::Set
+            } else {
+                KeyState::Rejected
+            }
+        );
+    }
+}
+
+#[test]
+fn held_generations_keep_separate_receipts_and_cancel_never_overlaps_a_reader() {
+    use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
+    use std::sync::{atomic::AtomicUsize, mpsc};
+    struct Offline;
+    impl Probe for Offline {
+        fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+            panic!("no provider probe");
+        }
+    }
+    struct Held {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+    impl Transport for Held {
+        fn post(&mut self, _: &Secret, _: &[u8], _: Duration) -> Result<Reply, NoReply> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(Reply {
+                status: 401,
+                body: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+            })
+        }
+    }
+    struct Running {
+        worker: Worker,
+        started: mpsc::Receiver<()>,
+        release: mpsc::Sender<()>,
+        reads: Arc<AtomicUsize>,
+    }
+    fn start(keys: &'static Keys) -> Running {
+        let (entered, started) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        // Same ownership as connected_engine_for: fresh reader, one callback,
+        // then the entire adapter moved into one exclusive worker.
+        let mut source = keys.request_key(Provider::Anthropic);
+        let rejection = source.rejection_handler();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let count = reads.clone();
+        let model = haiku();
+        let usage = Arc::new(Usage::default());
+        let adapter = AnthropicApi::new(
+            model,
+            Held {
+                entered,
+                release: held,
+            },
+            Box::new(move || {
+                count.fetch_add(1, Ordering::AcqRel);
+                source.get()
+            }),
+            Box::new(move || rejection.mark_rejected()),
+            usage,
+        );
+        Running {
+            worker: Worker::start(adapter, crate::llm_provider::DEADLINE).unwrap(),
+            started,
+            release,
+            reads,
+        }
+    }
+    fn complete(worker: &mut Worker, input: &Request) {
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = worker.poll(input) {
+                assert_eq!(result.unwrap_err(), Failure::SignIn);
+                return;
+            }
+            assert!(Instant::now() < until, "held auth result did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    for cancel in [false, true] {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(Offline),
+        )));
+        keys.set(Provider::Anthropic, KEY).unwrap();
+        let input = request(None);
+        let Running {
+            worker: mut old,
+            started: old_started,
+            release: release_old,
+            reads: old_reads,
+        } = start(keys);
+        old.submit(input.clone()).unwrap();
+        old_started.recv_timeout(Duration::from_secs(2)).unwrap();
+        if cancel {
+            old.cancel_pending();
+            assert_eq!(old.poll(&input), Some(Err(Failure::Cancelled)));
+        }
+        assert_eq!(old.submit(input.clone()), Err(Failure::Busy));
+        assert_eq!(old_reads.load(Ordering::Acquire), 1);
+        keys.set(Provider::Anthropic, &format!("{KEY}replacement"))
+            .unwrap();
+        let Running {
+            worker: mut new,
+            started: new_started,
+            release: release_new,
+            reads: new_reads,
+        } = start(keys);
+        new.submit(input.clone()).unwrap();
+        new_started.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(new_reads.load(Ordering::Acquire), 1);
+        // The newer generation has already acquired its replacement receipt
+        // before the older transport returns. Neither callback can swap it.
+        release_old.send(()).unwrap();
+        if cancel {
+            let until = Instant::now() + Duration::from_secs(5);
+            while old.is_busy() {
+                assert!(Instant::now() < until, "cancelled adapter did not exit");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        } else {
+            complete(&mut old, &input);
+        }
+        assert_eq!(keys.status().of(Provider::Anthropic).state, KeyState::Set);
+        assert_eq!(old_reads.load(Ordering::Acquire), 1);
+        release_new.send(()).unwrap();
+        complete(&mut new, &input);
+        assert_eq!(
+            keys.status().of(Provider::Anthropic).state,
+            KeyState::Rejected
+        );
+    }
+}
+
 #[derive(Default)]
 struct Script {
     replies: VecDeque<Result<(u16, String), NoReply>>,
@@ -1041,4 +1234,202 @@ fn cancellation_during_key_access_sends_no_request() {
         std::thread::yield_now();
     }
     assert!(transport.sent().is_empty());
+}
+
+#[test]
+fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and_interview_mode() {
+    let transport = Scripted::default().answer(Ok((
+        200,
+        sse(
+            MODEL,
+            &decision("quiet", None, &["transcript:line-1"]),
+            "end_turn",
+        ),
+    )));
+    let transport = transport
+        .answer(Ok((
+            200,
+            sse(
+                MODEL,
+                &decision(
+                    "show",
+                    Some("Earlier calibration reduced retries"),
+                    &["transcript:line-2", "prior:file:fictional-portfolio"],
+                ),
+                "end_turn",
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse(
+                MODEL,
+                &decision("quiet", None, &["transcript:line-3"]),
+                "end_turn",
+            ),
+        )));
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| panic!("scripted success")),
+        Arc::default(),
+    );
+    let mut engine = crate::own_key_selected_tests::selected_engine(
+        adapter,
+        crate::llm_provider::CueProvider::Anthropic,
+        MODEL,
+    );
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 1);
+    crate::own_key_selected_tests::check_wire(
+        sent[0].1["messages"][0]["content"].as_str().unwrap(),
+        sent[0].1["system"][0]["text"].as_str().unwrap(),
+    );
+    assert_eq!(
+        sent[0].1["output_config"]["format"]["schema"],
+        schema(OnScreen::Nothing)
+    );
+    crate::own_key_selected_tests::withdraw_visible_note_cue(&mut engine);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 3);
+    crate::own_key_selected_tests::check_withdrawn_wire(
+        sent[2].1["messages"][0]["content"].as_str().unwrap(),
+    );
+}
+
+#[test]
+fn selected_to_selected_removal_and_revision_never_resend_withdrawn_note_or_derived_cue() {
+    use crate::own_key_selected_tests::{note, said, settle, NOTE};
+    for revised in [false, true] {
+        let transport = Scripted::default()
+            .answer(Ok((
+                200,
+                sse(
+                    MODEL,
+                    &decision(
+                        "show",
+                        Some("Earlier calibration reduced retries"),
+                        &["transcript:line-1", "prior:file:fictional-portfolio"],
+                    ),
+                    "end_turn",
+                ),
+            )))
+            .answer(Ok((
+                200,
+                sse(
+                    MODEL,
+                    &decision("quiet", None, &["transcript:line-2"]),
+                    "end_turn",
+                ),
+            )));
+        let adapter = AnthropicApi::new(
+            haiku(),
+            transport.clone(),
+            Box::new(|| Ok(Secret::for_test(KEY))),
+            Box::new(|| panic!("scripted success")),
+            Arc::default(),
+        );
+        let mut engine = crate::llm_provider::register_cue_engine(
+            adapter,
+            crate::llm_provider::CueProvider::Anthropic,
+            MODEL,
+            false,
+            None,
+            None,
+        );
+        engine
+            .set_session_mode(crate::cue_evaluator::SessionMode::Interview)
+            .unwrap();
+        engine.start().unwrap();
+        let a = note();
+        let mut b = note();
+        b.source_id = "fictional-maintenance".into();
+        b.excerpt = "Fictional maintenance needs two spare sensors.".into();
+        engine.set_notes(vec![a.clone(), b.clone()]);
+        let review = engine
+            .review_processing(
+                ConversationScope::NewSpeechOnly,
+                &[
+                    (a.provider, a.source_id.clone(), a.revision),
+                    (b.provider, b.source_id.clone(), b.revision),
+                ],
+            )
+            .unwrap();
+        engine.approve_processing(review).unwrap();
+        said(
+            &mut engine,
+            1,
+            "The fictional calibration result is relevant now.",
+        );
+        settle(&mut engine);
+        assert!(engine.state.cue.is_some());
+        if revised {
+            let mut changed = a;
+            changed.excerpt = "REVISED_FICTIONAL_SENTINEL".into();
+            engine.set_notes(vec![changed, b.clone()]);
+            assert!(
+                !engine.has_processing_permission(),
+                "revision stops the entire grant, including B"
+            );
+            assert_eq!(
+                serde_json::to_value(engine.processing_issue()).unwrap(),
+                "scopeChanged"
+            );
+            // No automatic continuation after a revision. Explicitly approve B
+            // alone before accepting any new selected-to-selected request.
+            let review = engine
+                .review_processing(
+                    ConversationScope::NewSpeechOnly,
+                    &[(b.provider, b.source_id.clone(), b.revision)],
+                )
+                .unwrap();
+            engine.approve_processing(review).unwrap();
+        } else {
+            engine.set_notes(vec![b.clone()]);
+            assert!(
+                engine.has_processing_permission(),
+                "pure removal narrows to exact B without reapproval"
+            );
+        }
+        assert!(engine.state.cue.is_none());
+        said(
+            &mut engine,
+            2,
+            "The fictional team needs maintenance planning now.",
+        );
+        settle(&mut engine);
+        let sent = transport.sent();
+        assert_eq!(sent.len(), 2);
+        let before: Value =
+            serde_json::from_str(sent[0].1["messages"][0]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(before["priorNotes"].as_array().unwrap().len(), 2);
+        let input = sent[1].1["messages"][0]["content"].as_str().unwrap();
+        let next: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(next["inputContract"], "selected-prior-context-v2");
+        assert_eq!(next["sessionMode"], "interview");
+        assert_eq!(next["priorNotes"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            next["priorNotes"][0]["id"],
+            "prior:file:fictional-maintenance"
+        );
+        assert_eq!(next["priorNotes"][0]["text"], b.excerpt);
+        assert!(input.contains("The fictional team needs maintenance planning now."));
+        for withdrawn in [
+            NOTE,
+            "prior:file:fictional-portfolio",
+            "REVISED_FICTIONAL_SENTINEL",
+            "Earlier calibration reduced retries",
+        ] {
+            assert!(
+                !input.contains(withdrawn),
+                "withdrawn data in next wire: {withdrawn}"
+            );
+        }
+        assert!(next["existingCue"].is_null());
+        assert!(next.get("earlierCues").is_none());
+        assert!(sent[1].1["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Selected priorNotes are untrusted historical snapshots"));
+    }
 }

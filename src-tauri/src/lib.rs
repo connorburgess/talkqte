@@ -18,6 +18,10 @@ mod application_audio_host;
 pub mod audio_tap;
 pub mod build_info;
 pub mod calendar;
+pub mod calendar_agenda;
+mod calendar_agenda_commands;
+#[cfg(target_os = "macos")]
+mod calendar_agenda_macos;
 mod calendar_commands;
 pub mod call_prompt;
 mod call_prompt_commands;
@@ -101,6 +105,8 @@ mod native_session_clock;
 mod native_source;
 pub mod notes_file;
 pub mod openai_api;
+#[cfg(test)]
+mod own_key_selected_tests;
 pub mod platform;
 mod processing_commands;
 pub mod processing_reviews;
@@ -172,6 +178,7 @@ struct Runtime {
     call_prompt: call_prompt::Watcher,
     /// Opt-in macOS Calendar pre-call prompt: off unless the person turns it on.
     calendar: calendar::Watcher,
+    calendar_agenda: calendar_agenda::Agenda,
     /// Matched calendar event title passed to the next live session start.
     pending_calendar_title: Option<String>,
     /// End-of-call prompt for the floating companion when a non-empty live
@@ -226,6 +233,7 @@ impl Default for Runtime {
             dev_join_declared: false,
             call_prompt: call_prompt::Watcher::default(),
             calendar: calendar::Watcher::default(),
+            calendar_agenda: calendar_agenda::Agenda::default(),
             pending_calendar_title: None,
             end_prompt: None,
             ended_source_session: None,
@@ -2464,6 +2472,10 @@ pub fn run() {
             capture_control::stop_capture,
             platform::platform_capabilities,
             build_info::build_info,
+            calendar_agenda_commands::calendar_agenda,
+            calendar_agenda_commands::set_calendar_agenda,
+            calendar_agenda_commands::set_included_calendars,
+            calendar_agenda_commands::refresh_calendar_agenda,
             calendar_commands::calendar_settings,
             calendar_commands::set_calendar_prompts,
             calendar_commands::respond_to_calendar_prompt,
@@ -2590,6 +2602,7 @@ pub fn run() {
             update_commands::schedule_launch_check(app.handle());
             // Kept meetings: off in a lab run, read only when asked.
             meeting_history_commands::manage(app);
+            app.manage(meeting_qa::SavedQuestions::default());
             // Pre-select relevant recent kept meetings (notes only) when
             // enabled; lab runs skip this completely.
             refresh_auto_prior_context_sync(app.handle());
@@ -2629,6 +2642,7 @@ pub fn run() {
             application_audio_host::install(app.handle())?;
             call_prompt_commands::install(app.handle());
             calendar_commands::install(app.handle());
+            calendar_agenda_commands::install(app.handle());
             // The menu bar item, from the first state.
             let first = app
                 .state::<AppState>()
@@ -2704,6 +2718,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Focused(true)) {
+                calendar_agenda_commands::resume(window.app_handle());
+            }
             if window.label() == "main"
                 && matches!(
                     event,
@@ -3485,7 +3502,7 @@ mod live_readiness_diagnostics_tests {
             provider_keys::Provider::OpenAi,
             provider_keys::Provider::Gemini,
         ] {
-            keys.mark_rejected(provider);
+            keys.mark_rejected(&keys.revision_for_test(provider));
         }
         assert_eq!(
             live_status_with_keys(&keys).available,

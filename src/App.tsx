@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   AudioLines,
   BookOpen,
+  Calendar,
   ChevronRight,
   Cloud,
   CloudOff,
@@ -87,6 +88,20 @@ import { CallEndPrompt } from './components/CallEndPrompt';
 import { EndPrompt } from './components/EndPrompt';
 import { CallPromptSetting } from './components/CallPromptSetting';
 import { CalendarSettings } from './components/CalendarSettings';
+import {
+  CalendarAgenda,
+  LiveScheduleGlance,
+} from './components/CalendarAgenda';
+import {
+  calendarAgenda,
+  isCalendarAgendaSnapshot,
+  openCalendarSettings,
+  refreshCalendarAgenda,
+  setCalendarAgenda,
+  watchCalendarAgenda,
+  type CalendarAgendaEvent,
+  type CalendarAgendaSnapshot,
+} from './lib/calendarAgenda';
 import { SavedSettings } from './components/SavedSettings';
 import { MenuBarSettings } from './components/MenuBarSettings';
 import { UpdateSettings } from './components/UpdateSettings';
@@ -724,14 +739,64 @@ function Notebook() {
     (startPending && !startInstalled);
   const cancelling = capture.state?.startup === 'cancelling';
   const finishing = capture.state?.phase === 'stopping';
-  // Pre-filled meeting title from an opt-in calendar pre-call prompt.
+  // Pre-filled meeting title from an opt-in calendar pre-call prompt or Calendar Home.
+  type PendingTitleOrigin = 'agenda' | 'precall' | 'manual' | null;
   const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
+  const [pendingTitleOrigin, setPendingTitleOrigin] =
+    useState<PendingTitleOrigin>(null);
+  const pendingTitleOriginRef = useRef<PendingTitleOrigin>(null);
+  const setPendingTitle = useCallback(
+    (title: string | null, origin: PendingTitleOrigin) => {
+      pendingTitleOriginRef.current = origin;
+      setPendingTitleOrigin(origin);
+      setMeetingTitle(title);
+    },
+    [],
+  );
+  const [preparedCalendarEvent, setPreparedCalendarEvent] = useState<{
+    occurrenceKey: string;
+    title: string;
+  } | null>(null);
+  const [calendarSnap, setCalendarSnap] =
+    useState<CalendarAgendaSnapshot | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState('');
+  const [scheduleGlanceOpen, setScheduleGlanceOpen] = useState(false);
+  const scheduleGlanceTrigger = useRef<HTMLButtonElement>(null);
+  const calendarRevision = useRef(0);
+  const [nowEpochS, setNowEpochS] = useState(() =>
+    Math.floor(Date.now() / 1000),
+  );
+  const applyCalendarSnapshot = useCallback(
+    (next: CalendarAgendaSnapshot) => {
+      if (next.revision < calendarRevision.current) return;
+      calendarRevision.current = next.revision;
+      setCalendarSnap(next);
+      if (
+        !next.agendaEnabled ||
+        next.permission === 'denied' ||
+        next.permission === 'off'
+      ) {
+        setPreparedCalendarEvent(null);
+        if (pendingTitleOriginRef.current === 'agenda') {
+          setPendingTitle(null, null);
+        }
+      }
+    },
+    [setPendingTitle],
+  );
   useEffect(() => {
     let disposed = false;
     let stop: (() => void) | undefined;
-    void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
-      setView('notebook');
-      if (payload?.title) setMeetingTitle(payload.title);
+    void calendarAgenda()
+      .then((next) => {
+        if (!disposed && isCalendarAgendaSnapshot(next)) {
+          applyCalendarSnapshot(next);
+        }
+      })
+      .catch(() => {});
+    void watchCalendarAgenda((next) => {
+      if (!disposed) applyCalendarSnapshot(next);
     })
       .then((unlisten) => {
         if (disposed) unlisten();
@@ -742,13 +807,120 @@ function Notebook() {
       disposed = true;
       stop?.();
     };
+  }, [applyCalendarSnapshot, settingsEpoch]);
+  useEffect(() => {
+    if (!calendarSnap?.agendaEnabled) return;
+    setNowEpochS(Math.floor(Date.now() / 1000));
+    const timer = window.setInterval(
+      () => setNowEpochS(Math.floor(Date.now() / 1000)),
+      30_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [calendarSnap?.agendaEnabled]);
+  const liveSessionRunning = !!state?.live && state.status !== 'ended';
+  const prevLiveRunning = useRef(false);
+  useEffect(() => {
+    const wasLive = prevLiveRunning.current;
+    prevLiveRunning.current = liveSessionRunning;
+    if (liveSessionRunning && !wasLive) {
+      setScheduleGlanceOpen(false);
+      setPreparedCalendarEvent(null);
+    } else if (!liveSessionRunning && wasLive) {
+      setScheduleGlanceOpen(false);
+      void calendarAgenda()
+        .then((next) => {
+          if (isCalendarAgendaSnapshot(next)) applyCalendarSnapshot(next);
+        })
+        .catch(() => {});
+    }
+  }, [liveSessionRunning, applyCalendarSnapshot]);
+  const enableCalendarAgenda = () => {
+    setCalendarBusy(true);
+    setCalendarError('');
+    void setCalendarAgenda(true)
+      .then((next) => {
+        if (isCalendarAgendaSnapshot(next)) applyCalendarSnapshot(next);
+      })
+      .catch(() => {
+        setCalendarError('Could not turn on the Apple Calendar agenda.');
+      })
+      .finally(() => setCalendarBusy(false));
+  };
+  const refreshAgendaNow = () => {
+    setCalendarBusy(true);
+    setCalendarError('');
+    void refreshCalendarAgenda()
+      .then((next) => {
+        if (isCalendarAgendaSnapshot(next)) applyCalendarSnapshot(next);
+      })
+      .catch(() => {
+        setCalendarError('Could not refresh Apple Calendar. Try again.');
+      })
+      .finally(() => setCalendarBusy(false));
+  };
+  const openSystemCalendarSettings = () => {
+    setCalendarError('');
+    void openCalendarSettings().catch(() => {
+      setCalendarError('Could not open System Settings.');
+    });
+  };
+  const toggleScheduleGlance = () => {
+    setScheduleGlanceOpen((wasOpen) => {
+      const nextOpen = !wasOpen;
+      if (nextOpen) {
+        setCalendarError('');
+        void calendarAgenda()
+          .then((next) => {
+            if (isCalendarAgendaSnapshot(next)) applyCalendarSnapshot(next);
+          })
+          .catch(() => {});
+      }
+      return nextOpen;
+    });
+  };
+  const closeScheduleGlance = useCallback(() => {
+    setScheduleGlanceOpen(false);
+    requestAnimationFrame(() => scheduleGlanceTrigger.current?.focus());
   }, []);
+  const prepareCalendarMeeting = (event: CalendarAgendaEvent) => {
+    setPreparedCalendarEvent({
+      occurrenceKey: event.occurrenceKey,
+      title: event.title,
+    });
+    setPendingTitle(event.title, 'agenda');
+    setNotice(
+      'Calendar meeting prepared. Press Start live session when ready.',
+    );
+  };
+  const clearPreparedMeeting = () => {
+    setPreparedCalendarEvent(null);
+    setPendingTitle(null, null);
+  };
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<{ title?: string }>('calendar-prompt:start', ({ payload }) => {
+      setView('notebook');
+      setPreparedCalendarEvent(null);
+      if (payload?.title) setPendingTitle(payload.title, 'precall');
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [setPendingTitle]);
   const capturesSystemAudio = !notMacos(platform);
   const startLive = () => {
     focusCancel.current = document.activeElement === startButton.current;
     capture.clearError();
     setStartInstalled(false);
     setStartPending(true);
+    setScheduleGlanceOpen(false);
     const explicitTitle = meetingTitle === null ? undefined : meetingTitle;
     void run(async () => {
       setNotice('');
@@ -758,7 +930,8 @@ function Notebook() {
           'start_live_session',
           explicitTitle !== undefined ? { title: explicitTitle } : undefined,
         );
-        setMeetingTitle(null);
+        setPreparedCalendarEvent(null);
+        setPendingTitle(null, null);
       } catch (e) {
         // Native cancellation is an expected result, not a startup failure.
         if (
@@ -784,14 +957,33 @@ function Notebook() {
     setSettingsSection(section);
     setView('settings');
   };
+  const openCalendarSettingsSection = () => {
+    openSettingsSection('capture');
+    requestAnimationFrame(() => {
+      const heading = document.getElementById('calendar-agenda-setting');
+      heading?.scrollIntoView({ block: 'start' });
+      heading?.focus({ preventScroll: true });
+    });
+  };
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash;
       if (hash === '#settings-providers' || hash === '#live-transcription')
         setSettingsSection('providers');
       else if (hash === '#settings-cues') setSettingsSection('cues');
-      else if (hash === '#settings-capture') setSettingsSection('capture');
-      else if (hash === '#settings-meetings') setSettingsSection('meetings');
+      else if (
+        hash === '#settings-capture' ||
+        hash === '#calendar-agenda-setting' ||
+        hash === '#calendar-prompts-setting'
+      ) {
+        setSettingsSection('capture');
+        if (
+          hash === '#calendar-agenda-setting' ||
+          hash === '#calendar-prompts-setting'
+        ) {
+          setView('settings');
+        }
+      } else if (hash === '#settings-meetings') setSettingsSection('meetings');
       else if (hash === '#settings-privacy') setSettingsSection('privacy');
     };
     applyHash();
@@ -1937,11 +2129,23 @@ function Notebook() {
                         )}
                       </div>
                     </div>
-                    {!preparing &&
-                      !finishing &&
-                      live &&
-                      !capture.state?.processor && (
-                        <div className="session-actions">
+                    {!preparing && !finishing && live && (
+                      <div className="session-actions">
+                        {calendarSnap?.agendaEnabled &&
+                          calendarSnap.permission !== 'unavailable' && (
+                            <button
+                              ref={scheduleGlanceTrigger}
+                              type="button"
+                              className="secondary-button live-glance-btn"
+                              aria-expanded={scheduleGlanceOpen}
+                              aria-controls="live-schedule-glance"
+                              onClick={toggleScheduleGlance}
+                            >
+                              <Calendar size={14} aria-hidden="true" />
+                              Schedule glance
+                            </button>
+                          )}
+                        {!capture.state?.processor && (
                           <button
                             className="secondary-button"
                             disabled={busy}
@@ -1961,8 +2165,9 @@ function Notebook() {
                             )}
                             {state.cuesPaused ? 'Resume cues' : 'Pause cues'}
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                    )}
                   </section>
                   {liveCaptureBar && (
                     <MicrophoneControl
@@ -2196,7 +2401,18 @@ function Notebook() {
                       !finishing &&
                       meetingTitle !== null && (
                         <div className="calendar-meeting-title">
-                          <label htmlFor="pre-call-title">Meeting title</label>
+                          <label htmlFor="pre-call-title">
+                            Meeting title
+                            {pendingTitleOrigin === 'agenda' && (
+                              <span className="muted">
+                                {' '}
+                                · Prepared from Apple Calendar
+                              </span>
+                            )}
+                            {pendingTitleOrigin === 'manual' && (
+                              <span className="muted"> · Custom title</span>
+                            )}
+                          </label>
                           <div className="calendar-meeting-title-row">
                             <input
                               id="pre-call-title"
@@ -2204,16 +2420,33 @@ function Notebook() {
                               maxLength={120}
                               value={meetingTitle}
                               disabled={busy}
-                              onChange={(e) => setMeetingTitle(e.target.value)}
+                              onChange={(e) => {
+                                setPreparedCalendarEvent(null);
+                                setPendingTitle(e.target.value, 'manual');
+                              }}
                             />
                             <button
                               type="button"
                               className="secondary-button"
                               disabled={busy}
-                              onClick={() => setMeetingTitle('')}
+                              onClick={() => {
+                                setPreparedCalendarEvent(null);
+                                setPendingTitle('', 'manual');
+                              }}
                             >
                               Clear
                             </button>
+                            {(pendingTitleOrigin === 'agenda' ||
+                              pendingTitleOrigin === 'manual') && (
+                              <button
+                                type="button"
+                                className="text-button"
+                                disabled={busy}
+                                onClick={clearPreparedMeeting}
+                              >
+                                Ad-hoc session
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}
@@ -2345,6 +2578,37 @@ function Notebook() {
                   )}
                 </div>
               </section>
+            )}
+
+            {live && !preparing && !finishing && scheduleGlanceOpen && (
+              <LiveScheduleGlance
+                id="live-schedule-glance"
+                snapshot={calendarSnap}
+                open={scheduleGlanceOpen}
+                busy={calendarBusy}
+                error={calendarError}
+                nowEpochS={nowEpochS}
+                onClose={closeScheduleGlance}
+                onRefresh={refreshAgendaNow}
+                onOpenSettings={openCalendarSettingsSection}
+                onOpenSystemSettings={openSystemCalendarSettings}
+              />
+            )}
+
+            {isReady && !simulated && !micCheckActive && (
+              <CalendarAgenda
+                snapshot={calendarSnap}
+                busy={calendarBusy}
+                error={calendarError}
+                preparedKey={preparedCalendarEvent?.occurrenceKey ?? null}
+                nowEpochS={nowEpochS}
+                onEnable={enableCalendarAgenda}
+                onRefresh={refreshAgendaNow}
+                onOpenSettings={openCalendarSettingsSection}
+                onOpenSystemSettings={openSystemCalendarSettings}
+                onPrepare={prepareCalendarMeeting}
+                onClearPrepared={clearPreparedMeeting}
+              />
             )}
 
             <div className="ended-outcomes">
@@ -3546,7 +3810,11 @@ function Notebook() {
                 />
               )}
               <CallPromptSetting key={settingsEpoch} />
-              <CalendarSettings key={`calendar-${settingsEpoch}`} />
+              <CalendarSettings
+                key={`calendar-${settingsEpoch}`}
+                agendaSnapshot={calendarSnap}
+                onAgendaChange={applyCalendarSnapshot}
+              />
               <MenuBarSettings key={`menu-bar-${settingsEpoch}`} />
             </div>
 
@@ -3593,6 +3861,11 @@ function Notebook() {
                   setUserName('');
                   confirmedName.current = '';
                   setNameError('');
+                  setPreparedCalendarEvent(null);
+                  setScheduleGlanceOpen(false);
+                  if (pendingTitleOriginRef.current === 'agenda') {
+                    setPendingTitle(null, null);
+                  }
                   setSettingsEpoch((epoch) => epoch + 1);
                 }}
               />

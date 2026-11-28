@@ -287,8 +287,29 @@ impl Engine {
             sources.push(note_source(&note.item));
         }
         if !sources.is_empty() {
-            Request::new(self.generation, 0, sources.clone(), None)
+            let mut probe = sources.clone();
+            // No conversation is read/sent for this size check. Reserve a tiny
+            // serialized speech anchor so note metadata cannot exceed the
+            // selected-input ceiling before approval. Actual speech is checked
+            // atomically again before every dispatch, never silently trimmed.
+            probe.push(Source {
+                id: "transcript:scope-bound".into(),
+                revision: 0,
+                provenance: Provenance::Transcript {
+                    at_ms: 0,
+                    speaker: "Speaker".into(),
+                },
+                text: "Scope size check".into(),
+            });
+            let probe = Request::new(self.generation, 0, probe, None)
+                .and_then(|r| r.with_session_mode(self.state.session_mode))
+                .and_then(|r| r.with_listener(self.state.user_name.clone(), vec![]))
                 .map_err(|_| ProcessingError::InvalidScope)?;
+            if self.is_own_key() {
+                probe
+                    .own_key_prompt_input()
+                    .map_err(|_| ProcessingError::InvalidScope)?;
+            }
         }
         Ok(ProcessingReview {
             owner: Arc::clone(&state.permission.owner),
@@ -515,10 +536,72 @@ impl Engine {
     }
 
     pub(in crate::engine) fn reconcile_processing_permission(&mut self) {
-        if self.evaluation.as_ref().is_some_and(|state| {
+        let invalid = self.evaluation.as_ref().is_some_and(|state| {
             state.permission.grant.is_some()
                 && !state.permission.valid(self.generation, &self.notes)
-        }) {
+        });
+        if !invalid {
+            return;
+        }
+        // A pure removal may narrow an existing own-key grant. Revisions,
+        // altered metadata/content and withheld/revoked copies still stop it.
+        // Increment ownership generation so old review tokens cannot return.
+        let can_narrow = self.is_own_key()
+            && self
+                .evaluation
+                .as_ref()
+                .and_then(|s| s.permission.grant.as_ref())
+                .is_some_and(|grant| {
+                    grant.session == self.generation
+                        && grant.processor
+                            == self
+                                .evaluation
+                                .as_ref()
+                                .expect("own-key evaluator")
+                                .permission
+                                .processor
+                        && !grant.notes.is_empty()
+                        && grant.notes.iter().all(|source| {
+                            self.notes.iter().any(|n| matches_note(&n.item, source))
+                                || (!self
+                                    .notes
+                                    .iter()
+                                    .any(|n| note_source(&n.item).id == source.id)
+                                    && !self
+                                        .withheld_notes
+                                        .iter()
+                                        .any(|key| source.id == format!("prior:{key}")))
+                        })
+                });
+        if can_narrow {
+            self.invalidate_evaluation();
+            // Evaluated repeat keys include cue wording; keep independent
+            // phrase-rule/Asked-you bookkeeping, not derived note text.
+            self.last_shown
+                .retain(|(key, _)| !key.starts_with("Evaluated:"));
+            self.evaluated_cue = None;
+            self.state.cue = None;
+            self.unshown = None;
+            let state = self.evaluation.as_mut().expect("own-key evaluator");
+            // Cue text can contain withdrawn snapshot content. Do not carry
+            // it into later requests as a visible or earlier cue.
+            state.shown = None;
+            state.earlier.clear();
+            state.permission.generation = state
+                .permission
+                .generation
+                .checked_add(1)
+                .expect("permission generation");
+            let grant = state.permission.grant.as_mut().expect("reviewed grant");
+            grant
+                .notes
+                .retain(|source| self.notes.iter().any(|n| matches_note(&n.item, source)));
+            if grant.notes.is_empty() {
+                grant.after_ms = Some(self.state.elapsed_ms);
+                grant.approved_at_ms = self.state.elapsed_ms;
+            }
+            self.changed();
+        } else {
             self.revoke_processing();
             self.set_evaluation_status(EvaluationStatus::Unavailable(
                 EvaluationIssue::ScopeChanged,

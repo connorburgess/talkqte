@@ -1359,3 +1359,106 @@ fn deleting_after_a_failed_index_write_preserves_manual_order_and_hidden_meeting
     assert!(!folder.root().join(&ids[2]).exists());
     assert_eq!(final_store.open_meeting(&ids[2]), Err(Error::Missing));
 }
+
+#[test]
+fn ask_snapshot_rejects_edited_deleted_and_unavailable_saved_revisions() {
+    let folder = Folder::new("ask-revision");
+    let store = folder.store();
+    let saved = store
+        .keep(
+            "Fictional seed review",
+            content(1000, "Keep the seed trays indoors."),
+        )
+        .unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, saved.revision, |meeting| meeting
+            .content
+            .transcript
+            .len())
+        .is_ok());
+    let changed = store
+        .rename(&saved.id, "Fictional revised seed review")
+        .unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, saved.revision, |_| panic!(
+            "stale scope must not accept or mark auth"
+        ))
+        .is_err());
+    store.delete(&saved.id).unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, changed.revision, |_| panic!(
+            "deleted scope must not accept or mark auth"
+        ))
+        .is_err());
+    let off = Store::open(None, false);
+    assert!(off
+        .with_question_snapshot(&saved.id, saved.revision, |_| ())
+        .is_err());
+}
+
+#[test]
+fn saved_mutations_withdraw_pending_ask_before_its_next_transport_check() {
+    for change in [
+        "rename",
+        "update",
+        "move",
+        "archive",
+        "delete",
+        "delete-all",
+        "folder-rename",
+        "folder-delete",
+    ] {
+        let folder = Folder::new("ask-withdraw");
+        let store = folder.store();
+        store.create_folder("Fictional folder").unwrap();
+        let saved = store
+            .keep(
+                "Fictional seed review",
+                content(1000, "Keep seed trays indoors."),
+            )
+            .unwrap();
+        let moved = store
+            .set_folder(&saved.id, Some("Fictional folder"))
+            .unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        store
+            .with_question_snapshot(&saved.id, moved.revision, |_| {
+                store.track_question(&saved.id, flag.clone()).unwrap()
+            })
+            .unwrap();
+        match change {
+            "rename" => {
+                store.rename(&saved.id, "Fictional renamed review").unwrap();
+            }
+            "update" => {
+                store
+                    .update(&saved.id, content(1000, "Move seed trays outdoors."))
+                    .unwrap();
+            }
+            "move" => {
+                store.set_folder(&saved.id, None).unwrap();
+            }
+            "archive" => {
+                store.set_archived(&saved.id, true).unwrap();
+            }
+            "delete" => {
+                store.delete(&saved.id).unwrap();
+            }
+            "delete-all" => {
+                store.delete_all().unwrap();
+            }
+            "folder-rename" => {
+                store
+                    .rename_folder("Fictional folder", "Fictional renamed folder")
+                    .unwrap();
+            }
+            _ => {
+                store.delete_folder("Fictional folder").unwrap();
+            }
+        }
+        assert!(
+            flag.load(Ordering::Acquire),
+            "{change} must suppress a pending send/result"
+        );
+    }
+}

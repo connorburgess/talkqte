@@ -17,9 +17,29 @@ Use Rust for the application core, Tauri 2 for the desktop shell, and React with
 
 Tauri does not turn native audio capture into a solved problem. Its system webview avoids bundling Chromium, but actual memory, package size, responsiveness, and battery use must be measured during a live session. Transcription streams audio over the network instead of running inference on the device; its on-device cost has not been measured.
 
+## Calendar agenda boundary
+
+`calendar_agenda.rs` owns the separate default-off agenda, bounded projection,
+refresh tickets and cancellation. `calendar_agenda_macos.rs` projects EventKit
+metadata on a worker without event-note access. Main-only commands/events in
+`calendar_agenda_commands.rs` keep event lists out of session and companion
+snapshots. Selected calendar IDs persist as preferences; event metadata remains
+in memory. Pre-call prompts retain their independent opt-in and original window.
+See [scope, refresh behavior and native acceptance gaps](calendar-agenda.md).
+
 ## Explicit question boundary
 
-`meeting_qa.rs` owns bounded frozen transcript tickets, request budgets and validated source IDs; the engine owns each record and withdraws it on Stop/revoke/replacement. `meeting_qa_commands.rs` dispatches outside the engine lock over the existing fixed provider transports, then accepts the response and any auth-rejection side effect under that lock only for the still-current ticket. The companion can only request opening/focusing the main transcript/Ask panel; its capability cannot prepare, send, cancel or read questions/history. React never supplies a session identity or request destination. See [live questions](live-questions.md) for separate explicit Send permission, limits, retention and acceptance gaps.
+`meeting_qa.rs` owns frozen whole-transcript tickets, bounded conversational Q&A, request budgets and validated source IDs. The engine owns the current-session record and withdraws it on Stop/revoke/replacement. A separately managed saved-Ask record retains its cumulative ledger for the app process lifetime, independently of navigation and engine replacement. `meeting_qa_commands.rs` checks saved ID/revision and exact transcript content under the history mutation lock before begin/acceptance, nesting only store → saved record; it never holds these locks across key access, network or an async wait. Current results/auth effects are accepted under the engine lock; saved results/auth effects require the still-current saved snapshot. Provider-compatible serialized envelopes are bounded before credential access. The companion can only open/focus the notebook transcript/Ask panel, never prepare/send/read Ask. React supplies only a selected saved ID/revision, never transcript text, request destination or conversational evidence. See [live questions](live-questions.md) for explicit Send, omissions, retention and remaining acceptance.
+
+Provider authentication status additionally requires an opaque credential receipt
+from the original read. `provider_keys` serializes app-managed store mutations,
+credential reads and memo updates under its credential/memo mutex; network work
+runs after releasing it. Each provider has an independent revision and each store
+instance an independent owner identity. Late refusal/success cannot alter a newer
+credential's status. Cue adapters and speech streams retain their own acquisition
+receipt; Ask applies it only after source acceptance, and meeting notes preserve
+their existing cancellation gate. Receipts contain no key material, are never
+serialized, and add no credential cache. See [provider keys](provider-keys.md).
 
 ## Boundaries
 
@@ -47,7 +67,7 @@ The engine exposes one transcript input boundary for transcription feeds: `Engin
 
 `src-tauri/src/audio_tap.rs` is the bridge between microphone capture and the transcription worker. Its callback side downmixes interleaved samples to mono and pushes them into a fixed four-second lock-free ring (`rtrb`) without allocating, locking, or blocking; when the ring is full, samples are dropped and counted. A chunker on another thread drains the ring, resamples to 16 kHz (averaging when downsampling, which gives only minimal anti-aliasing, and linear interpolation when upsampling), and cuts chunks timed on the session clock: fixed-length by default, or, with `cut_at_pauses`, at the first pause after a minimum length and never longer than the set length. Live sessions use fixed 100 ms chunks for the cloud stream. With `cut_at_pauses`, a full-length chunk of near-total silence is skipped and counted; later chunk times are unchanged. Dropped audio leaves a gap so later chunks keep their times, a frame split across callbacks is kept, and stopping returns every remaining chunk once capture has stopped. Chunk times come from counting samples, so device clock drift and pausing the session can still move them off the engine's clock. Tests cover 8–48 kHz input, downmixing, split frames, overruns and the gap they leave, clipping, the remaining chunks on stop, and chunk timing over ten minutes at 48 kHz. An earlier check with the former on-device recognizer fed the fictional meeting at 16 and 48 kHz through the tap and raised the expected question, with no overruns. The live session connects the microphone to the tap.
 
-`src-tauri/src/context.rs` defines the source-aware contract for prior notes a user selects from a note-taker or a file. It covers validated items with provider, date, excerpt, and revision; separate import, live-input, and writeback capabilities; and connection status. Fetching, with bounded retries and cancellation, runs outside the in-memory store, so no lock is held during network work. The store accepts only selected notes, deduplicates by revision, and deletes copies only on an explicit removal, which is separate from disconnecting. Imported notes are kept apart from live meeting evidence. The first adapter is `src-tauri/src/notes_file.rs`: the native dialog reads up to 20 explicitly chosen JSON, Markdown or plain-text files (1 MB each, 4 MB aggregate, 200 listed notes), with per-file outcomes before selection. File references may keep an explicitly unknown source date; an optional entered date never replaces a known source date, and import time is never substituted. Granola and kept-meeting dates remain required. Only the first 2,000 characters are imported, with original character counts disclosed when shortened; neither this metadata nor the discarded tail widens provider input ([file rules](note-file-formats.md)). The items are listed for selection, and only the ticked notes are merged into the store held in the runtime; `context:changed` carries the items to the main window, which can remove them singly or all at once. The file adapter has no authentication or network access; the ordinary phrase-rule engine uses selected items for the title-word context reminder. Separate development evaluator paths may use exact selected notes only after their own processing review and grant; importing notes grants no processing permission ([selected-context scope](selected-context-lab-opt-in.md)). See [integration readiness](product-readiness.md#integration-readiness).
+`src-tauri/src/context.rs` defines the source-aware contract for prior notes a user selects from a note-taker or a file. It covers validated items with provider, date, excerpt, and revision; separate import, live-input, and writeback capabilities; and connection status. Fetching, with bounded retries and cancellation, runs outside the in-memory store, so no lock is held during network work. The store accepts only selected notes, deduplicates by revision, and deletes copies only on an explicit removal, which is separate from disconnecting. Imported notes are kept apart from live meeting evidence. The first adapter is `src-tauri/src/notes_file.rs`: the native dialog reads up to 20 explicitly chosen JSON, Markdown or plain-text files (1 MB each, 4 MB aggregate, 200 listed notes), with per-file outcomes before selection. File references may keep an explicitly unknown source date; an optional entered date never replaces a known source date, and import time is never substituted. Granola and kept-meeting dates remain required. Only the first 2,000 characters are imported, with original character counts disclosed when shortened; neither this metadata nor the discarded tail widens provider input ([file rules](note-file-formats.md)). The items are listed for selection, and only the ticked notes are merged into the store held in the runtime; `context:changed` carries the items to the main window, which can remove them singly or all at once. The file adapter has no authentication or network access; the ordinary phrase-rule engine uses selected items for the title-word context reminder. Production own-key and separate development evaluator paths may use exact selected notes only after their own processing review and grant; importing notes grants no processing permission ([selected-context scope](selected-context-lab-opt-in.md)). See [integration readiness](product-readiness.md#integration-readiness).
 
 The optional [Claude cue lab](claude-cue-lab.md) is a separate Node development script, not an application inference worker. It sends one bundled fictional case through the official subscription-authenticated CLI, checks the returned decision and source IDs, and prints a report. It cannot mutate Rust cue state, receive captured audio, or supply live app prompts. That single-case script is distinct from the development app connections described below: those use Rust-owned workers, validated source/version boundaries, resource budgets, cancellation and explicit session processing approval.
 
@@ -186,3 +206,22 @@ The [bounded evaluator](cue-evaluator.md) has a source-aware engine bridge in `e
 ### Meeting-notes validation recovery
 
 `meeting_notes.rs` rejects the entire reply when an item fails citation, owner, date, text or section bounds. A validation failure alone can enable one explicitly reviewed retry, with at most two sent attempts. Rust reserves each sent attempt's full worst-case estimate, including responses with missing usage, and refuses a combined estimate over $1. Unknown pricing on either attempt blocks retry. Unsent key/offline/cancel paths restore the previous failure without consuming an attempt. No automatic resend, model fallback, partial repair or validator relaxation occurs. Existing notes plan/write commands accept an optional retry flag; the retry confirmation digest binds the exact request, session and attempt generation. Worker callbacks also carry the generation, so late abandon/finish callbacks cannot release or replace a newer attempt. A new session clears the memory-only record.
+
+### Production selected-note cue projection
+
+Production own-key registration advertises optional selected prior snapshots but
+Start still grants only new speech with zero notes. Native single-use reviews
+bind exact snapshot content/metadata/revision and complete processor identity;
+approval does not swap adapters. A nonempty granted source set selects the same
+bounded `selected-prior-context-v2` projection for all three provider bodies.
+Zero notes preserve default user/system bytes. The shared snapshot rule treats
+notes as untrusted historical data; unknown file dates and explicit session mode
+are counted in the 16 KiB serialized ceiling. Provider-specific output schemas
+and request/cost/deadline bounds remain unchanged.
+
+Pure removal narrows an own-key grant, invalidates old review ownership and
+cancels pending effects; removal of the last note permits only newly spoken
+lines. A changed/withheld copy revokes the scope. Pause cancels pending effects
+but retains unchanged approval. Request/spend totals persist across these scope
+changes; fresh cited speech is still mandatory for nonquiet decisions. See
+[scope/lifecycle guidance](own-key-cues.md#explicitly-approved-prior-note-snapshots).

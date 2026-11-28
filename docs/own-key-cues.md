@@ -10,8 +10,8 @@ nothing falls back to another service. With a Deepgram key also stored, an
 ordinary build can run the whole loop: capture, Deepgram transcription, a cue
 decision from your selected provider and model, and the cue shown and cleared.
 
-This page describes what the code does. No live session request has reached a
-provider from this code; the evidence is the offline tests listed at the end.
+This page describes source behavior and offline checks. Those checks do not
+establish native acceptance, live provider quality or useful interview timing.
 
 ## Which connection a session uses
 
@@ -27,19 +27,23 @@ a live session."`
 
 ## When anything is sent
 
-Nothing is sent until the session's processing review is approved. That one
-review names both providers: your chosen cue provider (Anthropic, OpenAI, or
-Gemini), for the lines listed below, and Deepgram, for the session's audio. It
-also states the billing, the model (including whether estimated spend is
-unavailable for a custom model ID), and the caps. A launch setting cannot approve
-it. Pause, Off, Stop and session replacement behave as the
-[processing controls](processing-controls.md) and
-[cloud transcription](cloud-transcription.md#what-stops-it) describe.
+Ordinary **Start live session** approves the disclosed new-speech scope with
+zero prior notes for the chosen own-key provider. Imports and automatic prior-
+context selection never approve model sharing. During active capture, **Cue
+processing → Review prior-note sharing** lets you choose exact stored copies,
+review their provider/source/date/revision and destination, then **Update sharing
+for this session**. Capture continues; cancelling review leaves the existing
+scope unchanged. Lab and development routes keep their separate review rules.
+
+Pause cancels pending effects and stops cue requests while retaining unchanged
+approval; it does not stop transcription audio. Off, Stop and replacement
+withdraw permission. See [processing controls](processing-controls.md) and
+[cloud transcription](cloud-transcription.md#what-stops-it).
 
 ## The request
 
-Every provider uses the same system prompt (`scripts/fixtures/cue-decision.json`),
-same `Request::prompt_input` JSON, same three structured-output JSON schemas,
+Every provider uses the shared cue policy (`scripts/fixtures/cue-decision.json`),
+same native-owned bounded input projection, same three structured-output JSON schemas,
 same 8-second deadline, same 64 KiB / 1 MiB / 4096-byte bounds, and same reply
 normalization and validator:
 
@@ -62,13 +66,16 @@ normalization and validator:
 Transport uses TLS with rustls, bundled web roots, certificate validation, HTTPS
 only, redirects disabled, and one overall 8-second timeout. Each request sends:
 
-- One user message: the engine's input JSON (`Request::prompt_input`).
+- One user message: the engine's `own_key_prompt_input` JSON. With no approved
+  notes it preserves the existing `Request::prompt_input` bytes and system prompt.
   - It contains up to six recent transcript lines, all labelled `Speaker`, and
     any lines the cue on screen cites.
   - It contains the cue on screen, up to four earlier cues with how each
     ended, and the session name if one is set.
-  - It never contains audio, the full transcript, notes, imported notes or
-    focus lines.
+  - It never contains audio, the full transcript, manual meeting notes, unapproved
+    imported notes or focus lines. Explicitly approved prior snapshots use the
+    `selected-prior-context-v2` projection plus the shared untrusted-snapshot
+    rule; this does not change the provider's output grammar.
 - `output_config.format`: one of the lab's three JSON schemas, chosen by
   whether a cue is on screen and whether it is an "Asked you" cue.
 
@@ -220,3 +227,38 @@ the network:
 Still unverified: any request to the real APIs (Anthropic, OpenAI, or Gemini), latency against the
 [budgets](budgets.md), cue quality on real or lab cases across curated and custom models, the
 real Keychain on a signed build, device runs, and both sides of a call.
+
+## Explicitly approved prior-note snapshots
+
+The nonempty reviewed grant sends only selected copies, not the entire available
+catalog: exact text, provider, source ID/title, opaque local revision and source
+date. An undated file stays `date: null` / **Unknown date**; it is never assigned
+an invented source date. `sessionMode: "interview"` remains present in Interview
+mode. Copies are labeled `freshness: "not_verified"`, not independently verified
+facts or instructions. Attribution to the listener is not established by a note.
+
+The exact serialized selected input has a 16 KiB ceiling, including all metadata,
+JSON escaping, UTF-8, optional mode and cue/history fields. Existing per-source,
+source-count and aggregate limits also apply. A size violation fails the whole
+scope before credentials/transport; no selected text is silently dropped or
+truncated. New speech can make a reviewed scope too large; processing then stops
+with its input-limit status and needs a smaller explicit review.
+
+Changing an approved copy's revision, content, date or title, or withholding/
+revoking it, cancels in-flight effects and stops that scope. Explicit removal can
+narrow an own-key grant to remaining unchanged approved copies. Removing the last
+copy returns to disclosed **new speech only**, invalidates old review ownership
+and does not fetch or reapprove anything. Pause retains unchanged approval;
+resume accepts new speech only. None of these operations resets cumulative
+request/spend limits. A late response, including an authentication failure, must
+not affect a withdrawn scope or replacement session.
+Narrowing also clears visible and earlier cue wording because a cue may contain
+withdrawn snapshot text; these derived strings cannot be safely separated by source.
+Unchanged transcript lines remain subject to the narrowed speech scope.
+
+Every nonquiet proposal still needs a **fresh cited current-speech source**;
+notes alone cannot raise, resolve or withdraw a cue. Prior snapshots do not make
+the model know the whole meeting. Source/structure validation and fictional
+fake-wire/lifecycle tests are not evidence of semantic usefulness or provider
+obedience. Native acceptance and a separately authorized live usefulness check
+remain open.
