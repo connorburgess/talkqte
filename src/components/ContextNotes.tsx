@@ -532,6 +532,12 @@ export function ContextNotes({
                     {item.autoSelected && (
                       <span className="context-auto-chip">Auto</span>
                     )}
+                    {item.originalChars && (
+                      <span className="context-excerpt-chip small">
+                        Excerpt · 2,000 / {item.originalChars.toLocaleString()}{' '}
+                        chars
+                      </span>
+                    )}
                   </div>
                   <span className="muted small">
                     {item.sourceDate || 'Unknown date'} ·{' '}
@@ -549,12 +555,6 @@ export function ContextNotes({
                         (note) => note.sourceId === item.sourceId,
                       )}
                     />
-                  )}
-                  {item.originalChars && (
-                    <span className="context-excerpt-chip small">
-                      Excerpt · 2,000 / {item.originalChars.toLocaleString()}{' '}
-                      chars
-                    </span>
                   )}
                   <p>{item.excerpt}</p>
                   {item.originalChars && (

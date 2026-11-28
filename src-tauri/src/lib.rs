@@ -3730,6 +3730,41 @@ mod context_file_path_tests {
     }
 
     #[test]
+    fn batch_read_returns_per_file_results_without_importing_and_rejects_stale_selection() {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-command-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("reference.md");
+        std::fs::write(&path, "# Fictional reference\nUse a fixed journey.").unwrap();
+        let paths = vec![path, root.join("missing.md")];
+        let stale = begin_file_pick(&state).unwrap();
+        let latest = begin_file_pick(&state).unwrap();
+        assert!(
+            tauri::async_runtime::block_on(read_context_files(&state, stale, paths.clone()))
+                .is_err()
+        );
+        assert!(state.0.lock().unwrap().pending_import.is_none());
+        let result =
+            tauri::async_runtime::block_on(read_context_files(&state, latest, paths.clone()))
+                .unwrap();
+        assert_eq!(result.notes.len(), 1);
+        assert!(result.notes[0].source_date.is_empty());
+        assert_eq!(result.files.len(), 2);
+        assert!(result.files[1].error.is_some());
+        assert!(state.0.lock().unwrap().context.items().is_empty());
+        let canceled = begin_file_pick(&state).unwrap();
+        state.0.lock().unwrap().pending_file_pick = None;
+        assert!(
+            tauri::async_runtime::block_on(read_context_files(&state, canceled, paths)).is_err()
+        );
+        assert!(state.0.lock().unwrap().pending_import.is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn explicit_file_pipeline_refuses_missing_wrong_format_oversize_and_invalid_text_without_import(
     ) {
         let state = AppState(Mutex::new(Runtime::default()));

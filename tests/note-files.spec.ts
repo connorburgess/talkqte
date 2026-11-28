@@ -252,3 +252,29 @@ test('a fictional file batch reports each failure and imports only explicitly ti
   await expect(panel(page)).toContainText('Unknown date · From a file');
   await expect(panel(page)).not.toContainText('Tool shed rota');
 });
+
+test('a long undated reference discloses shortening before and after explicit import', async ({
+  page,
+}) => {
+  await chooseFile(page, 'long');
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await expect(dialog).toContainText(
+    'Shortened on import: keeps first 2,000 of 2,018 characters',
+  );
+  const choice = dialog.getByRole('checkbox', { name: /Fictional reference/ });
+  await expect(choice).not.toBeChecked();
+  await choice.check();
+  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(panel(page)).toContainText('Excerpt · 2,000 / 2,018 chars');
+  await expect(panel(page)).toContainText(
+    'The rest of the original note was not imported.',
+  );
+  await expect(panel(page)).toContainText('Unknown date');
+  await expect(panel(page)).not.toContainText('Tail not imported.');
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: '1 shortened to first 2,000 characters' }),
+  ).toHaveCount(1);
+});

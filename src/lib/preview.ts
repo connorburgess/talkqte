@@ -368,20 +368,38 @@ export function pickContextFile(): PickedNotes {
     };
   }
   if (refusedFiles[kind]) throw new Error(refusedFiles[kind]);
-  const file = noteFiles[kind] ?? {
-    fileName: 'garden-notes.json',
-    notes: exampleNotes,
-  };
+  const file =
+    kind === 'long'
+      ? {
+          fileName: 'Fictional reference.md',
+          notes: [
+            {
+              provider: 'file' as const,
+              sourceId: 'file-long-reference',
+              title: 'Fictional reference',
+              sourceDate: '',
+              excerpt: 'é'.repeat(2000) + 'Tail not imported.',
+              revision: 1,
+            },
+          ],
+        }
+      : (noteFiles[kind] ?? {
+          fileName: 'garden-notes.json',
+          notes: exampleNotes,
+        });
   pickedNotes = file.notes;
   return {
     fileName: file.fileName,
     skipped: 0,
-    asksForDates: !!noteFiles[kind],
+    asksForDates: !!noteFiles[kind] || kind === 'long',
     notes: file.notes.map((note) => ({
       sourceId: note.sourceId,
       title: note.title,
       sourceDate: note.sourceDate,
-      preview: note.excerpt,
+      preview: note.excerpt.slice(0, 120),
+      ...(Array.from(note.excerpt.trim()).length > 2000
+        ? { originalChars: Array.from(note.excerpt.trim()).length }
+        : {}),
     })),
   };
 }

@@ -1208,6 +1208,32 @@ mod batch_tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn chooser_limit_is_aggregate_and_keeps_selection_order() {
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-count-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [root.join("first.json"), root.join("second.json")];
+        for (batch, path) in paths.iter().enumerate() {
+            let notes: Vec<_> = (0..150)
+                .map(|index| {
+                    serde_json::json!({
+                        "id": format!("{batch}-{index}"), "date": "", "text": "Fictional reference"
+                    })
+                })
+                .collect();
+            std::fs::write(path, serde_json::json!({"notes": notes}).to_string()).unwrap();
+        }
+        let (source, summaries, files) = FileSource::read_batch(&paths).unwrap();
+        assert_eq!(summaries.len(), MAX_NOTES);
+        assert_eq!(source.skipped, 100);
+        assert_eq!((files[0].note_count, files[1].note_count), (150, 50));
+        assert_eq!(summaries[0].source_id, "0-0");
+        assert_eq!(summaries[199].source_id, "1-49");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn aggregate_byte_and_file_limits_fail_without_unbounded_reads() {
         assert!(FileSource::read_batch(&[]).is_err());
         assert!(FileSource::read_batch(&vec![
