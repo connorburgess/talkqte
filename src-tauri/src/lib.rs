@@ -101,6 +101,8 @@ mod native_session_clock;
 mod native_source;
 pub mod notes_file;
 pub mod openai_api;
+#[cfg(test)]
+mod own_key_selected_tests;
 pub mod platform;
 mod processing_commands;
 pub mod processing_reviews;

@@ -8,10 +8,10 @@
 
 use crate::cue_evaluator::{Cancellation, Evaluator, Failure, Request};
 use crate::llm_provider::{
-    check_cue_spend_cap, cue_schema, cue_system_prompt, finish_no_reply, model_echo_matches,
-    read_refusal_prefix, register_cue_engine, register_usage, token_cost_micro_usd, CueProvider,
-    CueUsageTracker, DecisionValidator, NoReply, OnScreen, Outcome, Reply, ResolvedModel,
-    MAX_LINE_BYTES, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MAX_TEXT_BYTES, SPEND_CAP_MICRO_USD,
+    check_cue_spend_cap, cue_schema, finish_no_reply, model_echo_matches, read_refusal_prefix,
+    register_cue_engine, register_usage, token_cost_micro_usd, CueProvider, CueUsageTracker,
+    DecisionValidator, NoReply, OnScreen, Outcome, Reply, ResolvedModel, MAX_LINE_BYTES,
+    MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MAX_TEXT_BYTES, SPEND_CAP_MICRO_USD,
 };
 use crate::provider_keys::{KeyError, Provider, Secret};
 use serde_json::{json, Value};
@@ -66,7 +66,7 @@ impl Transport for Network {
 pub fn cue_body(model_id: &str, input: &str, on_screen: OnScreen) -> Value {
     json!({
         "model": model_id,
-        "instructions": cue_system_prompt(),
+        "instructions": crate::llm_provider::cue_system_prompt_for_input(input),
         "input": input,
         "max_output_tokens": MAX_OUTPUT_TOKENS,
         "store": false,
@@ -299,14 +299,15 @@ impl<T: Transport> Evaluator for OpenAiApi<T> {
         if cancel.is_cancelled() {
             return Err(Failure::Cancelled);
         }
-        let input = request.prompt_input()?;
+        let input = request.own_key_prompt_input()?;
         let on_screen = OnScreen::of(request);
         let body = cue_body(&self.model.id, &input, on_screen).to_string();
         if body.len() > MAX_REQUEST_BYTES {
             return Err(Failure::InvalidInput);
         }
-        let prompt_bytes =
-            cue_system_prompt().len() + input.len() + cue_schema(on_screen).to_string().len();
+        let prompt_bytes = crate::llm_provider::cue_system_prompt_for_input(&input).len()
+            + input.len()
+            + cue_schema(on_screen).to_string().len();
         let worst = check_cue_spend_cap(
             &self.usage,
             self.model.price,

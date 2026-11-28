@@ -173,7 +173,7 @@ fn build_request_body(
         "max_tokens": MAX_TOKENS,
         "system": [{
             "type": "text",
-            "text": system_prompt(),
+            "text": crate::llm_provider::cue_system_prompt_for_input(input),
             "cache_control": {"type": "ephemeral"},
         }],
         "messages": [{"role": "user", "content": input}],
@@ -196,7 +196,9 @@ pub fn body(model: Model, input: &str, on_screen: OnScreen) -> Value {
 }
 
 fn worst_case_for_price(price: [f64; 4], input: &str, on_screen: OnScreen) -> u64 {
-    let bytes = system_prompt().len() + input.len() + schema(on_screen).to_string().len();
+    let bytes = crate::llm_provider::cue_system_prompt_for_input(input).len()
+        + input.len()
+        + schema(on_screen).to_string().len();
     crate::llm_provider::worst_case_micro_usd(price, bytes, MAX_TOKENS)
 }
 
@@ -499,8 +501,8 @@ impl<T: Transport> Evaluator for AnthropicApi<T> {
         if cancel.is_cancelled() {
             return Err(Failure::Cancelled);
         }
-        // Prior notes are never sent on this route; such input fails closed.
-        let input = request.prompt_input()?;
+        // Only exact native-approved prior snapshots may select the bounded note projection.
+        let input = request.own_key_prompt_input()?;
         let on_screen = OnScreen::of(request);
         let model_id = self.effective_model_id().to_string();
         let thinking = self.effective_thinking();

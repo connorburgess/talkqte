@@ -366,3 +366,15 @@ The [attested diagnostic path](selected-note-attestation.md) requires an exact o
 ### Meeting-notes recovery acceptance
 
 The notes recovery slice has fictional offline coverage for 236 short source segments, unchanged one-to-eight citation bounds, an explicit final retry review, conservative combined estimates and stale-result fencing. It does not establish why a particular real reply failed, provider acceptance, semantic citation accuracy or actual billed spend. Next blocker: with a fictional meeting and separately authorized provider access, inspect a failed validation and an explicitly confirmed recovery on each supported provider; verify final native keyboard/VoiceOver focus, cancellation and exact line grounding. Keep human usefulness, native and release gates open.
+
+## Own-key selected-note scope acceptance
+
+The focused implementation allows explicit exact-snapshot review on production
+own-key cue providers while preserving default no-note Start. Source tests cover
+real adapter fake-wire bodies, unknown dates/Interview mode, serialized bounds,
+current-speech anchors, pause/removal/revision withdrawal and cumulative caps.
+Their execution results belong to the exact PR head, not this source inventory.
+No readiness item closes here: next verify hosted native checks, review fictional
+desktop/narrow approval/error states and then a separately authorized native
+Start/review/pause/remove/Stop journey. Live semantic usefulness, unsupported
+attribution and model obedience remain unproven even after mock checks pass.

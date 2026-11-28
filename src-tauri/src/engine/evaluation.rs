@@ -544,6 +544,11 @@ impl Engine {
             .with_listener(self.state.user_name.clone(), state.earlier.clone())
         };
         let mut request = make_request(sources)?;
+        if self.is_own_key() {
+            // Mandatory approved snapshots + current speech must fit together;
+            // no credential access or worker submission on serialized overflow.
+            request.own_key_prompt_input()?;
+        }
         if permission.processor.bounded_history {
             // Mandatory cue evidence and the current fresh slice are never
             // truncated. This mode cannot approve notes, even indirectly.

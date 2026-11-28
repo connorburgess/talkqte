@@ -912,3 +912,117 @@ test('shortened prior notes disclose original-versus-excerpt length across choos
     ),
   ).toBeVisible();
 });
+
+test('own-key live capture can explicitly review selected prior notes without turning processing off', async ({
+  page,
+}) => {
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    phase: 'active',
+    approved: { conversation: 'newSpeechOnly', notes: [] },
+    processor: {
+      ...initial.processor!,
+      id: 'anthropic-api',
+      name: 'Claude (your Anthropic API key)',
+      acceptsNotes: true,
+      dataPolicy:
+        'Fictional own-key requests use new speech by default. Exact selected prior-note copies require this separate approval.',
+    },
+  });
+  await page.getByRole('button', { name: 'Review prior-note sharing' }).click();
+  await expect(
+    page.getByRole('checkbox', { name: /watering plan/ }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole('checkbox', { name: /supplier review/ }),
+  ).not.toBeChecked();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  expect(await calls(page, 'revoke_processing')).toEqual([]);
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await page.getByRole('button', { name: 'Review selected sources' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Review before enabling' }),
+  ).toBeFocused();
+  await expect(page.getByText(/Pause keeps unchanged approval/)).toBeVisible();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  await expect(
+    page.getByText('Model connection on', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Review prior-note sharing' }).click();
+  await page.getByRole('checkbox', { name: /supplier review/ }).check();
+  await page.getByRole('button', { name: 'Review selected sources' }).click();
+  await page
+    .getByRole('button', { name: 'Update sharing for this session' })
+    .click();
+  expect(await calls(page, 'approve_processing_scope')).toHaveLength(1);
+  expect(await calls(page, 'revoke_processing')).toEqual([]);
+  const final = await page.evaluate(() => window.processingTest.snapshot());
+  expect(final.phase).toBe('active');
+  expect(final.capture).toBe('running');
+  expect(final.approved?.notes).toHaveLength(1);
+  expect(final.approved?.notes[0].sourceId).toBe('garden');
+});
+
+test('narrow own-key review keeps unknown date explicit and recovers from changed source', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, '?hosted');
+  const initial = await page.evaluate(() => window.processingTest.snapshot());
+  await send(page, {
+    phase: 'active',
+    approved: { conversation: 'newSpeechOnly', notes: [] },
+    processor: {
+      ...initial.processor!,
+      id: 'openai-api',
+      name: 'OpenAI (your OpenAI API key)',
+      acceptsNotes: true,
+    },
+    notes: [
+      {
+        provider: 'file',
+        sourceId: 'fictional-undated',
+        revision: 7,
+        sourceDate: '',
+        title: 'Fictional observatory project',
+      },
+    ],
+  });
+  const launcher = page.getByRole('button', {
+    name: 'Review prior-note sharing',
+  });
+  await launcher.click();
+  await expect(
+    page.getByRole('heading', { name: 'Choose what to process' }),
+  ).toBeFocused();
+  const note = page.getByRole('checkbox', {
+    name: /Fictional observatory project/,
+  });
+  await expect(note).not.toBeChecked();
+  await expect(page.getByText(/Imported file.*Unknown date/)).toBeVisible();
+  await note.check();
+  await page.getByRole('button', { name: 'Review selected sources' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Review before enabling' }),
+  ).toBeFocused();
+  await expect(page.getByText(/Imported file.*Unknown date/)).toBeVisible();
+  await send(page, {
+    scopeRevision: initial.scopeRevision + 1,
+    phase: 'unavailable',
+    approved: null,
+    issue: 'scopeChanged',
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Review before enabling' }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/an approved note changed/)).toBeVisible();
+  expect(await calls(page, 'approve_processing_scope')).toEqual([]);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+  ).toBe(false);
+});

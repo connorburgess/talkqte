@@ -436,16 +436,23 @@ export function ProcessingControl({
   const startup = snapshot?.startup;
   const cancelStart =
     microphone === 'off' && (startup === 'loading' || startup === 'cancelling');
+  const canUpdateNotes =
+    snapshot?.phase === 'active' &&
+    isOwnKeyProcessor(snapshot.processor?.id) &&
+    snapshot.processor?.acceptsNotes === true &&
+    snapshot.notes.length > 0;
   const canReview =
     capture === 'running' &&
-    (snapshot?.phase === 'off' || snapshot?.phase === 'unavailable') &&
+    (snapshot?.phase === 'off' ||
+      snapshot?.phase === 'unavailable' ||
+      canUpdateNotes) &&
     !status?.failed &&
     snapshot?.issue !== 'callLimit' &&
     snapshot?.issue !== 'requestLimit' &&
     snapshot?.issue !== 'spendLimit' &&
     snapshot?.issue !== 'devSettings' &&
     !!snapshot.processor &&
-    !snapshot.approved;
+    (!snapshot.approved || canUpdateNotes);
   const approved = snapshot?.approved;
   const active = snapshot?.phase === 'active';
   const paused = snapshot?.phase === 'paused';
@@ -653,16 +660,16 @@ export function ProcessingControl({
         {!editing && canReview && (
           <button
             ref={launcher}
-            className="primary-button"
+            className={approved ? 'secondary-button' : 'primary-button'}
             disabled={!!busy || !!status?.failed}
             onClick={() => {
-              setSelected([]);
-              setRecent(false);
+              setSelected(approved?.notes.map(noteKey) ?? []);
+              setRecent(approved?.conversation === 'recentAndNewSpeech');
               setEditing(true);
               setError('');
             }}
           >
-            Review processing
+            {approved ? 'Review prior-note sharing' : 'Review processing'}
           </button>
         )}
         {(active || paused) && (
@@ -889,7 +896,9 @@ export function ProcessingControl({
           <p>{review.processor.dataPolicy}</p>
           <p>
             This approval ends with this session. A changed approved note
-            requires another review.
+            requires another review. Removing selected copies withdraws them;
+            when none remain, only new speech is shared. Pause keeps unchanged
+            approval while stopping cue requests.
           </p>
           <div className="processing-actions">
             <button
@@ -899,7 +908,11 @@ export function ProcessingControl({
                 void act('approve', () => processingApi.approve(review.id))
               }
             >
-              {busy === 'approve' ? 'Enabling…' : 'Enable for this session'}
+              {busy === 'approve'
+                ? 'Enabling…'
+                : approved
+                  ? 'Update sharing for this session'
+                  : 'Enable for this session'}
             </button>
             <button
               className="secondary-button"

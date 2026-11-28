@@ -241,3 +241,9 @@ Support joining Google Meet on a phone and receiving prompts during the call. Ob
 - [ ] **M5** Test platform-specific prompt surfaces, background behavior, accessibility, battery use, and permission denial before making capability claims.
 
 Speech-to-text transcribes speech; it does not produce reliable summaries or understand meeting intent on its own. Semantic summaries and conversational search need a separate model or an explicitly limited rules-based implementation.
+
+Own-key selected-note follow-up (unvalidated capability): the explicit-review
+implementation is described in [scope guidance](docs/own-key-cues.md#explicitly-approved-prior-note-snapshots).
+Default Start excludes notes. No item is checked off: next acceptance is exact-head
+hosted native/fake-wire validation and a separately authorized fictional native
+source-withdrawal journey, followed by live usefulness assessment.

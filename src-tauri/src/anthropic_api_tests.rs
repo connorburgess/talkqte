@@ -1042,3 +1042,37 @@ fn cancellation_during_key_access_sends_no_request() {
     }
     assert!(transport.sent().is_empty());
 }
+
+#[test]
+fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and_interview_mode() {
+    let transport = Scripted::default().answer(Ok((
+        200,
+        sse(
+            MODEL,
+            &decision("quiet", None, &["transcript:line-1"]),
+            "end_turn",
+        ),
+    )));
+    let adapter = AnthropicApi::new(
+        haiku(),
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| panic!("scripted success")),
+        Arc::default(),
+    );
+    crate::own_key_selected_tests::selected_engine(
+        adapter,
+        crate::llm_provider::CueProvider::Anthropic,
+        MODEL,
+    );
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 1);
+    crate::own_key_selected_tests::check_wire(
+        sent[0].1["messages"][0]["content"].as_str().unwrap(),
+        sent[0].1["system"][0]["text"].as_str().unwrap(),
+    );
+    assert_eq!(
+        sent[0].1["output_config"]["format"]["schema"],
+        schema(OnScreen::Nothing)
+    );
+}

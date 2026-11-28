@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::cue_evaluator::{Action, ExistingCue, Provenance, Source, Worker};
+use crate::llm_provider::cue_system_prompt;
 use crate::llm_provider::{curated_model, CueProvider, REQUEST_CAP};
 use std::{collections::VecDeque, sync::Mutex};
 
@@ -327,4 +328,30 @@ fn cancellation_during_key_access_sends_no_request() {
         std::thread::yield_now();
     }
     assert!(transport.sent().is_empty());
+}
+
+#[test]
+fn production_approved_selected_notes_reach_openai_wire_with_unknown_date_and_interview_mode() {
+    let model = built_in_model();
+    let model_id = model.id.clone();
+    let transport = Scripted::default().answer(Ok((
+        200,
+        sse(&model_id, &decision("quiet", None, &["transcript:line-1"])),
+    )));
+    let usage = Arc::new(CueUsageTracker::new(CueProvider::OpenAi, &model_id, false));
+    let adapter = OpenAiApi::new(
+        model,
+        transport.clone(),
+        Box::new(|| Ok(Secret::for_test(KEY))),
+        Box::new(|| panic!("scripted success")),
+        usage,
+    );
+    crate::own_key_selected_tests::selected_engine(adapter, CueProvider::OpenAi, &model_id);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 1);
+    let body = &sent[0].1;
+    crate::own_key_selected_tests::check_wire(
+        body["input"].as_str().unwrap(),
+        body["instructions"].as_str().unwrap(),
+    );
 }
