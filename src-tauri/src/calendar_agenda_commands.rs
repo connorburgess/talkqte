@@ -31,35 +31,55 @@ fn horizon() -> agenda::Horizon {
 }
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
-    let enabled = state
-        .0
-        .lock()
-        .map_err(|_| "The agenda is unavailable.")?
-        .calendar_agenda
-        .enabled();
-    // No authorization query, EventKit store or event read while disabled/lab.
-    let permission = if !supported() {
+    snapshot_with(
+        &state,
+        supported(),
+        || app.state::<CalendarBackend>().0.authorization_status(),
+        horizon,
+    )
+}
+/// Authorization and local-clock reads stay outside the session lock. The seam
+/// permits held fictional reads without constructing a Tauri app or EventKit.
+fn snapshot_with(
+    state: &AppState,
+    available: bool,
+    authorization: impl FnOnce() -> PermissionStatus,
+    clock: impl FnOnce() -> agenda::Horizon,
+) -> Result<Snapshot, String> {
+    let (enabled, revision) = {
+        let runtime = state.0.lock().map_err(|_| "The agenda is unavailable.")?;
+        (
+            runtime.calendar_agenda.enabled(),
+            runtime.calendar_agenda.snapshot.revision,
+        )
+    };
+    let permission = if !available {
         PermissionStatus::Unavailable
     } else if enabled {
-        app.state::<CalendarBackend>().0.authorization_status()
+        authorization()
     } else {
         PermissionStatus::Off
     };
-    let clock = horizon();
+    let clock = clock();
     let mut runtime = state.0.lock().map_err(|_| "The agenda is unavailable.")?;
-    runtime.calendar_agenda.clock(clock);
-    let permission = if !supported() {
-        PermissionStatus::Unavailable
-    } else if runtime.calendar_agenda.enabled() {
-        permission
-    } else {
-        PermissionStatus::Off
-    };
-    runtime.calendar_agenda.permission(permission);
+    // A newer enable, reset, filter, clock, permission or worker result wins
+    // over this out-of-lock observation. Never retire its ticket or cache.
+    if runtime.calendar_agenda.snapshot.revision == revision {
+        runtime.calendar_agenda.clock(clock);
+        let permission = if !available {
+            PermissionStatus::Unavailable
+        } else if runtime.calendar_agenda.enabled() {
+            permission
+        } else {
+            PermissionStatus::Off
+        };
+        runtime.calendar_agenda.permission(permission);
+    }
     let live = runtime.live_session_open();
     let prompts = runtime.calendar.enabled();
     Ok(runtime.calendar_agenda.view(Instant::now(), live, prompts))
 }
+
 fn emit(app: &tauri::AppHandle, snapshot: &Snapshot) {
     let _ = app.emit_to("main", "calendar:agenda-changed", snapshot);
 }
@@ -142,12 +162,13 @@ pub(crate) fn set_calendar_agenda(
     if !supported() {
         return snapshot(&app);
     }
-    {
+    let enable_revision = {
         let state = app.state::<AppState>();
         let mut runtime = state.0.lock().map_err(|_| "The agenda is unavailable.")?;
-        runtime.calendar_agenda.set_enabled(enabled);
+        let revision = runtime.calendar_agenda.set_enabled(enabled);
         crate::settings_commands::record(&app, |settings| settings.calendar_agenda = enabled);
-    }
+        revision
+    };
     let _ = snapshot(&app)?;
     if enabled {
         app.state::<AppState>()
@@ -155,7 +176,7 @@ pub(crate) fn set_calendar_agenda(
             .lock()
             .map_err(|_| "The agenda is unavailable.")?
             .calendar_agenda
-            .request(true, Instant::now());
+            .request_for_enable(enable_revision, Instant::now());
         dispatch(&app);
     }
     let value = snapshot(&app)?;
@@ -261,6 +282,127 @@ mod tests {
     use super::*;
     use crate::calendar::CalendarEvent;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    #[test]
+    fn held_authorization_read_cannot_retire_a_newer_enabled_refresh() {
+        use std::sync::{mpsc, Arc, Mutex};
+        for auth in [PermissionStatus::Off, PermissionStatus::Denied] {
+            for ready in [false, true] {
+                let state = Arc::new(AppState(Mutex::new(crate::Runtime::default())));
+                let old_clock = agenda::Horizon::utc(1_800_000_000);
+                let new_clock = agenda::Horizon::utc(1_800_086_400);
+                {
+                    let mut runtime = state.0.lock().unwrap();
+                    runtime.calendar_agenda.clock(old_clock.clone());
+                    runtime.calendar_agenda.set_enabled(true);
+                    runtime
+                        .calendar_agenda
+                        .permission(PermissionStatus::Connected);
+                }
+                let (entered, started) = mpsc::channel();
+                let (release, held) = mpsc::channel();
+                let reader_state = state.clone();
+                let reader = std::thread::spawn(move || {
+                    snapshot_with(
+                        &reader_state,
+                        true,
+                        || {
+                            entered.send(()).unwrap();
+                            held.recv().unwrap();
+                            auth
+                        },
+                        || old_clock,
+                    )
+                    .unwrap()
+                });
+                started
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+                let (ticket, revision) = {
+                    let mut runtime = state.0.lock().unwrap();
+                    let a = &mut runtime.calendar_agenda;
+                    a.set_enabled(false);
+                    a.set_enabled(true);
+                    a.clock(new_clock.clone());
+                    a.permission(PermissionStatus::Connected);
+                    a.request(true, Instant::now());
+                    let ticket = a.begin(Instant::now(), false).unwrap();
+                    if ready {
+                        let batch = agenda::Batch {
+                            calendars: vec![agenda::CalendarSummary {
+                                id: "atlas".into(),
+                                title: "Atlas".into(),
+                                source_label: "On this Mac".into(),
+                                included: true,
+                            }],
+                            ..Default::default()
+                        };
+                        a.finish(
+                            &ticket,
+                            PermissionStatus::Connected,
+                            Ok(batch),
+                            Instant::now(),
+                            1_800_086_400,
+                        );
+                    }
+                    let revision = a.view(Instant::now(), false, false).revision;
+                    (ticket, revision)
+                };
+                release.send(()).unwrap();
+                let value = reader.join().unwrap();
+                assert_eq!(
+                    value.permission,
+                    PermissionStatus::Connected,
+                    "held old authorization must not overwrite newer opt-in"
+                );
+                assert_eq!(
+                    value.sync_state,
+                    if ready {
+                        agenda::SyncState::Ready
+                    } else {
+                        agenda::SyncState::Loading
+                    }
+                );
+                assert_eq!(value.today_local_date, new_clock.today);
+                assert_eq!(value.revision, revision);
+                if ready {
+                    assert_eq!(value.calendars.len(), 1);
+                    assert!(value.last_updated_epoch_ms.is_some());
+                }
+                assert!(
+                    !ticket.cancelled(),
+                    "held old authorization must not cancel the newer worker"
+                );
+            }
+        }
+    }
+    #[test]
+    fn fresh_authorization_applies_but_off_and_unavailable_never_read_the_source() {
+        use std::sync::Mutex;
+        let state = AppState(Mutex::new(crate::Runtime::default()));
+        let clock = || agenda::Horizon::utc(1_800_000_000);
+        let off = snapshot_with(
+            &state,
+            true,
+            || panic!("off agenda must not read authorization"),
+            clock,
+        )
+        .unwrap();
+        assert_eq!(off.permission, PermissionStatus::Off);
+        state.0.lock().unwrap().calendar_agenda.set_enabled(true);
+        let denied = snapshot_with(&state, true, || PermissionStatus::Denied, clock).unwrap();
+        assert_eq!(denied.permission, PermissionStatus::Denied);
+        let connected = snapshot_with(&state, true, || PermissionStatus::Connected, clock).unwrap();
+        assert_eq!(connected.permission, PermissionStatus::Connected);
+        let unavailable = snapshot_with(
+            &state,
+            false,
+            || panic!("lab/nonmac must not read authorization"),
+            clock,
+        )
+        .unwrap();
+        assert_eq!(unavailable.permission, PermissionStatus::Unavailable);
+        assert!(unavailable.calendars.is_empty());
+    }
     struct Fake {
         calls: AtomicUsize,
         revoke: bool,

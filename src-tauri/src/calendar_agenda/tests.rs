@@ -405,3 +405,37 @@ fn unavailable_completions_clear_cache_but_old_tickets_cannot_clear_new_loading(
         assert_eq!(a.snapshot.sync_state, SyncState::Ready);
     }
 }
+
+#[test]
+fn retired_enable_continuation_cannot_reintroduce_permission_or_refresh_work() {
+    let (mut a, now) = configured();
+    let old_enable = a.set_enabled(true);
+    a.set_enabled(false);
+    let current_enable = a.set_enabled(true);
+    a.permission(PermissionStatus::Connected);
+    a.request_for_enable(current_enable, now);
+    complete(&mut a, now);
+    a.request_for_enable(old_enable, now);
+    assert!(
+        a.begin(now, false).is_none(),
+        "retired enable must not enqueue new permission-capable work"
+    );
+}
+
+#[test]
+fn reset_retires_enable_continuations_without_losing_fresh_enable_intent() {
+    let (mut a, now) = configured();
+    let old = a.set_enabled(true);
+    a.restore(false, None);
+    a.request_for_enable(old, now);
+    assert!(a.begin(now, false).is_none());
+    let fresh = a.set_enabled(true);
+    a.request_for_enable(old, now);
+    assert!(a.begin(now, false).is_none());
+    a.clock(Horizon::utc(1_800_086_400));
+    a.request_for_enable(fresh, now);
+    assert!(
+        a.begin(now, false).is_some(),
+        "fresh enable survives its own clock observation"
+    );
+}

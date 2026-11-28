@@ -242,6 +242,7 @@ pub struct Agenda {
     pub(crate) snapshot: Snapshot,
     ids: Option<Vec<String>>,
     generation: u64,
+    enable_revision: u64,
     serial: u64,
     flight: Option<Ticket>,
     pending: bool,
@@ -279,6 +280,7 @@ impl Default for Agenda {
             },
             ids: None,
             generation: 0,
+            enable_revision: 0,
             serial: 0,
             flight: None,
             pending: false,
@@ -320,6 +322,7 @@ impl Agenda {
         self.last_good = None;
     }
     pub fn restore(&mut self, enabled: bool, ids: Option<Vec<String>>) {
+        self.enable_revision += 1;
         self.retire();
         self.clear();
         self.ids = ids;
@@ -331,7 +334,8 @@ impl Agenda {
         self.allow_permission = false;
         self.changed();
     }
-    pub fn set_enabled(&mut self, enabled: bool) {
+    pub fn set_enabled(&mut self, enabled: bool) -> u64 {
+        self.enable_revision += 1;
         if !enabled {
             self.retire();
             self.clear();
@@ -343,6 +347,13 @@ impl Agenda {
         }
         self.snapshot.agenda_enabled = enabled;
         self.changed();
+        self.enable_revision
+    }
+    /// Continuation of the explicit enable command after its cached read.
+    pub fn request_for_enable(&mut self, revision: u64, now: Instant) {
+        if revision == self.enable_revision {
+            self.request(true, now);
+        }
     }
     pub fn set_ids(&mut self, ids: Vec<String>) {
         self.retire();

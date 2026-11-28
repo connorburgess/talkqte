@@ -42,7 +42,9 @@ requests coalesce into one rerun. Disable, reset, filter changes, timezone/day
 changes and permission revocation invalidate old tickets. A blocked OS request
 retains its worker slot until it returns; disable clears visible data immediately,
 and late results cannot repopulate it. Cached reads check authorization without
-requesting it. Only explicitly enabling the agenda may request Calendar permission.
+requesting it. Out-of-lock authorization/clock observations apply only to the
+unchanged snapshot revision. A retired enable command cannot enqueue fresh
+permission-capable work after disable, reset or a newer enable. Only explicitly enabling the agenda may request Calendar permission.
 
 Store changes, day/timezone changes and wake notifications debounce for 500 ms.
 A five-minute fallback poll and 15/30/60/120/300-second error backoff provide
