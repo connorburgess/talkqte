@@ -1179,8 +1179,8 @@ fn selected_to_selected_removal_and_revision_never_resend_withdrawn_note_or_deri
                 "revision stops the entire grant, including B"
             );
             assert_eq!(
-                engine.processing_issue(),
-                Some(crate::engine::EvaluationIssue::ScopeChanged)
+                serde_json::to_value(engine.processing_issue()).unwrap(),
+                "scopeChanged"
             );
             // No automatic continuation after a revision. Explicitly approve B
             // alone before accepting any new selected-to-selected request.
