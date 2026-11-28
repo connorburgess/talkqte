@@ -629,7 +629,7 @@ const TOKEN_POLL: Duration = Duration::from_millis(50);
 /// wiped once the handshake is sent.
 pub struct Token(
     Box<dyn FnMut() -> Result<Option<Zeroizing<String>>, SttFailure> + Send>,
-    Option<crate::provider_keys::RequestKey>,
+    Option<crate::provider_keys::RequestRejection>,
 );
 
 impl Token {
@@ -650,8 +650,8 @@ impl Token {
     /// `key_unavailable`, so the person is told to check the key rather than
     /// waiting out the token wait for a settings problem.
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
-        let source = keys.request_key(crate::provider_keys::Provider::Deepgram);
-        let rejected_source = source.clone();
+        let mut source = keys.request_key(crate::provider_keys::Provider::Deepgram);
+        let rejected_source = source.rejection_handler();
         Self(
             Box::new(move || {
                 source
@@ -923,7 +923,7 @@ mod tests {
             }
         }
         const KEY: &str = "0123456789abcdef0123456789abcdef01234567";
-        for boundary in ["current", "replace", "abort"] {
+        for boundary in ["current", "replace", "abort", "overlap"] {
             let keys = Box::leak(Box::new(Keys::new(
                 Box::<MemoryStore>::default(),
                 Box::new(Offline),
@@ -942,10 +942,29 @@ mod tests {
                 Duration::from_secs(60),
             );
             started.recv_timeout(Duration::from_secs(2)).unwrap();
-            if boundary == "replace" {
+            if matches!(boundary, "replace" | "overlap") {
                 keys.set(Provider::Deepgram, &format!("{KEY}replacement"))
                     .unwrap();
             }
+            // A reconnect/new stream has its own acquisition even while
+            // the old handshake is still held in its connector.
+            let newer = if boundary == "overlap" {
+                let (entered, started) = mpsc::channel();
+                let (release, held) = mpsc::channel();
+                let stream = DeepgramStream::start(
+                    Held {
+                        entered,
+                        release: Mutex::new(held),
+                    },
+                    ListenRequest::lab(),
+                    Token::from_keys(keys),
+                    Duration::from_secs(60),
+                );
+                started.recv_timeout(Duration::from_secs(2)).unwrap();
+                Some((stream, release))
+            } else {
+                None
+            };
             if boundary == "abort" {
                 stream.abort();
             }
@@ -961,6 +980,19 @@ mod tests {
                     KeyState::Set
                 }
             );
+            if let Some((mut newer, release)) = newer {
+                release.send(()).unwrap();
+                wait_for(&mut newer, |events| {
+                    events.contains(&SttEvent::Failed(SttFailure::Auth))
+                });
+                assert_eq!(
+                    keys.status().of(Provider::Deepgram).state,
+                    KeyState::Rejected
+                );
+                if let Some(thread) = newer.thread.take() {
+                    thread.join().unwrap();
+                }
+            }
             if let Some(thread) = stream.thread.take() {
                 thread.join().unwrap();
             }

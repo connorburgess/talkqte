@@ -646,8 +646,8 @@ impl KeySource {
     }
 
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
-        let source = keys.request_key(crate::provider_keys::Provider::ElevenLabs);
-        let rejected_source = source.clone();
+        let mut source = keys.request_key(crate::provider_keys::Provider::ElevenLabs);
+        let rejected_source = source.rejection_handler();
         Self {
             read: Box::new(move || {
                 source
@@ -897,7 +897,7 @@ mod tests {
             }
         }
         const KEY: &str = "sk_fictional0123456789abcdef0123456789abcdef01234567";
-        for boundary in ["current", "replace", "abort"] {
+        for boundary in ["current", "replace", "abort", "overlap"] {
             let keys = Box::leak(Box::new(Keys::new(
                 Box::<MemoryStore>::default(),
                 Box::new(Offline),
@@ -916,10 +916,29 @@ mod tests {
                 Duration::from_secs(60),
             );
             started.recv_timeout(Duration::from_secs(2)).unwrap();
-            if boundary == "replace" {
+            if matches!(boundary, "replace" | "overlap") {
                 keys.set(Provider::ElevenLabs, &format!("{KEY}replacement"))
                     .unwrap();
             }
+            // A reconnect/new stream has its own acquisition even while
+            // the old handshake is still held in its connector.
+            let newer = if boundary == "overlap" {
+                let (entered, started) = mpsc::channel();
+                let (release, held) = mpsc::channel();
+                let stream = ElevenLabsStream::start(
+                    Held {
+                        entered,
+                        release: Mutex::new(held),
+                    },
+                    RealtimeRequest::for_language(Language::English),
+                    KeySource::from_keys(keys),
+                    Duration::from_secs(60),
+                );
+                started.recv_timeout(Duration::from_secs(2)).unwrap();
+                Some((stream, release))
+            } else {
+                None
+            };
             if boundary == "abort" {
                 stream.abort();
             }
@@ -935,6 +954,19 @@ mod tests {
                     KeyState::Set
                 }
             );
+            if let Some((mut newer, release)) = newer {
+                release.send(()).unwrap();
+                wait_for(&mut newer, |events| {
+                    events.contains(&SttEvent::Failed(SttFailure::Auth))
+                });
+                assert_eq!(
+                    keys.status().of(Provider::ElevenLabs).state,
+                    KeyState::Rejected
+                );
+                if let Some(thread) = newer.thread.take() {
+                    thread.join().unwrap();
+                }
+            }
             if let Some(thread) = stream.thread.take() {
                 thread.join().unwrap();
             }

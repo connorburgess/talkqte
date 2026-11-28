@@ -423,8 +423,8 @@ pub fn connected_engine(
     register_usage(usage.clone());
     let model_id = model.id.clone();
     let custom = model.custom;
-    let key_source = crate::provider_keys::global().request_key(Provider::Gemini);
-    let rejected_source = key_source.clone();
+    let mut key_source = crate::provider_keys::global().request_key(Provider::Gemini);
+    let rejected_source = key_source.rejection_handler();
     let adapter = GeminiApi::new(
         model,
         Network,

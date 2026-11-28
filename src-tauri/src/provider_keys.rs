@@ -456,16 +456,25 @@ pub(crate) struct CredentialRevision {
     revision: u64,
 }
 
-/// One serial adapter/stream's credential acquisition and rejection callback.
-/// A separate instance is required for independently concurrent requests.
-#[derive(Clone)]
+/// A non-cloneable reader owned by one serial adapter or stream.
+/// Only its rejection handle can be shared; it cannot acquire credentials.
 pub(crate) struct RequestKey {
     keys: &'static Keys,
     provider: Provider,
     revision: Arc<Mutex<Option<CredentialRevision>>>,
 }
+pub(crate) struct RequestRejection {
+    keys: &'static Keys,
+    revision: Arc<Mutex<Option<CredentialRevision>>>,
+}
 impl RequestKey {
-    pub fn get(&self) -> Result<Secret, KeyError> {
+    pub fn rejection_handler(&self) -> RequestRejection {
+        RequestRejection {
+            keys: self.keys,
+            revision: self.revision.clone(),
+        }
+    }
+    pub fn get(&mut self) -> Result<Secret, KeyError> {
         let result = self.keys.get_with_revision(self.provider);
         let mut receipt = self
             .revision
@@ -474,6 +483,8 @@ impl RequestKey {
         *receipt = result.as_ref().ok().map(|(_, revision)| revision.clone());
         result.map(|(key, _)| key)
     }
+}
+impl RequestRejection {
     pub fn mark_rejected(&self) {
         let revision = self
             .revision
@@ -923,18 +934,103 @@ mod tests {
             Box::new(NoNetwork),
         )));
         keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
-        let old = keys.request_key(Provider::Anthropic);
+        let mut old = keys.request_key(Provider::Anthropic);
         old.get().unwrap();
         keys.remove(Provider::Anthropic).unwrap();
         keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
-        old.mark_rejected();
+        old.rejection_handler().mark_rejected();
         assert_eq!(keys.status().anthropic.state, KeyState::Set);
-        let current = keys.request_key(Provider::Anthropic);
+        let mut current = keys.request_key(Provider::Anthropic);
         current.get().unwrap();
         keys.set(Provider::OpenAi, OPENAI).unwrap();
-        current.mark_rejected();
+        current.rejection_handler().mark_rejected();
         assert_eq!(keys.status().anthropic.state, KeyState::Rejected);
         assert_eq!(keys.status().openai.state, KeyState::Set);
+    }
+
+    #[test]
+    fn failed_or_ambiguous_store_writes_retire_old_results_without_verifying_any_key() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Faulty {
+            inner: MemoryStore,
+            fail: Arc<AtomicBool>,
+            write_before_error: bool,
+        }
+        impl SecretStore for Faulty {
+            fn get(&self, account: &str) -> Result<Option<Secret>, StoreError> {
+                self.inner.get(account)
+            }
+            fn set(&self, account: &str, secret: &Secret) -> Result<(), StoreError> {
+                let fail = self.fail.load(Ordering::Acquire);
+                if !fail || self.write_before_error {
+                    self.inner.set(account, secret)?;
+                }
+                if fail {
+                    Err(StoreError::Failed)
+                } else {
+                    Ok(())
+                }
+            }
+            fn delete(&self, account: &str) -> Result<(), StoreError> {
+                let fail = self.fail.load(Ordering::Acquire);
+                if !fail || self.write_before_error {
+                    self.inner.delete(account)?;
+                }
+                if fail {
+                    Err(StoreError::Failed)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for remove in [false, true] {
+            for write_before_error in [false, true] {
+                for answer in [ProbeResult::Accepted, ProbeResult::Rejected] {
+                    let fail = Arc::new(AtomicBool::new(false));
+                    let keys = Keys::new(
+                        Box::new(Faulty {
+                            inner: MemoryStore::default(),
+                            fail: fail.clone(),
+                            write_before_error,
+                        }),
+                        Box::new(NoNetwork),
+                    );
+                    keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+                    let (_, old) = keys.get_with_revision(Provider::Anthropic).unwrap();
+                    keys.apply_result(&old, ProbeResult::Accepted);
+                    assert!(keys.status().anthropic.verified);
+                    fail.store(true, Ordering::Release);
+                    let result = if remove {
+                        keys.remove(Provider::Anthropic)
+                    } else {
+                        keys.set(Provider::Anthropic, &format!("{ANTHROPIC}replacement"))
+                    };
+                    assert!(matches!(result, Err(KeyError::Store)));
+                    fail.store(false, Ordering::Release);
+                    keys.apply_result(&old, answer);
+                    let status = keys.status().anthropic;
+                    assert!(
+                        !status.verified,
+                        "failed mutation cannot preserve or grant verification"
+                    );
+                    assert_eq!(
+                        status.state,
+                        if remove && write_before_error {
+                            KeyState::NotSet
+                        } else {
+                            KeyState::Set
+                        }
+                    );
+                    if !(remove && write_before_error) {
+                        // An actual fresh read may still reject the credential
+                        // that remained (or was written despite the error).
+                        let (_, fresh) = keys.get_with_revision(Provider::Anthropic).unwrap();
+                        keys.mark_rejected(&fresh);
+                        assert_eq!(keys.status().anthropic.state, KeyState::Rejected);
+                    }
+                }
+            }
+        }
     }
 
     /// A store that records every call, so a test can see what was written.
