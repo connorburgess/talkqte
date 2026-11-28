@@ -318,7 +318,7 @@ fn run(
     let mut socket = match socket {
         Ok(socket) => socket,
         Err(failure) => {
-            if failure == SttFailure::Auth {
+            if failure == SttFailure::Auth && !stop.load(Ordering::Acquire) {
                 key_source.note_rejected();
             }
             let _ = events.send(SttEvent::Failed(failure));
@@ -485,7 +485,7 @@ fn run(
                 }
                 Ok(None) => {}
                 Err(failure) => {
-                    if failure == SttFailure::Auth {
+                    if failure == SttFailure::Auth && !stop.load(Ordering::Acquire) {
                         key_source.note_rejected();
                     }
                     let _ = events.send(SttEvent::Failed(failure));
@@ -501,7 +501,7 @@ fn run(
                 return;
             }
             Err(failure) => {
-                if failure == SttFailure::Auth {
+                if failure == SttFailure::Auth && !stop.load(Ordering::Acquire) {
                     key_source.note_rejected();
                 }
                 let _ = events.send(SttEvent::Failed(failure));
@@ -646,14 +646,17 @@ impl KeySource {
     }
 
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
+        let source = keys.request_key(crate::provider_keys::Provider::ElevenLabs);
+        let rejected_source = source.clone();
         Self {
             read: Box::new(move || {
-                keys.get(crate::provider_keys::Provider::ElevenLabs)
+                source
+                    .get()
                     .map(|key| Zeroizing::new(key.expose().to_string()))
                     .map_err(|_| SttFailure::KeyUnavailable)
             }),
             reject: Some(Arc::new(move || {
-                keys.mark_rejected(crate::provider_keys::Provider::ElevenLabs);
+                rejected_source.mark_rejected();
             })),
         }
     }
@@ -868,6 +871,74 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         events
+    }
+
+    #[test]
+    fn held_auth_handshake_cannot_reject_replacement_or_aborted_stream() {
+        use crate::provider_keys::{
+            KeyState, Keys, MemoryStore, Probe, ProbeResult, Provider, Secret,
+        };
+        use std::sync::mpsc;
+        struct Offline;
+        impl Probe for Offline {
+            fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+                panic!("no provider probe");
+            }
+        }
+        struct Held {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+        impl Connector for Held {
+            fn connect(&self, _: &str, _: &str) -> Result<Box<dyn Socket>, SttFailure> {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                Err(SttFailure::Auth)
+            }
+        }
+        const KEY: &str = "sk_fictional0123456789abcdef0123456789abcdef01234567";
+        for boundary in ["current", "replace", "abort"] {
+            let keys = Box::leak(Box::new(Keys::new(
+                Box::<MemoryStore>::default(),
+                Box::new(Offline),
+            )));
+            keys.set(Provider::ElevenLabs, KEY).unwrap();
+            let (entered, started) = mpsc::channel();
+            let (release, held) = mpsc::channel();
+            let connector = Held {
+                entered,
+                release: Mutex::new(held),
+            };
+            let mut stream = ElevenLabsStream::start(
+                connector,
+                RealtimeRequest::for_language(Language::English),
+                KeySource::from_keys(keys),
+                Duration::from_secs(60),
+            );
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+            if boundary == "replace" {
+                keys.set(Provider::ElevenLabs, &format!("{KEY}replacement"))
+                    .unwrap();
+            }
+            if boundary == "abort" {
+                stream.abort();
+            }
+            release.send(()).unwrap();
+            wait_for(&mut stream, |events| {
+                events.contains(&SttEvent::Failed(SttFailure::Auth))
+            });
+            assert_eq!(
+                keys.status().of(Provider::ElevenLabs).state,
+                if boundary == "current" {
+                    KeyState::Rejected
+                } else {
+                    KeyState::Set
+                }
+            );
+            if let Some(thread) = stream.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 
     #[test]

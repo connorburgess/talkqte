@@ -290,7 +290,7 @@ fn run(
     // The token may arrive after approval: the lab hands it over only once
     // it has seen the review. Audio waits in the bounded queue meanwhile.
     let until = timing.now() + timing.token_wait;
-    let token = loop {
+    let credential = loop {
         if stop.load(Ordering::Acquire) {
             return;
         }
@@ -309,8 +309,13 @@ fn run(
         std::thread::sleep(TOKEN_POLL);
     };
     let url = request.url();
-    let socket = checked(&url).and_then(|url| connector.connect(url, &token));
-    drop(token);
+    let socket = checked(&url).and_then(|url| connector.connect(url, &credential));
+    drop(credential);
+    // Only a credential read for this exact stream can affect key status.
+    // Development/file tokens have no receipt; withdrawn streams have no effect.
+    if !stop.load(Ordering::Acquire) && matches!(&socket, Err(SttFailure::Auth)) {
+        token.note_rejected();
+    }
     let mut socket = match socket {
         Ok(socket) => socket,
         Err(failure) => {
@@ -622,13 +627,17 @@ const TOKEN_POLL: Duration = Duration::from_millis(50);
 /// Where the socket thread gets its credential: a fixed one, the owner-only
 /// file read when a valid token is there, or the stored key. The text is
 /// wiped once the handshake is sent.
-pub struct Token(Box<dyn FnMut() -> Result<Option<Zeroizing<String>>, SttFailure> + Send>);
+pub struct Token(
+    Box<dyn FnMut() -> Result<Option<Zeroizing<String>>, SttFailure> + Send>,
+    Option<crate::provider_keys::RequestKey>,
+);
 
 impl Token {
     pub fn from_file(path: std::path::PathBuf) -> Self {
-        Self(Box::new(move || {
-            Ok(super::cloud::read_token(&path).ok().map(Zeroizing::new))
-        }))
+        Self(
+            Box::new(move || Ok(super::cloud::read_token(&path).ok().map(Zeroizing::new))),
+            None,
+        )
     }
 
     /// The person's own Deepgram key, from the Keychain.
@@ -641,22 +650,34 @@ impl Token {
     /// `key_unavailable`, so the person is told to check the key rather than
     /// waiting out the token wait for a settings problem.
     fn from_keys(keys: &'static crate::provider_keys::Keys) -> Self {
-        Self(Box::new(move || {
-            keys.get(crate::provider_keys::Provider::Deepgram)
-                .map(|key| Some(Zeroizing::new(key.expose().to_string())))
-                .map_err(|_| SttFailure::KeyUnavailable)
-        }))
+        let source = keys.request_key(crate::provider_keys::Provider::Deepgram);
+        let rejected_source = source.clone();
+        Self(
+            Box::new(move || {
+                source
+                    .get()
+                    .map(|key| Some(Zeroizing::new(key.expose().to_string())))
+                    .map_err(|_| SttFailure::KeyUnavailable)
+            }),
+            Some(rejected_source),
+        )
     }
 
     fn take(&mut self) -> Result<Option<Zeroizing<String>>, SttFailure> {
         (self.0)()
+    }
+
+    fn note_rejected(&self) {
+        if let Some(source) = &self.1 {
+            source.mark_rejected();
+        }
     }
 }
 
 impl From<String> for Token {
     fn from(token: String) -> Self {
         let mut token = Some(Zeroizing::new(token));
-        Self(Box::new(move || Ok(token.take())))
+        Self(Box::new(move || Ok(token.take())), None)
     }
 }
 
@@ -691,17 +712,7 @@ pub struct Network(pub Auth);
 
 impl Connector for Network {
     fn connect(&self, url: &str, token: &str) -> Result<Box<dyn Socket>, SttFailure> {
-        let result = self.connect_inner(url, token);
-        note_refusal(crate::provider_keys::global(), self.0, &result);
-        result
-    }
-}
-
-/// A refused key (401 or 403) is marked rejected; a refused development
-/// token is not the person's key and leaves it alone.
-fn note_refusal<T>(keys: &crate::provider_keys::Keys, auth: Auth, result: &Result<T, SttFailure>) {
-    if auth == Auth::Key && matches!(result, Err(SttFailure::Auth)) {
-        keys.mark_rejected(crate::provider_keys::Provider::Deepgram);
+        self.connect_inner(url, token)
     }
 }
 
@@ -886,6 +897,74 @@ mod tests {
         serde_json::json!({"type":"Results","is_final":is_final,"speech_final":is_final,"start":start,"duration":1.5,
             "channel":{"alternatives":[{"transcript":transcript,"words":words}]}})
         .to_string()
+    }
+
+    #[test]
+    fn held_auth_handshake_cannot_reject_replacement_or_aborted_stream() {
+        use crate::provider_keys::{
+            KeyState, Keys, MemoryStore, Probe, ProbeResult, Provider, Secret,
+        };
+        use std::sync::mpsc;
+        struct Offline;
+        impl Probe for Offline {
+            fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+                panic!("no provider probe");
+            }
+        }
+        struct Held {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+        impl Connector for Held {
+            fn connect(&self, _: &str, _: &str) -> Result<Box<dyn Socket>, SttFailure> {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                Err(SttFailure::Auth)
+            }
+        }
+        const KEY: &str = "0123456789abcdef0123456789abcdef01234567";
+        for boundary in ["current", "replace", "abort"] {
+            let keys = Box::leak(Box::new(Keys::new(
+                Box::<MemoryStore>::default(),
+                Box::new(Offline),
+            )));
+            keys.set(Provider::Deepgram, KEY).unwrap();
+            let (entered, started) = mpsc::channel();
+            let (release, held) = mpsc::channel();
+            let connector = Held {
+                entered,
+                release: Mutex::new(held),
+            };
+            let mut stream = DeepgramStream::start(
+                connector,
+                ListenRequest::lab(),
+                Token::from_keys(keys),
+                Duration::from_secs(60),
+            );
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+            if boundary == "replace" {
+                keys.set(Provider::Deepgram, &format!("{KEY}replacement"))
+                    .unwrap();
+            }
+            if boundary == "abort" {
+                stream.abort();
+            }
+            release.send(()).unwrap();
+            wait_for(&mut stream, |events| {
+                events.contains(&SttEvent::Failed(SttFailure::Auth))
+            });
+            assert_eq!(
+                keys.status().of(Provider::Deepgram).state,
+                if boundary == "current" {
+                    KeyState::Rejected
+                } else {
+                    KeyState::Set
+                }
+            );
+            if let Some(thread) = stream.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 
     #[test]
@@ -1106,11 +1185,13 @@ mod tests {
         assert_eq!(*Auth::Key.header(KEY), format!("Token {KEY}"));
         assert_eq!(*Auth::Bearer.header("t"), "Bearer t");
         // A refusal of the key marks it rejected; a lab token's does not.
-        note_refusal::<()>(keys, Auth::Bearer, &Err(SttFailure::Auth));
+        let mut development = Token::from("fictional-development-token".to_string());
+        development.take().unwrap();
+        development.note_rejected();
         assert_eq!(keys.status().deepgram.state, KeyState::Set);
-        note_refusal::<()>(keys, Auth::Key, &Err(SttFailure::Network));
-        assert_eq!(keys.status().deepgram.state, KeyState::Set);
-        note_refusal::<()>(keys, Auth::Key, &Err(SttFailure::Auth));
+        let mut stored = Token::from_keys(keys);
+        stored.take().unwrap();
+        stored.note_rejected();
         assert_eq!(keys.status().deepgram.state, KeyState::Rejected);
     }
 

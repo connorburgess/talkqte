@@ -443,6 +443,42 @@ fn stop_waiting_after_sending_stops_reading_and_the_cost_is_unknown() {
 }
 
 #[test]
+fn withdrawn_notes_attempt_never_applies_late_auth_or_success() {
+    for model in [
+        &llm_provider::ANTHROPIC_MODELS[0],
+        &llm_provider::OPENAI_MODELS[0],
+        &llm_provider::GEMINI_MODELS[0],
+    ] {
+        for status in [200, 400, 401, 403] {
+            let (mut prepared, _) = first_case();
+            prepared.target = ResolvedModel::from_curated(model);
+            let cancelled = Cell::new(false);
+            let rejected = Cell::new(false);
+            let written = write_provider(
+                &prepared,
+                Secret::for_test(KEY),
+                || rejected.set(true),
+                &|| cancelled.get(),
+                |_, _| {
+                    cancelled.set(true);
+                    Ok(Reply {
+                        status,
+                        body: Box::new(std::io::Cursor::new(
+                            br#"{"error":{"details":[{"reason":"API_KEY_INVALID"}]}}"#.to_vec(),
+                        )),
+                    })
+                },
+                |_| panic!("withdrawn response must not be parsed"),
+            );
+            assert!(written.sent);
+            assert_eq!(written.result.unwrap_err(), Failure::Cancelled);
+            assert_eq!(written.spent_micro_usd, None);
+            assert!(!rejected.get());
+        }
+    }
+}
+
+#[test]
 fn a_new_session_stops_the_last_sessions_request() {
     let mut engine = Engine::live();
     ended_session(&mut engine);

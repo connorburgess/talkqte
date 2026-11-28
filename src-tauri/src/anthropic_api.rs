@@ -881,11 +881,13 @@ pub fn connected_engine_for(
     crate::llm_provider::register_usage(tracker.clone());
     let model_id = resolved.id.clone();
     let custom = resolved.custom;
+    let key_source = crate::provider_keys::global().request_key(Provider::Anthropic);
+    let rejected_source = key_source.clone();
     let adapter = AnthropicApi::for_resolved(
         resolved,
         Network,
-        Box::new(|| crate::provider_keys::global().get(Provider::Anthropic)),
-        Box::new(|| crate::provider_keys::global().mark_rejected(Provider::Anthropic)),
+        Box::new(move || key_source.get()),
+        Box::new(move || rejected_source.mark_rejected()),
         usage,
         tracker,
     );

@@ -8,6 +8,72 @@ use std::{collections::VecDeque, sync::Mutex};
 
 const KEY: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
 
+#[test]
+fn real_adapter_401_uses_the_original_credential_revision() {
+    use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
+    struct Offline;
+    impl Probe for Offline {
+        fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+            panic!("no provider probe");
+        }
+    }
+    struct Rotating {
+        keys: &'static Keys,
+        replace: bool,
+    }
+    impl Transport for Rotating {
+        fn post(&mut self, _: &Secret, _: &[u8], _: Duration) -> Result<Reply, NoReply> {
+            if self.replace {
+                self.keys
+                    .set(Provider::OpenAi, &format!("{KEY}replacement"))
+                    .unwrap();
+            }
+            Ok(Reply {
+                status: 401,
+                body: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+            })
+        }
+    }
+    for replace in [false, true] {
+        let keys = Box::leak(Box::new(Keys::new(
+            Box::<MemoryStore>::default(),
+            Box::new(Offline),
+        )));
+        keys.set(Provider::OpenAi, KEY).unwrap();
+        let key_source = keys.request_key(Provider::OpenAi);
+        let rejected_source = key_source.clone();
+        let model = built_in_model();
+        let usage = Arc::new(CueUsageTracker::new(CueProvider::OpenAi, &model.id, false));
+        let adapter = OpenAiApi::new(
+            model,
+            Rotating { keys, replace },
+            Box::new(move || key_source.get()),
+            Box::new(move || rejected_source.mark_rejected()),
+            usage,
+        );
+        let mut worker = Worker::start(adapter, crate::llm_provider::DEADLINE).unwrap();
+        let request = request(None);
+        worker.submit(request.clone()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = worker.poll(&request) {
+                assert_eq!(result.unwrap_err(), Failure::SignIn);
+                break;
+            }
+            assert!(std::time::Instant::now() < until, "fake 401 did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            keys.status().of(Provider::OpenAi).state,
+            if replace {
+                KeyState::Set
+            } else {
+                KeyState::Rejected
+            }
+        );
+    }
+}
+
 #[derive(Default)]
 struct Script {
     replies: VecDeque<Result<(u16, String), NoReply>>,

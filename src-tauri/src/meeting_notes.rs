@@ -1257,6 +1257,12 @@ pub(crate) fn write_provider(
             return failed(failure, None);
         }
     };
+    // A held refusal is no longer an authentication observation once this
+    // explicitly reviewed attempt has been withdrawn. Credential revisions
+    // provide an additional, independent guard against replacement.
+    if cancelled() {
+        return failed(Failure::Cancelled, None);
+    }
     match reply.status {
         200 => {}
         401 | 403 => {

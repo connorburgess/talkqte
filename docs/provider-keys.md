@@ -78,6 +78,16 @@ one.
   32-to-64-character hexadecimal key. Whitespace around a pasted key is removed;
   anything else is refused without quoting what was pasted.
 - Whether a key was checked or rejected is kept in memory for the app run.
+- Authentication observations are tied to an opaque, in-memory revision of the
+  credential actually read. App-managed replacement/removal (including re-adding
+  the same text) retires old observations. A delayed refusal cannot reject a
+  replacement, and a delayed successful check cannot mark it verified. Other
+  providers' changes do not retire a still-current credential's result.
+- Credential reads, app-managed writes and conditional status updates share one
+  synchronization boundary. No lock is held during a provider response
+  wait. Revisions contain no key text or digest and never cross IPC, persist, or
+  appear in diagnostics. Existing cancellation/source-withdrawal checks apply
+  before the revision check; an already-sent request cannot be recalled.
 - Checking whether a key is set does not unlock the Linux keyring: it searches
   the items' attributes only. Reading a key for a session or a check may show
   the keyring's own unlock prompt.
@@ -152,6 +162,14 @@ real Keychain or network. Not yet checked: the real Keychain on a signed
 build, Credential Manager and GNOME Keyring in a person's desktop session
 (including the keyring's unlock prompt), KWallet, and either provider's real
 response to the check.
+
+Revision regressions use held fake authentication results and memory-only keys:
+replacement, removal/re-addition, same-text saves, unrelated-provider changes,
+late success, wrong-store receipts and genuinely current rejection. Ask completion
+also requires its original source/ticket; speech handshake regressions cover
+replacement and abort. These are offline boundaries, not real-provider or native
+credential-store acceptance. App revisions track writes made through TalkQTE;
+they do not supply an OS version for a credential replaced by another application.
 
 ## Repeated macOS access prompts
 
