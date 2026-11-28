@@ -579,6 +579,10 @@ impl Engine {
             self.state.cue = None;
             self.unshown = None;
             let state = self.evaluation.as_mut().expect("own-key evaluator");
+            // Cue text can contain withdrawn snapshot content. Do not carry
+            // it into later requests as a visible or earlier cue.
+            state.shown = None;
+            state.earlier.clear();
             state.permission.generation = state
                 .permission
                 .generation

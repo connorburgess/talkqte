@@ -285,6 +285,18 @@ fn production_selected_cues_need_fresh_cited_speech_not_just_a_selected_note() {
         .sources()
         .iter()
         .any(|s| s.id == "prior:file:fictional-portfolio"));
+    // A displayed cue can quote the note. Removing that source must also
+    // withdraw its wording from earlierCues in the next transcript-only wire.
+    e.set_notes(vec![]);
+    assert!(e.state.cue.is_none());
+    said(&mut e, 3, "The fictional team has moved to maintenance.");
+    let narrowed = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(narrowed.earlier_cues().is_empty());
+    let input = narrowed.own_key_prompt_input().unwrap();
+    assert!(!input.contains("Earlier calibration reduced retries"));
+    assert!(!input.contains("prior:file:fictional-portfolio"));
+    answer.send(quiet(&narrowed)).unwrap();
+    settle(&mut e);
 }
 
 struct NotifyRetired(mpsc::Sender<()>);
