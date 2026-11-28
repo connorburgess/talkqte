@@ -700,6 +700,50 @@ mod tests {
     const OPENAI: &str = "sk-proj-FICTIONALfictional0123456789abcdefghij-_XYZ";
     const GEMINI: &str = "AIzaSyFICTIONALfictional0123456789abcdef";
 
+    #[test]
+    fn held_old_key_result_cannot_reject_or_verify_a_replacement() {
+        use std::sync::mpsc;
+        struct Held {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            answer: ProbeResult,
+        }
+        impl Probe for Held {
+            fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                self.answer
+            }
+        }
+        for answer in [ProbeResult::Rejected, ProbeResult::Accepted] {
+            let (entered, started) = mpsc::channel();
+            let (release, held) = mpsc::channel();
+            let keys = Arc::new(Keys::new(
+                Box::<MemoryStore>::default(),
+                Box::new(Held {
+                    entered,
+                    release: Mutex::new(held),
+                    answer,
+                }),
+            ));
+            keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
+            let worker_keys = keys.clone();
+            let worker = std::thread::spawn(move || worker_keys.test(Provider::Anthropic));
+            started
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            keys.set(Provider::Anthropic, &format!("{ANTHROPIC}replacement"))
+                .unwrap();
+            release.send(()).unwrap();
+            let status = worker.join().unwrap().unwrap().anthropic;
+            assert_eq!(status.state, KeyState::Set);
+            assert!(
+                !status.verified,
+                "an old success cannot bless a replacement"
+            );
+        }
+    }
+
     /// A store that records every call, so a test can see what was written.
     #[derive(Clone, Default)]
     struct Recording {
