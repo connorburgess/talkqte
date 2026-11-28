@@ -233,6 +233,7 @@ export interface ContextItem {
   autoSelected?: boolean;
 }
 export interface NoteSummary {
+  fileName?: string;
   sourceId: string;
   title: string;
   /** Empty when a Markdown or plain-text file gives no date. */
@@ -240,11 +241,12 @@ export interface NoteSummary {
   preview: string;
 }
 export interface PickedNotes {
+  files?: { fileName: string; noteCount: number; error: string | null }[];
   fileName: string;
   notes: NoteSummary[];
   /** Notes in the file not listed: beyond the limit of 200, or repeated. */
   skipped: number;
-  /** A Markdown or plain-text file: a note without a date asks for one. */
+  /** A file source: undated notes offer an optional source date. */
   asksForDates?: boolean;
 }
 export interface MergeOutcome {

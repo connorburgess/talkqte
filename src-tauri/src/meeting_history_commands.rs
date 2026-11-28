@@ -628,6 +628,7 @@ pub(crate) async fn list_kept_meetings_for_context(
     runtime.pending_file_pick = None;
     runtime.pending_import = Some(crate::context_import::PendingImport::new(Box::new(source)));
     Ok(crate::PickedNotes {
+        files: vec![],
         file_name: "kept meetings".into(),
         notes,
         skipped,

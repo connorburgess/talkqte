@@ -160,7 +160,8 @@ impl Request {
                     provider,
                     date,
                     title,
-                } if bounded_text(date, 128)
+                } if (bounded_text(date, 128)
+                    || (*provider == crate::context::Provider::File && date.is_empty()))
                     && bounded_text(title, crate::context::MAX_TITLE_CHARS) =>
                 {
                     date.len() + title.len() + provider.id().len()

@@ -19,15 +19,18 @@ export const SELECTED_POLICY = 'fictional-lab-selected-prior-v2';
 export const SELECTED_FRAME = 'talkqte.lab.selected.v2';
 export const SELECTED_DESCRIPTOR = 'talkqte.lab.selected.descriptor.v2';
 export const SELECTED_PROMPT =
-  '1a862e9973e2d42970e42f69a921e5ec0600906b13d47b51bf7f190b568cc9b5';
+  '7e990e5566a4542682e15346018a18b198e302158d91a8f1eed7f0c235fec5bc';
 export const selectedIdentity = () => ({
   contextPolicy: SELECTED_CONTEXT,
   inputContract: SELECTED_INPUT,
   policyRevision: SELECTED_POLICY,
   promptSha256: SELECTED_PROMPT,
 });
+export const UNKNOWN_FILE_DATE_RULE =
+  '\nA file priorNote with date:null has an unknown source date. Never substitute import time, claim recency, or treat it as current meeting evidence. Known source dates retain their original meaning; approval and current-speech citation requirements still apply.';
 export function selectedSystemPrompt() {
-  const text = anthropicSystemPrompt() + SELECTED_SNAPSHOT_RULE;
+  const text =
+    anthropicSystemPrompt() + SELECTED_SNAPSHOT_RULE + UNKNOWN_FILE_DATE_RULE;
   if (createHash('sha256').update(text).digest('hex') !== SELECTED_PROMPT)
     throw new Error('selected_prompt_drift');
   return text;

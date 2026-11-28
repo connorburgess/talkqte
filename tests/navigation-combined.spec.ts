@@ -115,7 +115,7 @@ test('narrow keyboard flow preserves context controls and independent Stop', asy
     .press('Enter');
   await expect(context).toContainText('0 notes selected');
   await expect(
-    context.getByRole('button', { name: 'Add notes from a file' }),
+    context.getByRole('button', { name: 'Add notes from files' }),
   ).toBeFocused();
   await page
     .getByRole('button', { name: 'Settings', exact: true })

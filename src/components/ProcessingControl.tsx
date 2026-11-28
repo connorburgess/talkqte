@@ -158,7 +158,7 @@ function NoteLabel({ note }: { note: ProcessingNote }) {
           : note.provider === 'history'
             ? 'Kept meeting'
             : 'Imported file'}{' '}
-        · {note.sourceDate} · prior note
+        · {note.sourceDate || 'Unknown date'} · prior note
       </span>
     </>
   );

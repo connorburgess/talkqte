@@ -90,7 +90,10 @@ function validateInput(input, contract) {
     check(note.id.startsWith(prefix) && note.id.length > prefix.length);
     check(
       text(note.title, 200) &&
-        date(note.date) &&
+        (date(note.date) ||
+          (contract === 'selected-prior-context-v2' &&
+            note.provider === 'file' &&
+            note.date === null)) &&
         version(note.snapshotRevision),
     );
     check(note.freshness === 'not_verified' && [...note.text].length <= 2000);
@@ -98,7 +101,7 @@ function validateInput(input, contract) {
       note.id +
         note.provider +
         note.title +
-        note.date +
+        (note.date ?? '') +
         note.text +
         note.snapshotRevision +
         note.freshness,

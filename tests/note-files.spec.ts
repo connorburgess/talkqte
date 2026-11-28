@@ -12,11 +12,11 @@ async function chooseFile(page: Page, kind: string) {
   await page.goto(`/?notes=${kind}`);
   await page.locator('.context-disclosure > summary').press('Enter');
   await panel(page)
-    .getByRole('button', { name: 'Add notes from a file' })
+    .getByRole('button', { name: 'Add notes from files' })
     .click();
 }
 
-test('a Markdown note without a date waits for the date the person enters, then is listed, removable, and never exported', async ({
+test('an optional entered source date is preserved, removable, and never exported', async ({
   page,
 }) => {
   await chooseFile(page, 'markdown');
@@ -27,24 +27,21 @@ test('a Markdown note without a date waits for the date the person enters, then 
   });
   await expect(note).toHaveCount(1);
   await expect(note).not.toBeChecked();
-  await expect(dialog).toContainText('No date in the file');
+  await expect(dialog).toContainText('Unknown date');
   const date = dialog.getByLabel('Date of Welcome guide printing');
   await expect(date).toHaveValue('');
   const importButton = dialog.getByRole('button', { name: /^Import/ });
   await expect(importButton).toBeDisabled();
-  // Ticking the note is not enough: nothing guesses its date.
+  // Undated references can import without inventing a source date.
   await note.check();
-  await expect(importButton).toBeDisabled();
-  await expect(dialog.getByRole('status')).toContainText(
-    'Enter the date of each ticked note that has none in the file. TalkQTE never guesses a date.',
-  );
+  await expect(importButton).toBeEnabled();
   await date.fill('2026-10-21');
   await expect(
     dialog.getByRole('button', { name: 'Import 1 selected' }),
   ).toBeEnabled();
-  // Clearing the date, or a year the app cannot accept, holds the import.
+  // Clearing a date keeps it unknown; an invalid nonempty date blocks import.
   await date.fill('');
-  await expect(importButton).toBeDisabled();
+  await expect(importButton).toBeEnabled();
   await date.fill('1899-12-31');
   await expect(importButton).toBeDisabled();
   await date.fill('2026-10-21');
@@ -93,7 +90,7 @@ test('a date entered and then cancelled is not kept for the next pick', async ({
   await expect(dialog).toBeHidden();
   await expect(panel(page).getByRole('listitem')).toHaveCount(0);
   await panel(page)
-    .getByRole('button', { name: 'Add notes from a file' })
+    .getByRole('button', { name: 'Add notes from files' })
     .click();
   await expect(
     dialog.getByRole('checkbox', { name: /Welcome guide printing/ }),
@@ -104,7 +101,7 @@ test('a date entered and then cancelled is not kept for the next pick', async ({
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(
-    panel(page).getByRole('button', { name: 'Add notes from a file' }),
+    panel(page).getByRole('button', { name: 'Add notes from files' }),
   ).toBeFocused();
 });
 
@@ -125,7 +122,7 @@ test('a plain-text note that states its date imports with that date and no date 
   );
   // Choosing the same file again keeps one copy.
   await panel(page)
-    .getByRole('button', { name: 'Add notes from a file' })
+    .getByRole('button', { name: 'Add notes from files' })
     .click();
   await dialog.getByRole('checkbox', { name: /Tool shed rota/ }).check();
   await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
@@ -149,7 +146,9 @@ test('a TalkQTE JSON notes file states its dates and never asks for one', async 
   await expect(dialog.getByRole('checkbox')).toHaveCount(3);
   await expect(dialog.locator('time')).toHaveCount(3);
   await expect(dialog.getByLabel(/^Date of/)).toHaveCount(0);
-  await expect(dialog).not.toContainText('No date in the file');
+  await expect(dialog.locator('.context-choices')).not.toContainText(
+    'Unknown date',
+  );
 });
 
 for (const [kind, message] of [
@@ -173,7 +172,7 @@ for (const [kind, message] of [
       'add a Markdown (.md), text (.txt), or TalkQTE JSON notes file',
     );
     await expect(
-      panel(page).getByRole('button', { name: 'Add notes from a file' }),
+      panel(page).getByRole('button', { name: 'Add notes from files' }),
     ).toBeEnabled();
   });
 }
@@ -205,4 +204,51 @@ test('local path fallback lists notes without importing and clears the transient
   await expect(dialog.getByRole('button', { name: /^Import/ })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(panel(page).getByRole('listitem')).toHaveCount(0);
+});
+
+test('an undated reference imports explicitly unknown without a date or processing approval', async ({
+  page,
+}) => {
+  await chooseFile(page, 'markdown');
+  const dialog = page.getByRole('dialog', { name: /Choose notes/ });
+  await dialog
+    .getByRole('checkbox', { name: /Welcome guide printing/ })
+    .check();
+  await expect(dialog.getByLabel('Date of Welcome guide printing')).toHaveValue(
+    '',
+  );
+  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(panel(page).getByRole('listitem')).toContainText(
+    'Unknown date · From a file',
+  );
+  await expect(panel(page).getByRole('listitem')).not.toContainText('2026-');
+  await expect(
+    panel(page).getByRole('button', {
+      name: 'Remove Welcome guide printing (Unknown date)',
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test('a fictional file batch reports each failure and imports only explicitly ticked readable notes', async ({
+  page,
+}) => {
+  await chooseFile(page, 'batch');
+  const dialog = page.getByRole('dialog', {
+    name: /Choose notes from 3 files/,
+  });
+  await expect(
+    dialog.getByRole('list', { name: 'Selected file results' }),
+  ).toContainText('Unreadable.md');
+  await expect(dialog).toContainText('The file could not be read.');
+  await expect(dialog.getByRole('checkbox')).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: /^Import/ })).toBeDisabled();
+  await dialog
+    .getByRole('checkbox', { name: /Welcome guide printing/ })
+    .check();
+  await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
+  await expect(panel(page).getByRole('listitem')).toHaveCount(1);
+  await expect(panel(page)).toContainText('Unknown date · From a file');
+  await expect(panel(page)).not.toContainText('Tool shed rota');
 });

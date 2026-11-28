@@ -565,6 +565,7 @@ impl HistorySource {
         self.items
             .iter()
             .map(|item| crate::notes_file::NoteSummary {
+                file_name: None,
                 source_id: item.source_id.clone(),
                 title: item.title.clone(),
                 source_date: item.source_date.clone(),

@@ -343,6 +343,30 @@ export function pickContextFile(): PickedNotes {
       asksForDates: false,
     };
   }
+  if (kind === 'batch') {
+    pickedNotes = [...noteFiles.markdown.notes, ...noteFiles.text.notes];
+    return {
+      fileName: '3 files',
+      skipped: 0,
+      asksForDates: true,
+      files: [
+        { fileName: 'Reference.md', noteCount: 1, error: null },
+        { fileName: 'Rota.txt', noteCount: 1, error: null },
+        {
+          fileName: 'Unreadable.md',
+          noteCount: 0,
+          error: 'The file could not be read.',
+        },
+      ],
+      notes: pickedNotes.map((note, index) => ({
+        sourceId: note.sourceId,
+        title: note.title,
+        sourceDate: note.sourceDate,
+        preview: note.excerpt,
+        fileName: index === 0 ? 'Reference.md' : 'Rota.txt',
+      })),
+    };
+  }
   if (refusedFiles[kind]) throw new Error(refusedFiles[kind]);
   const file = noteFiles[kind] ?? {
     fileName: 'garden-notes.json',
@@ -380,7 +404,8 @@ export function importContextNotes(
       ...picked,
       sourceDate: picked.sourceDate || (asks && dates[picked.sourceId]) || '',
     };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate)) outcome.rejected++;
+    if (note.sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate))
+      outcome.rejected++;
     else if (contextItems.some((item) => item.sourceId === note.sourceId))
       outcome.unchanged++;
     else {

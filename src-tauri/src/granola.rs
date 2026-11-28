@@ -599,6 +599,7 @@ impl Connection {
             .into_iter()
             .take(MAX_NOTES)
             .map(|note| NoteSummary {
+                file_name: None,
                 source_id: note.id,
                 title: note.title,
                 source_date: note.date,

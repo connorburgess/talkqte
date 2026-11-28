@@ -55,13 +55,16 @@ impl Request {
                             .id
                             .strip_prefix(prefix.as_str())
                             .is_none_or(str::is_empty)
-                        || !crate::context::valid_date(date)
+                        || !(crate::context::valid_date(date)
+                            || (v2
+                                && *provider == crate::context::Provider::File
+                                && date.is_empty()))
                         || source.text.chars().count() > crate::context::MAX_EXCERPT_CHARS
                     {
                         return Err(Failure::InvalidInput);
                     }
                     notes.push(json!({
-                        "id":source.id,"provider":provider.id(),"title":title,"date":date,
+                        "id":source.id,"provider":provider.id(),"title":title,"date":if date.is_empty() { Value::Null } else { json!(date) },
                         "snapshotRevision":source.revision.to_string(),
                         "freshness":"not_verified","text":source.text
                     }));
@@ -380,5 +383,49 @@ mod tests {
             r.sources.push(note);
         }
         assert_eq!(r.selected_snapshot_input(), Err(Failure::InvalidInput));
+    }
+}
+
+#[cfg(test)]
+mod unknown_date_projection_tests {
+    use super::*;
+    use crate::{context::Provider, cue_evaluator::Source};
+    #[test]
+    fn selected_v2_projects_unknown_file_date_as_null_but_v1_keeps_its_strict_contract() {
+        let request = Request::new(
+            1,
+            1,
+            vec![
+                Source {
+                    id: "transcript:current".into(),
+                    revision: 0,
+                    provenance: Provenance::Transcript {
+                        at_ms: 1,
+                        speaker: "Speaker".into(),
+                    },
+                    text: "Which rendering choice fits?".into(),
+                },
+                Source {
+                    id: "prior:file:reference".into(),
+                    revision: 1,
+                    provenance: Provenance::PriorNote {
+                        provider: Provider::File,
+                        date: String::new(),
+                        title: "Fictional reference".into(),
+                    },
+                    text: "Authored journeys.".into(),
+                },
+            ],
+            None,
+        )
+        .unwrap();
+        let value: Value =
+            serde_json::from_str(&request.selected_prior_context_input().unwrap()).unwrap();
+        assert_eq!(value["priorNotes"][0]["date"], Value::Null);
+        assert_eq!(value["priorNotes"][0]["freshness"], "not_verified");
+        assert_eq!(
+            request.selected_snapshot_input(),
+            Err(Failure::InvalidInput)
+        );
     }
 }

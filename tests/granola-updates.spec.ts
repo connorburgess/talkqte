@@ -181,7 +181,7 @@ test('stopping a check keeps a late answer out and leaves the notebook usable', 
   const stop = button(page, 'Stop check');
   await expect(stop).toBeFocused();
   await expect(button(page, 'Disconnect Granola')).toBeEnabled();
-  await expect(button(page, 'Add notes from a file')).toBeEnabled();
+  await expect(button(page, 'Add notes from files')).toBeEnabled();
   await expect(notes(page).nth(0).getByRole('button')).toBeEnabled();
 
   await stop.press('Enter');

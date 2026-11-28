@@ -20,3 +20,14 @@
   font: inherit;
   font-size: 13.5px;
 }
+
+.context-file-results {
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+.context-file-results li {
+  margin-block: 8px;
+}
+.context-file-results p {
+  margin-block: 4px;
+}

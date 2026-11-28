@@ -30,7 +30,7 @@ test('Prior context opens from the notebook without moving away from tabs', asyn
   page,
 }) => {
   await expect(
-    page.getByRole('button', { name: 'Add notes from a file' }),
+    page.getByRole('button', { name: 'Add notes from files' }),
   ).toBeVisible();
   await page.getByRole('tab', { name: /Transcript/ }).click();
   await expect(page.getByRole('tab', { name: /Transcript/ })).toBeFocused();
@@ -195,7 +195,7 @@ test('the browser preview offers no Granola connection and says where it lives',
     'Saved meetings and Granola connections are available in the desktop app.',
   );
   await expect(
-    panel.getByRole('button', { name: 'Add notes from a file' }),
+    panel.getByRole('button', { name: 'Add notes from files' }),
   ).toBeVisible();
 });
 
@@ -205,7 +205,7 @@ test('a chooser with nothing to choose says so instead of showing a blank list',
   await page.goto('/?notes=empty');
   await page.locator('.context-disclosure > summary').press('Enter');
   const panel = page.getByRole('region', { name: 'Prior context' });
-  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await panel.getByRole('button', { name: 'Add notes from files' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
   await expect(dialog.getByRole('status')).toContainText(
     'This file has no notes with an id, a date, and text; nothing was imported.',
@@ -221,7 +221,7 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
 }) => {
   const panel = page.getByRole('region', { name: 'Prior context' });
   await expect(panel).toContainText('excluded from Markdown exports');
-  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await panel.getByRole('button', { name: 'Add notes from files' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
   await expect(dialog).toContainText('garden-notes.json');
   await expect(dialog.getByRole('checkbox')).toHaveCount(3);
@@ -263,7 +263,7 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
     page.getByRole('region', { name: 'Suggested question' }),
   ).toHaveCount(0);
   // Importing the same notes again does not duplicate them.
-  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await panel.getByRole('button', { name: 'Add notes from files' }).click();
   await dialog.getByRole('checkbox', { name: /Garden welcome guide/ }).check();
   await dialog.getByRole('button', { name: 'Import 1 selected' }).click();
   await expect(panel.getByRole('listitem')).toHaveCount(1);
@@ -279,18 +279,18 @@ test('prior notes from a file are chosen, shown apart from the conversation, rem
     0,
   );
   await expect(
-    panel.getByRole('button', { name: 'Add notes from a file' }),
+    panel.getByRole('button', { name: 'Add notes from files' }),
   ).toBeFocused();
   await expect(
     page.getByRole('status').filter({ hasText: '1 imported note removed.' }),
   ).toHaveCount(1);
   // Escape in the chooser leaves nothing pending and returns focus.
-  await panel.getByRole('button', { name: 'Add notes from a file' }).click();
+  await panel.getByRole('button', { name: 'Add notes from files' }).click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(
-    panel.getByRole('button', { name: 'Add notes from a file' }),
+    panel.getByRole('button', { name: 'Add notes from files' }),
   ).toBeFocused();
   await expect(panel.getByRole('listitem')).toHaveCount(0);
 });

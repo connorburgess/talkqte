@@ -73,7 +73,7 @@ pub struct ContextItem {
     pub source_id: String,
     /// At most `MAX_TITLE_CHARS`; "Untitled note" when empty.
     pub title: String,
-    /// The note's own date, YYYY-MM-DD, shown beside it.
+    /// The source date, YYYY-MM-DD; empty means unknown for file notes only.
     pub source_date: String,
     /// The selected excerpt, at most `MAX_EXCERPT_CHARS`.
     pub excerpt: String,
@@ -182,7 +182,7 @@ pub struct MergeOutcome {
     /// Not imported because the store already holds `MAX_ITEMS` notes.
     pub over_limit: usize,
     /// Dropped because they were not selected, came from another provider,
-    /// or lacked a valid ID, date, or text.
+    /// or lacked a valid ID, permitted source date, or text.
     pub rejected: usize,
 }
 
@@ -302,7 +302,7 @@ pub(crate) fn valid_date(date: &str) -> bool {
 }
 
 /// Accepts an item only if it came from this provider and has a clean ID, a
-/// real date, and some text; trims the ID, title, and excerpt.
+/// real date (or an explicitly unknown file date), and text; trims fields.
 fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
     item.source_id = item.source_id.trim().to_string();
     item.excerpt = item
@@ -323,7 +323,8 @@ fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
             .any(|c| c.is_control() || invisible(c));
     (item.provider == provider
         && id_ok
-        && valid_date(&item.source_date)
+        && (valid_date(&item.source_date)
+            || (provider == Provider::File && item.source_date.is_empty()))
         && !item.excerpt.is_empty())
     .then_some(item)
 }
@@ -602,5 +603,33 @@ mod tests {
         };
         let (result, _) = fetch(&mut source);
         assert_eq!((result, source.calls), (Err(FetchError::NotSupported), 0));
+    }
+}
+
+#[cfg(test)]
+mod unknown_file_date_tests {
+    use super::*;
+    #[test]
+    fn only_file_sources_can_keep_an_unknown_date_and_known_dates_are_preserved() {
+        let note = |provider, date: &str| ContextItem {
+            provider,
+            source_id: "fictional-reference".into(),
+            title: "Reference".into(),
+            source_date: date.into(),
+            excerpt: "Fixed journeys use authored frames.".into(),
+            revision: 1,
+        };
+        for provider in [Provider::File, Provider::Granola, Provider::History] {
+            let mut store = ContextStore::default();
+            let outcome = store.merge(
+                provider,
+                &["fictional-reference".into()],
+                vec![note(provider, "")],
+            );
+            assert_eq!(outcome.added, usize::from(provider == Provider::File));
+            assert_eq!(outcome.rejected, usize::from(provider != Provider::File));
+        }
+        assert!(validated(note(Provider::File, "2026-11-04"), Provider::File).is_some());
+        assert!(validated(note(Provider::File, "2026-02-30"), Provider::File).is_none());
     }
 }

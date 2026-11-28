@@ -111,13 +111,13 @@ export function ContextNotes({
   const connectButton = useRef<HTMLButtonElement>(null);
   const returnConnectFocus = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const selectionLimit = pickedFrom === 'granola' ? 10 : 200;
+  const selectionLimit =
+    pickedFrom === 'granola' ? 10 : pickedFrom === 'file' ? 20 : 200;
   const allChosen =
     !!picked &&
     chosen.length === Math.min(picked.notes.length, selectionLimit) &&
     chosen.length > 0;
-  // A Markdown or plain-text note without a date waits for one; TalkQTE
-  // never guesses it. Rust says which files ask.
+  // A file without a source date may stay undated; an entered date is optional.
   const needsDate = (note: NoteSummary) =>
     !!picked?.asksForDates && !note.sourceDate;
   // A complete date the app accepts; a year before 1900 counts as missing.
@@ -125,11 +125,12 @@ export function ContextNotes({
     const date = dates[id] ?? '';
     return /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= '1900-01-01' ? date : '';
   };
-  const undated =
+  const invalidDates =
     picked?.notes.filter(
       (note) =>
         needsDate(note) &&
         chosen.includes(note.sourceId) &&
+        !!dates[note.sourceId] &&
         !entered(note.sourceId),
     ).length ?? 0;
   const addButton = useRef<HTMLButtonElement>(null);
@@ -295,7 +296,9 @@ export function ContextNotes({
         outcome.added ? `${outcome.added} imported` : '',
         outcome.updated ? `${outcome.updated} updated` : '',
         outcome.unchanged ? `${outcome.unchanged} already imported` : '',
-        outcome.rejected ? `${outcome.rejected} skipped (no date or text)` : '',
+        outcome.rejected
+          ? `${outcome.rejected} skipped (invalid source or no text)`
+          : '',
         outcome.overLimit ? `${outcome.overLimit} over the limit of 20` : '',
       ].filter(Boolean);
       onNotice(parts.length ? `${parts.join(', ')}.` : 'Nothing imported.');
@@ -355,7 +358,7 @@ export function ContextNotes({
                 onClick={pick}
               >
                 <FileText size={15} />
-                Add notes from a file
+                Add notes from files
               </button>
               {bridge.desktop && (
                 <button
@@ -528,7 +531,7 @@ export function ContextNotes({
                     )}
                   </div>
                   <span className="muted small">
-                    {item.sourceDate} ·{' '}
+                    {item.sourceDate || 'Unknown date'} ·{' '}
                     {item.provider === 'granola'
                       ? 'From Granola'
                       : item.provider === 'history'
@@ -551,7 +554,7 @@ export function ContextNotes({
                     <button
                       type="button"
                       className="text-button context-archive-button"
-                      aria-label={`Archive ${item.title} (${item.sourceDate}) so it is never auto-selected`}
+                      aria-label={`Archive ${item.title} (${item.sourceDate || 'Unknown date'}) so it is never auto-selected`}
                       title="Archive (never include again)"
                       disabled={busy || working}
                       onClick={(event) => {
@@ -568,7 +571,7 @@ export function ContextNotes({
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label={`Remove ${item.title} (${item.sourceDate})`}
+                    aria-label={`Remove ${item.title} (${item.sourceDate || 'Unknown date'})`}
                     title="Remove for this session"
                     disabled={busy || working}
                     onClick={(event) => {
@@ -621,6 +624,31 @@ export function ContextNotes({
           never trigger cues on their own. Sending them to a cue provider needs
           a separate processing review and approval.
         </p>
+        {pickedFrom === 'file' && (
+          <p className="small muted">
+            Choose up to 20 files, 1 MB each and 4 MB total. Tick up to 20 notes
+            to import. Source dates are optional; undated references stay
+            labeled Unknown date.
+          </p>
+        )}
+        {!!picked?.files?.length && (
+          <ul
+            className="context-file-results"
+            aria-label="Selected file results"
+          >
+            {picked.files.map((file, index) => (
+              <li key={index}>
+                <strong>{file.fileName}</strong> · {file.noteCount}{' '}
+                {file.noteCount === 1 ? 'note ready' : 'notes ready'}
+                {file.error && (
+                  <p className="small" role="status">
+                    {file.error}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         {pickedFrom === 'history' && (
           <p className="small muted">
             Only your written notes and kept meeting notes are listed, never
@@ -642,7 +670,7 @@ export function ContextNotes({
               ? ': Granola returned a partial list, or it exceeds the 200-note chooser limit.'
               : pickedFrom === 'history'
                 ? ': only kept meetings with your notes or kept meeting notes (up to 200) are listed.'
-                : ': the file has repeated ids or more than 200 notes.'}
+                : ': the selected files have repeated IDs or exceed the 200-note review limit.'}
           </p>
         )}
         {picked && picked.notes.length > 1 && (
@@ -680,7 +708,7 @@ export function ContextNotes({
                 ? emptyHistoryReason
                   ? `${emptyHistoryReason.title} ${emptyHistoryReason.detail} Nothing was imported.`
                   : 'No reusable saved notes could be listed. Review Meetings, or add notes from a file or Granola. Nothing was imported.'
-                : 'This file has no notes with an id, a date, and text; nothing was imported.'}
+                : 'No readable notes are ready. Review the file results, then cancel and choose other files. Nothing was imported.'}
           </p>
         )}
         <ul className="context-choices">
@@ -708,8 +736,11 @@ export function ContextNotes({
                 />
                 <span className="context-choice-copy">
                   <strong>{note.title}</strong>
-                  {needsDate(note) ? (
-                    <span className="muted small">No date in the file</span>
+                  {note.fileName && (
+                    <span className="muted small">{note.fileName}</span>
+                  )}
+                  {!note.sourceDate ? (
+                    <span className="muted small">Unknown date</span>
                   ) : (
                     <time className="muted small" dateTime={note.sourceDate}>
                       {note.sourceDate}
@@ -727,7 +758,7 @@ export function ContextNotes({
               </label>
               {needsDate(note) && (
                 <label className="context-date">
-                  <span>Date</span>
+                  <span>Source date · optional</span>
                   <input
                     type="date"
                     min="1900-01-01"
@@ -747,10 +778,10 @@ export function ContextNotes({
             </li>
           ))}
         </ul>
-        {undated > 0 && (
+        {invalidDates > 0 && (
           <p className="small" role="status">
-            Enter the date of each ticked note that has none in the file.
-            TalkQTE never guesses a date.
+            Enter a valid source date, or clear it to keep the date unknown.
+            TalkQTE never uses the import time as the source date.
           </p>
         )}
         {pickError && (
@@ -773,7 +804,7 @@ export function ContextNotes({
           </button>
           <button
             className="primary-button"
-            disabled={working || chosen.length === 0 || undated > 0}
+            disabled={working || chosen.length === 0 || invalidDates > 0}
             onClick={importChosen}
           >
             {importing

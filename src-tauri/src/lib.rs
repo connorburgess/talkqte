@@ -1066,6 +1066,7 @@ const CLOUD_CHUNK_MS: u64 = 100;
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PickedNotes {
+    pub(crate) files: Vec<notes_file::FileReadResult>,
     pub(crate) file_name: String,
     pub(crate) notes: Vec<notes_file::NoteSummary>,
     /// Notes in the source that are not listed: beyond the limit or without
@@ -1311,10 +1312,15 @@ async fn pick_context_file(
             .dialog()
             .file()
             .add_filter("Notes", &notes_file::EXTENSIONS)
-            .blocking_pick_file()
-            .map(|file| {
-                file.into_path()
-                    .map_err(|_| "Choose a local file.".to_string())
+            .blocking_pick_files()
+            .map(|files| {
+                files
+                    .into_iter()
+                    .map(|file| {
+                        file.into_path()
+                            .map_err(|_| "Choose local files.".to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
             })
     })
     .await
@@ -1322,7 +1328,7 @@ async fn pick_context_file(
     let Some(path) = picked.transpose()? else {
         return Ok(None);
     };
-    read_context_file(&state, ticket, path).await.map(Some)
+    read_context_files(&state, ticket, path).await.map(Some)
 }
 
 /// An explicit local path avoids the system chooser when its service is unavailable.
@@ -1363,10 +1369,33 @@ async fn read_context_file(
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     finish_file_pick(&mut runtime, &ticket, source)?;
     Ok(PickedNotes {
+        files: vec![],
         file_name,
         notes,
         skipped,
         asks_for_dates,
+    })
+}
+
+async fn read_context_files(
+    state: &AppState,
+    ticket: Arc<()>,
+    paths: Vec<std::path::PathBuf>,
+) -> Result<PickedNotes, String> {
+    let count = paths.len();
+    let (source, notes, files) =
+        tauri::async_runtime::spawn_blocking(move || notes_file::FileSource::read_batch(&paths))
+            .await
+            .map_err(|_| "The selected files could not be read.")??;
+    let skipped = source.skipped;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    finish_file_pick(&mut runtime, &ticket, source)?;
+    Ok(PickedNotes {
+        file_name: format!("{count} files"),
+        notes,
+        skipped,
+        asks_for_dates: true,
+        files,
     })
 }
 
@@ -1694,6 +1723,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     runtime.pending_file_pick = None;
     runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
+        files: vec![],
         file_name: "Granola · the last 30 days".into(),
         notes,
         skipped,

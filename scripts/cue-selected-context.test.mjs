@@ -462,3 +462,35 @@ test('actual provider rejects malformed union IDs before broker settlement can h
     }
   }
 });
+
+test('an explicitly undated file remains null and never becomes recent evidence', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { selectedPriorContextInput, buildSelectedContextParams } =
+    await import('./cue-selected-context.mjs');
+  const value = JSON.parse(
+    readFileSync(
+      new URL(
+        './fixtures/selected-context-undated-input.json',
+        import.meta.url,
+      ),
+    ),
+  );
+  assert.equal(
+    JSON.parse(selectedPriorContextInput(value)).priorNotes[0].date,
+    null,
+  );
+  const params = buildSelectedContextParams('claude-opus-5-5', value);
+  assert.equal(JSON.parse(params.messages[0].content).priorNotes[0].date, null);
+  assert.match(params.system[0].text, /unknown source date/);
+  for (const provider of ['granola', 'history']) {
+    const invalid = structuredClone(value);
+    invalid.priorNotes[0].provider = provider;
+    invalid.priorNotes[0].id = `prior:${provider}:reference`;
+    assert.throws(() => selectedPriorContextInput(invalid));
+  }
+  for (const date of ['', 'unknown', '2026-02-30']) {
+    const invalid = structuredClone(value);
+    invalid.priorNotes[0].date = date;
+    assert.throws(() => selectedPriorContextInput(invalid));
+  }
+});

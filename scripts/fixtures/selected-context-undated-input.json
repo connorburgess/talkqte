@@ -1,0 +1,22 @@
+{
+  "inputContract": "selected-prior-context-v2",
+  "events": [
+    {
+      "id": "transcript:current",
+      "speaker": "Speaker",
+      "text": "Which rendering choice fits this fictional project?"
+    }
+  ],
+  "priorNotes": [
+    {
+      "id": "prior:file:reference",
+      "provider": "file",
+      "title": "Fictional rendering reference",
+      "date": null,
+      "snapshotRevision": "1",
+      "freshness": "not_verified",
+      "text": "The project uses authored camera journeys."
+    }
+  ],
+  "existingCue": null
+}

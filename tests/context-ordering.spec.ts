@@ -41,7 +41,7 @@ for (const all of [false, true]) {
     expect(await page.evaluate(() => window.contextTest.items().length)).toBe(
       all ? 0 : 1,
     );
-    await button(page, 'Add notes from a file').focus();
+    await button(page, 'Add notes from files').focus();
     await page.evaluate(() => window.contextTest.release());
     await page.evaluate(() => new Promise(requestAnimationFrame));
     await panel(page).screenshot({
@@ -50,7 +50,7 @@ for (const all of [false, true]) {
     await expect(panel(page)).not.toContainText(firstTitle);
     if (all) await expect(panel(page)).toContainText('0 notes selected');
     else await expect(panel(page)).toContainText(secondTitle);
-    await expect(button(page, 'Add notes from a file')).toBeFocused();
+    await expect(button(page, 'Add notes from files')).toBeFocused();
     if (all) {
       await page.setViewportSize({ width: 600, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -135,7 +135,7 @@ for (const all of [false, true]) {
     await remove.press('Enter');
     await expect(panel(page)).not.toContainText(firstTitle);
     await expect(
-      all ? button(page, 'Add notes from a file') : summary,
+      all ? button(page, 'Add notes from files') : summary,
     ).toBeFocused();
     if (all) await expect(panel(page)).toContainText('0 notes selected');
     else await expect(panel(page)).toContainText(secondTitle);

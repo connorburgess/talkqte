@@ -181,7 +181,7 @@ test('disconnect stays reachable while listing and ignores a late chooser', asyn
   await expect(chooser).not.toBeVisible();
   await expect(context.getByRole('listitem')).toHaveCount(1);
   await expect(
-    page.getByRole('button', { name: 'Add notes from a file' }),
+    page.getByRole('button', { name: 'Add notes from files' }),
   ).toBeEnabled();
 });
 
@@ -266,6 +266,6 @@ test('removing all after a Granola import returns focus to prior context', async
     page.getByRole('region', { name: 'Prior context' }),
   ).toContainText('0 notes selected');
   await expect(
-    page.getByRole('button', { name: 'Add notes from a file' }),
+    page.getByRole('button', { name: 'Add notes from files' }),
   ).toBeFocused();
 });
