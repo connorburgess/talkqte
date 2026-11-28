@@ -19,6 +19,15 @@ const fixture = JSON.parse(
     'utf8',
   ),
 );
+const interviewFixture = JSON.parse(
+  await readFile(
+    new URL(
+      './fixtures/selected-context-interview-input.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+);
 
 // All HTTP is loopback, all credentials fictional. The broker and API worker are real.
 // The socket peer uses the shared native wire fixture; native UI consent, capture,
@@ -235,6 +244,53 @@ test('selected native-wire fixture traverses real broker/provider/worker/SDK for
       fake.requests[0].output_config,
       fake.requests[1].output_config,
     );
+    assert.equal(peer.provider.calls, 2);
+    assert.equal(peer.broker.evaluationSummary.resultsSent, 2);
+    peer.send('cancel', { reason: 'stop' });
+    assert.equal((await peer.next('terminal')).reason, 'protocol');
+  } finally {
+    await peer.close();
+    await fake.close();
+  }
+  assert.equal(fake.requests.length, 2);
+});
+
+test('selected interview native-wire fixture traverses real broker/provider/worker/SDK for both empty and populated arms', async () => {
+  const fake = await fakeApi((current) => ({
+    action: 'quiet',
+    cue: null,
+    sourceIds: [current.events[0].id],
+  }));
+  const peer = await route(fake).catch(async (error) => {
+    await fake.close();
+    throw error;
+  });
+  try {
+    assert.equal(
+      peer.provider.metadata.promptSha256,
+      selectedIdentity().promptSha256,
+    );
+    for (const [index, notes] of [[], interviewFixture.priorNotes].entries()) {
+      const current = {
+        ...structuredClone(interviewFixture),
+        priorNotes: notes,
+      };
+      const id = String(index + 1);
+      evaluate(peer, current, id);
+      const frame = await peer.next('result');
+      assert.deepEqual(frame.value, {
+        action: 'quiet',
+        cue: null,
+        sourceIds: [current.events[0].id],
+      });
+      settle(peer, id);
+      await peer.broker.gate.waitIdle();
+      const params = fake.requests[index];
+      const sent = JSON.parse(params.messages[0].content);
+      assert.deepEqual(sent, current);
+      assert.equal(sent.sessionMode, 'interview');
+      assert.equal(params.system[0].text, selectedSystemPrompt());
+    }
     assert.equal(peer.provider.calls, 2);
     assert.equal(peer.broker.evaluationSummary.resultsSent, 2);
     peer.send('cancel', { reason: 'stop' });

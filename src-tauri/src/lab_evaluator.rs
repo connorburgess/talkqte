@@ -29,7 +29,7 @@ use std::{
 const SELECTED_CONTEXT: &str = "selected-prior-v2";
 const SELECTED_INPUT: &str = "selected-prior-context-v2";
 const SELECTED_POLICY: &str = "fictional-lab-selected-prior-v2";
-const SELECTED_PROMPT: &str = "7e990e5566a4542682e15346018a18b198e302158d91a8f1eed7f0c235fec5bc";
+const SELECTED_PROMPT: &str = "59a6415ab3183976d99985c560313ff8d5d682f9327c1559d30e1067cb0161d1";
 const SELECTED_SCHEMA: &str = "talkqte.lab.selected.v2";
 const SCHEMA: &str = "talkqte.lab.v1";
 const FRAME_LIMIT: usize = 65_536;

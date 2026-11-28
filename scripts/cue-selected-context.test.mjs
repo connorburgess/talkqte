@@ -463,6 +463,67 @@ test('actual provider rejects malformed union IDs before broker settlement can h
   }
 });
 
+test('selected-prior-v2 preserves sessionMode:"interview" end-to-end across shared fixture, params, spend, receipts, and fake API worker', async () => {
+  const sharedInterviewFixture = JSON.parse(
+    readFileSync(
+      new URL(
+        './fixtures/selected-context-interview-input.json',
+        import.meta.url,
+      ),
+    ),
+  );
+  assert.deepEqual(
+    JSON.parse(selectedPriorContextInput(sharedInterviewFixture)),
+    sharedInterviewFixture,
+  );
+  for (const notes of [false, true]) {
+    const meeting = input(notes);
+    const interview = { ...meeting, sessionMode: 'interview' };
+    const params = buildSelectedContextParams(model, interview);
+    assert.equal(params.system[0].text, selectedSystemPrompt());
+    const wire = JSON.parse(params.messages[0].content);
+    assert.equal(wire.sessionMode, 'interview');
+    assert.equal(wire.priorNotes.length, notes ? 1 : 0);
+    assert.ok(
+      worstCaseMicroUsd(model, interview, SELECTED_CONTEXT) >=
+        worstCaseMicroUsd(model, meeting, SELECTED_CONTEXT),
+    );
+  }
+
+  const fake = await api();
+  const session = await open(fake, SELECTED_CONTEXT);
+  try {
+    assert.equal(session.metadata.promptSha256, SELECTED_PROMPT);
+    for (const current of [
+      sharedInterviewFixture,
+      { ...input(false), sessionMode: 'interview' },
+    ]) {
+      const result = await session.request({
+        role: 'cue-evaluator',
+        input: current,
+      });
+      assert.equal(result.value.action, 'quiet');
+      const sent = fake.requests.at(-1);
+      assert.equal(sent.system[0].text, selectedSystemPrompt());
+      const wire = JSON.parse(sent.messages[0].content);
+      assert.equal(wire.sessionMode, 'interview');
+      assert.deepEqual(wire, current);
+    }
+    // Invalid sessionMode fails before any API dispatch (never silently stripped).
+    await assert.rejects(
+      session.request({
+        role: 'cue-evaluator',
+        input: { ...input(), sessionMode: 'meeting' },
+      }),
+      { category: 'invalid-request' },
+    );
+    assert.equal(fake.requests.length, 2);
+  } finally {
+    await session.close();
+    await fake.close();
+  }
+});
+
 test('an explicitly undated file remains null and never becomes recent evidence', async () => {
   const { readFileSync } = await import('node:fs');
   const { selectedPriorContextInput, buildSelectedContextParams } =
