@@ -116,8 +116,8 @@ pub trait NoteSource {
     fn capabilities(&self) -> Capabilities;
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError>;
     /// Whether the chooser offers an optional date for a file note that has
-    /// none. Only a Markdown or plain-text file does; other sources state
-    /// their dates, and a note without one is skipped.
+    /// none. File batches include explicitly undated JSON entries; a direct
+    /// single JSON source keeps its supplied date. Other providers require dates.
     fn asks_for_dates(&self) -> bool {
         false
     }

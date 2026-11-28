@@ -180,10 +180,10 @@ impl FileSource {
         let limit = MAX_FILE_BYTES.min(*remaining);
         // Read at most one byte past the limit, in case the file grew.
         let mut bytes = Vec::new();
-        file.take(limit + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| UNREADABLE)?;
+        let read = file.take(limit + 1).read_to_end(&mut bytes);
+        // Even a failed read may have consumed bytes before the I/O error.
         *remaining = remaining.saturating_sub(bytes.len() as u64);
+        read.map_err(|_| UNREADABLE)?;
         if bytes.len() as u64 > limit {
             return Err(if limit < MAX_FILE_BYTES {
                 "This selection exceeds 4 MB. Choose fewer or smaller files.".into()
@@ -384,6 +384,9 @@ impl FileSource {
             Self {
                 notes,
                 skipped,
+                // The batch chooser offers optional dates for every undated
+                // file note, including an explicitly empty JSON date. Format
+                // detection already happened independently for each file.
                 kind: FileKind::Markdown,
             },
             summaries,

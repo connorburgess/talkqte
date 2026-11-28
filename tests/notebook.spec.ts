@@ -208,7 +208,7 @@ test('a chooser with nothing to choose says so instead of showing a blank list',
   await panel.getByRole('button', { name: 'Add notes from files' }).click();
   const dialog = page.getByRole('dialog', { name: /Choose notes/ });
   await expect(dialog.getByRole('status')).toContainText(
-    'This file has no notes with an id, a date, and text; nothing was imported.',
+    'No readable notes are ready. Review the file results, then cancel and choose other files. Nothing was imported.',
   );
   await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: /Import/ })).toBeDisabled();
