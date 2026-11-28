@@ -258,7 +258,7 @@ impl Record {
         // A legal 1,000-character question can need 4,000 serialized bytes, and the
         // provider embeds that JSON string again. Size the actual provider body
         // with the most escaped allowed question before any credential access.
-        let body = request_body(&target, &selected, &conversation, &"\t".repeat(1000));
+        let body = request_body(&target, &selected, &conversation, &"\"".repeat(1000));
         let bytes = serde_json::to_vec(&body)
             .map_err(|_| "Question unavailable.")?
             .len();
@@ -856,6 +856,7 @@ mod tests {
                 "\\".repeat(1000),
                 "\"".repeat(1000),
                 "a\t".repeat(500),
+                "a\n".repeat(500),
             ] {
                 let mut r = Record::default();
                 let target = ResolvedModel::from_curated(model);
