@@ -65,38 +65,62 @@ test('opening is free of sends; inline Send authorizes the displayed excerpt and
   );
   await expect(page.locator('#transcript-line-qa-1')).toBeFocused();
 });
-test('bounded scope explicitly excludes beginning and authored insufficient answer explains limit', async ({
+test('whole transcript includes the beginning and its exact citation remains navigable after grouping', async ({
   page,
 }) => {
-  await open(page, 240);
+  await open(page, 236);
   await page.getByText('Transcript scope and cost').click();
   await expect(
-    page.getByText('Earlier discussion is not included.', { exact: false }),
+    page.getByText(/Uses all 236 available transcript lines/),
   ).toBeVisible();
-  await expect(page.getByText(/Uses the latest 200 lines/)).toBeVisible();
+  await expect(page.getByText(/No tail-only fallback/)).toBeVisible();
   await page.evaluate(() =>
     window.qaTest.answer({
-      answer:
-        'I cannot tell what was decided at the start: it is outside this recent excerpt.',
-      insufficient: true,
-      citations: [],
+      answer: 'The greenhouse discussion began with the opening check.',
+      insufficient: false,
+      citations: ['qa-0'],
     }),
   );
-  await input(page).fill('What did we decide at the start?');
+  await input(page).fill('What was discussed at the beginning?');
   await send(page).click();
+  await expect(page.locator('.ask-entry')).toHaveCount(1);
+  await page
+    .getByRole('button', { name: 'Transcript 0:00', exact: true })
+    .click();
+  await expect(page.locator('#transcript-line-qa-0')).toBeFocused();
+});
+test('follow-up scope discloses prior exchanges and whole-pair omission; clear never sends', async ({
+  page,
+}) => {
+  await open(page);
+  for (let i = 0; i < 4; i++) {
+    await input(page).fill(
+      i === 0 ? 'What was chosen?' : `Explain that choice ${i}.`,
+    );
+    await send(page).click();
+    await expect(page.locator('.ask-entry')).toHaveCount(i + 1);
+    await expect(
+      page.getByText(new RegExp(`plus ${Math.min(i + 1, 3)} prior exchanges?`)),
+    ).toBeVisible();
+  }
+  await page.getByText('Transcript scope and cost').click();
+  await expect(page.getByText(/1 earlier exchange is excluded/)).toBeVisible();
   await expect(
-    page.getByText('Model answer · insufficient evidence'),
+    page.getByText(/only transcript lines are evidence/),
   ).toBeVisible();
-  await expect(
-    page.getByText(/I cannot tell what was decided at the start/),
-  ).toBeVisible();
-  await expect(page.getByRole('button', { name: /Transcript \d/ })).toHaveCount(
-    0,
+  const before = await page.evaluate(
+    () =>
+      window.qaTest.calls.filter((c) => c.command === 'ask_question').length,
   );
-  const audit = await new AxeBuilder({ page })
-    .include('.meeting-ask')
-    .analyze();
-  expect(audit.violations).toEqual([]);
+  await page.getByRole('button', { name: 'Clear conversation' }).click();
+  await expect(page.locator('.ask-entry')).toHaveCount(0);
+  await expect(page.getByText(/budget allowances are unchanged/)).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        window.qaTest.calls.filter((c) => c.command === 'ask_question').length,
+    ),
+  ).toBe(before);
 });
 test('held answer can be cancelled; errors retain the question for retry', async ({
   page,
@@ -258,4 +282,123 @@ test('answers follow only while the history reader stays at the end', async ({
   await page.evaluate(() => window.qaTest.release());
   await expect(page.locator('.ask-entry')).toHaveCount(2);
   expect(await history.evaluate((el) => el.scrollTop)).toBeLessThan(2);
+});
+
+async function savedMeeting(page: Page) {
+  await open(page);
+  const id = await page.evaluate(() =>
+    window.historyTest.add({
+      title: 'Fictional greenhouse review',
+      startedAtMs: Date.UTC(2026, 0, 3),
+      durationMs: 236000,
+      sources: 'both',
+      notes: 'Excluded private-for-fixture notes',
+      cues: [],
+      transcript: Array.from({ length: 236 }, (_, i) => ({
+        atMs: i * 1000,
+        label: 'them' as const,
+        echo: i === 0,
+        text: `Fictional greenhouse observation ${i}.`,
+      })),
+    }),
+  );
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click();
+  await page
+    .locator('.history-item')
+    .filter({ hasText: 'Fictional greenhouse review' })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: 'Ask about this meeting' }),
+  ).toBeVisible();
+  return id;
+}
+test('saved whole scope sends exact ID/revision and an echo citation reveals the original grouped line', async ({
+  page,
+}) => {
+  const id = await savedMeeting(page);
+  await expect(
+    page.getByText(
+      /Uses all 236 available transcript lines from this saved meeting/,
+    ),
+  ).toBeVisible();
+  await page.evaluate(() =>
+    window.qaTest.answer({
+      answer: 'The first fictional greenhouse observation is the cited line.',
+      insufficient: false,
+      citations: ['saved-line-0'],
+    }),
+  );
+  await input(page).fill('What was the first observation?');
+  await send(page).click();
+  const sent = await page.evaluate(
+    () =>
+      window.qaTest.calls.filter((c) => c.command === 'ask_question').at(-1)
+        ?.args,
+  );
+  expect(sent).toMatchObject({ saved: { id, revision: 1 } });
+  await page
+    .getByRole('button', { name: 'Transcript 0:00', exact: true })
+    .click();
+  await expect(
+    page.locator(`#saved-transcript-${id}-1-saved-line-0`),
+  ).toBeFocused();
+  expect(
+    await page.evaluate(
+      () =>
+        window.qaTest.calls.filter((c) => c.command === 'ask_question').length,
+    ),
+  ).toBe(1);
+});
+test('editing a saved meeting retires held answer and old revision citations instead of remapping them', async ({
+  page,
+}) => {
+  const id = await savedMeeting(page);
+  await page.evaluate(() => window.qaTest.hold());
+  await input(page).fill('Summarize the greenhouse review.');
+  await send(page).click();
+  await expect(
+    page.getByRole('button', { name: 'Cancel answer' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Meeting title' })
+    .fill('Fictional renamed greenhouse review');
+  await page.getByRole('button', { name: 'Save title' }).click();
+  await expect(
+    page.getByRole('heading', {
+      name: 'Fictional renamed greenhouse review',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.locator('.ask-entry')).toHaveCount(0);
+  await expect(
+    page.locator(`#saved-transcript-${id}-1-saved-line-1`),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cancel answer' })).toHaveCount(
+    0,
+  );
+});
+test('over-limit scope disables Send and explains refusal without a tail fallback', async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() =>
+    window.qaTest.scopeError(
+      'This whole transcript exceeds the 128 KiB Ask request limit. No excerpt or request was sent.',
+    ),
+  );
+  await page.getByRole('button', { name: 'Use latest transcript' }).click();
+  await input(page).fill('Assess the whole meeting.');
+  await expect(send(page)).toBeDisabled();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'No excerpt or request was sent.' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        window.qaTest.calls.filter((c) => c.command === 'ask_question').length,
+    ),
+  ).toBe(0);
 });

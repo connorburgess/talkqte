@@ -1359,3 +1359,39 @@ fn deleting_after_a_failed_index_write_preserves_manual_order_and_hidden_meeting
     assert!(!folder.root().join(&ids[2]).exists());
     assert_eq!(final_store.open_meeting(&ids[2]), Err(Error::Missing));
 }
+
+#[test]
+fn ask_snapshot_rejects_edited_deleted_and_unavailable_saved_revisions() {
+    let folder = Folder::new("ask-revision");
+    let store = folder.store();
+    let saved = store
+        .keep(
+            "Fictional seed review",
+            content(1000, "Keep the seed trays indoors."),
+        )
+        .unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, saved.revision, |meeting| meeting
+            .content
+            .transcript
+            .len())
+        .is_ok());
+    let changed = store
+        .rename(&saved.id, "Fictional revised seed review")
+        .unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, saved.revision, |_| panic!(
+            "stale scope must not accept or mark auth"
+        ))
+        .is_err());
+    store.delete(&saved.id).unwrap();
+    assert!(store
+        .with_question_snapshot(&saved.id, changed.revision, |_| panic!(
+            "deleted scope must not accept or mark auth"
+        ))
+        .is_err());
+    let off = Store::open(None, false);
+    assert!(off
+        .with_question_snapshot(&saved.id, saved.revision, |_| ())
+        .is_err());
+}

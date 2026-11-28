@@ -65,9 +65,9 @@ The Notebook puts **Start live session** first when your providers are available
 
 Imported or saved prior notes are not automatically sent to the cue provider. Turn processing off and explicitly select the notes in **Cue processing → Review processing** before including them. On macOS, call-start offers are on by default and can be turned off; automatic start is off unless you explicitly enable it in Settings. [Call-start controls](docs/call-prompt.md).
 
-## Ask about recent discussion
+## Ask about a meeting
 
-During or after the current session, open **Ask** in the notebook, or use the companion’s **Transcript and Ask** button. **Send** explicitly shares your question and the disclosed latest transcript excerpt with your selected provider and own key. This is separate from cue approval; opening the panel sends nothing. Answers link to transcript timestamps and can be wrong. Older discussion outside the bounded excerpt is excluded. Q&A stays in memory and is not saved or exported. See [scope, controls and limits](docs/live-questions.md).
+During or after the current session, open **Ask**, or open one saved meeting in **Meetings**. **Send** shares your question, the whole available selected transcript and up to three prior Q&A exchanges with your selected provider and own key. This is separate from cue approval; opening the panel sends nothing. Prior answers help with follow-ups but are never evidence. Answers cite exact transcript lines and can be wrong. Over-limit or truncated transcripts are refused rather than silently using a tail. Q&A stays in memory and is not saved or exported; clearing chat does not reset budgets. See [scope, controls and limits](docs/live-questions.md).
 
 ## Where your meeting goes
 

@@ -1196,6 +1196,28 @@ impl Store {
             return Err(Error::Missing);
         }
         let _guard = self.lock.lock();
+        self.open_meeting_locked(id)
+    }
+
+    /// Short snapshot/acceptance work under the mutation lock, never network I/O.
+    pub(crate) fn with_question_snapshot<T>(
+        &self,
+        id: &str,
+        revision: u64,
+        work: impl FnOnce(&Meeting) -> T,
+    ) -> Result<T, Error> {
+        if !valid_id(id) {
+            return Err(Error::Missing);
+        }
+        let _guard = self.lock.lock().map_err(|_| Error::Unreadable)?;
+        let meeting = self.open_meeting_locked(id)?;
+        if meeting.revision != revision {
+            return Err(Error::Invalid);
+        }
+        Ok(work(&meeting))
+    }
+
+    fn open_meeting_locked(&self, id: &str) -> Result<Meeting, Error> {
         let root = self.root.clone().ok_or(Error::Off)?;
         let folder = match self.read_index(&root) {
             Ok((entries, _)) => {

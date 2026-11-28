@@ -2590,6 +2590,7 @@ pub fn run() {
             update_commands::schedule_launch_check(app.handle());
             // Kept meetings: off in a lab run, read only when asked.
             meeting_history_commands::manage(app);
+            app.manage(meeting_qa::SavedQuestions::default());
             // Pre-select relevant recent kept meetings (notes only) when
             // enabled; lab runs skip this completely.
             refresh_auto_prior_context_sync(app.handle());

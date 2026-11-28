@@ -843,8 +843,19 @@ impl Engine {
         if !self.state.live || self.live_stopping || self.state.status == Status::Ready {
             return Err("Start a live session and wait for transcript lines before asking.".into());
         }
-        self.meeting_qa.prepare(
-            &self.state.transcript,
+        self.meeting_qa.prepare_source(
+            self.meeting
+                .iter()
+                .map(|line| crate::meeting_qa::Line {
+                    id: line.id.clone(),
+                    at_ms: line.at_ms,
+                    text: line.text.clone(),
+                })
+                .collect(),
+            crate::meeting_qa::Source::Current {
+                session: self.state.session.clone(),
+            },
+            self.meeting_cut,
             crate::llm_provider::resolved_cue_model(),
         )
     }
