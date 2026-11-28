@@ -9,7 +9,7 @@
 //! front matter or a level-one heading on its first line (Markdown only), or
 //! else the file name. Its date comes only from a `date:` in Markdown front
 //! matter or a `Date:` line near the top, before any other heading, written
-//! YYYY-MM-DD; otherwise the person enters the date in the chooser. Nothing
+//! YYYY-MM-DD; otherwise the source date stays unknown unless the person optionally enters it. Nothing
 //! guesses a date, and the text is kept as written.
 
 use crate::context::{valid_date, Capabilities, ContextItem, NoteSource, Provider, SourceError};
@@ -22,6 +22,17 @@ use std::path::Path;
 pub const MAX_FILE_BYTES: u64 = 1 << 20;
 /// The most notes listed from one file.
 pub const MAX_NOTES: usize = 200;
+/// Bounds one explicit native file selection.
+pub const MAX_FILES: usize = 20;
+pub const MAX_BATCH_BYTES: u64 = 4 << 20;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReadResult {
+    pub file_name: String,
+    pub note_count: usize,
+    pub error: Option<String>,
+}
 /// Characters of each note shown while choosing.
 const PREVIEW_CHARS: usize = 120;
 /// Non-blank lines at the top of a Markdown or plain-text note searched for
@@ -116,6 +127,12 @@ pub struct NoteSummary {
     pub title: String,
     pub source_date: String,
     pub preview: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    /// Original trimmed character count when the note exceeds
+    /// `context::MAX_EXCERPT_CHARS` and will be shortened on import.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_chars: Option<usize>,
 }
 
 /// The notes read from one file, served through the context contract.
@@ -131,6 +148,13 @@ impl FileSource {
     /// Reads and parses a notes file. Errors are short messages for the
     /// person who picked the file; they never include the file's text.
     pub fn read(path: &Path) -> Result<Self, String> {
+        {
+            let mut remaining = MAX_FILE_BYTES;
+            Self::read_with_budget(path, &mut remaining)
+        }
+    }
+
+    fn read_with_budget(path: &Path, remaining: &mut u64) -> Result<Self, String> {
         let kind = FileKind::of(path)?;
         // Do not let a typed path block while opening a FIFO. Validate the
         // opened handle, so a path replacement cannot turn a pre-open check
@@ -150,13 +174,22 @@ impl FileSource {
         if metadata.len() > MAX_FILE_BYTES {
             return Err(TOO_LARGE.into());
         }
+        if metadata.len() > *remaining {
+            return Err("This selection exceeds 4 MB. Choose fewer or smaller files.".into());
+        }
+        let limit = MAX_FILE_BYTES.min(*remaining);
         // Read at most one byte past the limit, in case the file grew.
         let mut bytes = Vec::new();
-        file.take(MAX_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| UNREADABLE)?;
-        if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(TOO_LARGE.into());
+        let read = file.take(limit + 1).read_to_end(&mut bytes);
+        // Even a failed read may have consumed bytes before the I/O error.
+        *remaining = remaining.saturating_sub(bytes.len() as u64);
+        read.map_err(|_| UNREADABLE)?;
+        if bytes.len() as u64 > limit {
+            return Err(if limit < MAX_FILE_BYTES {
+                "This selection exceeds 4 MB. Choose fewer or smaller files.".into()
+            } else {
+                TOO_LARGE.into()
+            });
         }
         // A renamed PDF or Word file is binary, and rarely valid UTF-8.
         if kind != FileKind::Json && bytes.contains(&0) {
@@ -243,6 +276,7 @@ impl FileSource {
                 title: title.unwrap_or_else(|| document.name.trim().to_string()),
                 source_date: date.unwrap_or_default(),
                 excerpt: body,
+                original_chars: None,
                 revision: document.revision,
             }],
             skipped: 0,
@@ -280,6 +314,7 @@ impl FileSource {
                 title: note.title,
                 source_date: note.date,
                 excerpt: note.text,
+                original_chars: None,
                 revision: note.revision,
             })
             .collect();
@@ -291,27 +326,99 @@ impl FileSource {
         })
     }
 
+    /// Read a bounded user-selected batch in selection order. Failures never
+    /// discard readable files; duplicate IDs are not allowed to alias checkboxes.
+    pub fn read_batch(
+        paths: &[std::path::PathBuf],
+    ) -> Result<(Self, Vec<NoteSummary>, Vec<FileReadResult>), String> {
+        if paths.is_empty() || paths.len() > MAX_FILES {
+            return Err("Choose between 1 and 20 notes files at a time.".into());
+        }
+        let mut remaining = MAX_BATCH_BYTES;
+        let mut notes = Vec::new();
+        let mut summaries = Vec::new();
+        let mut files = Vec::new();
+        let mut skipped = 0;
+        for path in paths {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let mut report = FileReadResult {
+                file_name: name.clone(),
+                note_count: 0,
+                error: None,
+            };
+            match Self::read_with_budget(path, &mut remaining) {
+                Err(error) => report.error = Some(error),
+                Ok(source) => {
+                    skipped += source.skipped;
+                    let listed = source.summaries();
+                    let mut duplicates = 0;
+                    for (note, mut summary) in source.notes.into_iter().zip(listed) {
+                        if notes.iter().any(|kept: &ContextItem| {
+                            kept.source_id.trim() == note.source_id.trim()
+                        }) {
+                            skipped += 1;
+                            duplicates += 1;
+                            continue;
+                        }
+                        if notes.len() >= MAX_NOTES {
+                            skipped += 1;
+                            continue;
+                        }
+                        summary.file_name = Some(name.clone());
+                        notes.push(note);
+                        summaries.push(summary);
+                        report.note_count += 1;
+                    }
+                    if duplicates > 0 {
+                        report.error = Some(format!("{duplicates} repeated note IDs skipped; use distinct IDs or choose files separately."));
+                    }
+                }
+            }
+            files.push(report);
+        }
+        Ok((
+            Self {
+                notes,
+                skipped,
+                // The batch chooser offers optional dates for every undated
+                // file note, including an explicitly empty JSON date. Format
+                // detection already happened independently for each file.
+                kind: FileKind::Markdown,
+            },
+            summaries,
+            files,
+        ))
+    }
+
     /// The notes to choose from, in file order.
     pub fn summaries(&self) -> Vec<NoteSummary> {
         self.notes
             .iter()
-            .map(|note| NoteSummary {
-                source_id: note.source_id.trim().to_string(),
-                title: if note.title.trim().is_empty() {
-                    "Untitled note".into()
-                } else {
-                    note.title.trim().to_string()
-                },
-                source_date: note.source_date.clone(),
-                preview: {
-                    let trimmed = note.excerpt.trim();
-                    let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
-                    if trimmed.chars().count() > PREVIEW_CHARS {
+            .map(|note| {
+                let trimmed = note.excerpt.trim();
+                let trimmed_chars = trimmed.chars().count();
+                let short: String = trimmed.chars().take(PREVIEW_CHARS).collect();
+                NoteSummary {
+                    source_id: note.source_id.trim().to_string(),
+                    title: if note.title.trim().is_empty() {
+                        "Untitled note".into()
+                    } else {
+                        note.title.trim().to_string()
+                    },
+                    source_date: note.source_date.clone(),
+                    file_name: None,
+                    preview: if trimmed_chars > PREVIEW_CHARS {
                         format!("{short}…")
                     } else {
                         short
-                    }
-                },
+                    },
+                    original_chars: (trimmed_chars > crate::context::MAX_EXCERPT_CHARS)
+                        .then_some(trimmed_chars),
+                }
             })
             .collect()
     }
@@ -481,7 +588,7 @@ mod tests {
     const EXAMPLE: &str = r#"{"notes":[
         {"id":"n1","title":"Garden welcome guide","date":"2026-10-28","text":"Draft a one-page guide. Robin suggested a map of the tool shed."},
         {"id":"n2","date":"2026-11-02","text":"Visitors asked where to find watering cans."},
-        {"id":"n3","title":"No date","date":"","text":"Should be rejected by the store."}
+        {"id":"n3","title":"No date","date":"","text":"Fictional undated reference material."}
     ]}"#;
 
     #[test]
@@ -499,11 +606,15 @@ mod tests {
         let outcome = store.merge(Provider::File, &ids, fetched);
         assert_eq!(
             (outcome.added, outcome.rejected),
-            (1, 1),
-            "the dateless note is rejected"
+            (2, 0),
+            "an explicitly empty file date stays unknown"
         );
         assert_eq!(store.items()[0].source_id, "n2");
         assert_eq!(store.items()[0].provider, Provider::File);
+        assert_eq!(store.items()[0].source_date, "2026-11-02");
+        assert_eq!(store.items()[1].source_id, "n3");
+        assert!(store.items()[1].source_date.is_empty());
+        assert!(store.items().iter().all(|note| note.source_id != "n1"));
     }
 
     #[test]
@@ -807,20 +918,22 @@ mod tests {
         assert_eq!(filled[0].source_date, "2026-10-21");
         let ids = vec!["file-fictional".to_string()];
         let mut store = ContextStore::default();
-        let skipped = store.merge(Provider::File, &ids, fetch_entered(undated(), &[]));
+        let imported = store.merge(Provider::File, &ids, fetch_entered(undated(), &[]));
         assert_eq!(
-            (skipped.added, skipped.rejected),
-            (0, 1),
-            "no date, not imported"
+            (imported.added, imported.rejected),
+            (1, 0),
+            "unknown file date is preserved, not fabricated"
         );
+        assert_eq!(store.items()[0].source_date, "");
+        store.remove(Provider::File, &ids[0]);
         assert_eq!(store.merge(Provider::File, &ids, filled).added, 1);
         assert_eq!(store.items()[0].source_date, "2026-10-21");
         // A date from the file is never replaced.
         let dated = document(FileKind::Markdown, SUMMARY).unwrap();
         let kept = fetch_entered(dated, &[("file-fictional", "2026-01-01")]);
         assert_eq!(kept[0].source_date, "2026-10-21");
-        // A JSON notes file states its dates; a note without one is skipped,
-        // as before, even if a date arrives for it.
+        // A single JSON file does not take an entered date; an explicitly
+        // blank source date remains unknown.
         let json = || {
             FileSource::parse(r#"{"notes":[{"id":"n3","date":"","text":"Gate sign."}]}"#).unwrap()
         };
@@ -833,27 +946,33 @@ mod tests {
 
     #[test]
     fn a_long_note_keeps_the_existing_excerpt_title_and_preview_limits() {
-        let text = format!(
-            "# {}\n{}",
-            "Long title ".repeat(40),
-            "Seedlings. ".repeat(600)
-        );
+        let body = "Seedlings. ".repeat(600);
+        let expected_original = body.trim().chars().count();
+        let text = format!("# {}\n{body}", "Long title ".repeat(40));
         let source = document(FileKind::Markdown, &text).unwrap();
-        assert!(source.summaries()[0].preview.ends_with('…'));
-        assert_eq!(
-            source.summaries()[0].preview.chars().count(),
-            PREVIEW_CHARS + 1
-        );
+        let summary = &source.summaries()[0];
+        assert!(summary.preview.ends_with('…'));
+        assert_eq!(summary.preview.chars().count(), PREVIEW_CHARS + 1);
+        assert_eq!(summary.original_chars, Some(expected_original));
         let ids = vec!["file-fictional".to_string()];
         let fetched = fetch_entered(source, &[("file-fictional", "2026-10-21")]);
         let mut store = ContextStore::default();
-        store.merge(Provider::File, &ids, fetched);
+        let outcome = store.merge(Provider::File, &ids, fetched);
+        assert_eq!((outcome.added, outcome.shortened), (1, 1));
         let note = &store.items()[0];
         assert_eq!(
             note.excerpt.chars().count(),
             crate::context::MAX_EXCERPT_CHARS
         );
+        assert_eq!(note.original_chars, Some(expected_original));
         assert_eq!(note.title.chars().count(), crate::context::MAX_TITLE_CHARS);
+        // A note that fits within the excerpt limit omits original_chars.
+        let short_source = document(
+            FileKind::Markdown,
+            &format!("# Fits\n{}", "a".repeat(crate::context::MAX_EXCERPT_CHARS)),
+        )
+        .unwrap();
+        assert_eq!(short_source.summaries()[0].original_chars, None);
     }
 
     #[cfg(unix)]
@@ -1023,5 +1142,126 @@ mod tests {
         for private in ["Garden committee", "welcome guide", "Robin"] {
             assert!(!printed.contains(private), "printed {private}: {printed}");
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use crate::context::ContextStore;
+    #[test]
+    fn batch_lists_readable_undated_and_dated_files_with_per_file_errors_before_import() {
+        let root =
+            std::env::temp_dir().join(format!("talkqte-fictional-batch-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [
+            root.join("reference.md"),
+            root.join("rota.txt"),
+            root.join("bad.md"),
+        ];
+        std::fs::write(
+            &paths[0],
+            "# Fictional reference\nUse a fixed camera journey.",
+        )
+        .unwrap();
+        std::fs::write(&paths[1], "Date: 2026-11-04\nReview the fictional rota.").unwrap();
+        std::fs::write(&paths[2], [0xff]).unwrap();
+        let (mut source, summaries, files) = FileSource::read_batch(&paths).unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].source_date, "");
+        assert_eq!(summaries[1].source_date, "2026-11-04");
+        assert_eq!(summaries[0].file_name.as_deref(), Some("reference.md"));
+        assert_eq!(files[2].note_count, 0);
+        assert!(files[2].error.is_some());
+        let mut store = ContextStore::default();
+        assert!(store.items().is_empty());
+        let selection = vec![summaries[0].source_id.clone()];
+        let fetched = source.fetch(&selection).unwrap();
+        assert_eq!(store.merge(Provider::File, &selection, fetched).added, 1);
+        assert_eq!(store.items()[0].source_date, "");
+        assert_eq!(store.items()[0].title, "Fictional reference");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn repeated_json_ids_are_reported_without_aliasing_selection() {
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-ids-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [root.join("first.json"), root.join("second.json")];
+        for (path, text) in paths
+            .iter()
+            .zip(["First fictional note", "Second fictional note"])
+        {
+            std::fs::write(
+                path,
+                format!(r#"{{"notes":[{{"id":"same","date":"2026-11-04","text":"{text}"}}]}}"#),
+            )
+            .unwrap();
+        }
+        let (mut source, summaries, files) = FileSource::read_batch(&paths).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(source.skipped, 1);
+        assert!(files[1]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("repeated note IDs"));
+        assert_eq!(
+            source.fetch(&["same".into()]).unwrap()[0].excerpt,
+            "First fictional note"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn chooser_limit_is_aggregate_and_keeps_selection_order() {
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-count-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [root.join("first.json"), root.join("second.json")];
+        for (batch, path) in paths.iter().enumerate() {
+            let notes: Vec<_> = (0..150)
+                .map(|index| {
+                    serde_json::json!({
+                        "id": format!("{batch}-{index}"), "date": "", "text": "Fictional reference"
+                    })
+                })
+                .collect();
+            std::fs::write(path, serde_json::json!({"notes": notes}).to_string()).unwrap();
+        }
+        let (source, summaries, files) = FileSource::read_batch(&paths).unwrap();
+        assert_eq!(summaries.len(), MAX_NOTES);
+        assert_eq!(source.skipped, 100);
+        assert_eq!((files[0].note_count, files[1].note_count), (150, 50));
+        assert_eq!(summaries[0].source_id, "0-0");
+        assert_eq!(summaries[199].source_id, "1-49");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn aggregate_byte_and_file_limits_fail_without_unbounded_reads() {
+        assert!(FileSource::read_batch(&[]).is_err());
+        assert!(FileSource::read_batch(&vec![
+            std::path::PathBuf::from("fictional.md");
+            MAX_FILES + 1
+        ])
+        .is_err());
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-budget-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths: Vec<_> = (0..5)
+            .map(|n| root.join(format!("reference-{n}.md")))
+            .collect();
+        for path in &paths {
+            std::fs::write(path, vec![b'x'; 900_000]).unwrap();
+        }
+        let (_, summaries, files) = FileSource::read_batch(&paths).unwrap();
+        assert_eq!(summaries.len(), 4);
+        assert!(files[4].error.as_deref().unwrap().contains("4 MB"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

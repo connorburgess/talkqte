@@ -82,7 +82,7 @@ impl Attempt {
     /// Fetches like `fetch`, then, if the source asks for dates, gives each
     /// note without one the date the person entered for it. A date from the
     /// source is never replaced, and an entry that is not a real YYYY-MM-DD
-    /// date fills nothing, so the store skips that note.
+    /// date fills nothing, so file references keep their date explicitly unknown.
     pub fn fetch_with_dates(
         &mut self,
         ids: &[String],
@@ -168,6 +168,7 @@ mod tests {
                 title: "Gate sign".into(),
                 source_date: String::new(),
                 excerpt: "A sign might cost less.".into(),
+                original_chars: None,
                 revision: 1,
             }])
         }

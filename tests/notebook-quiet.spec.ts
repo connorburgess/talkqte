@@ -102,14 +102,14 @@ for (const width of [320, 600]) {
     await expect(focus).toBeHidden();
     await page.locator('.context-disclosure > summary').press('Enter');
     await page
-      .getByRole('button', { name: 'Add notes from a file' })
+      .getByRole('button', { name: 'Add notes from files' })
       .press('Enter');
     await expect(
       page.getByRole('dialog', { name: /Choose notes/ }),
     ).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(
-      page.getByRole('button', { name: 'Add notes from a file' }),
+      page.getByRole('button', { name: 'Add notes from files' }),
     ).toBeFocused();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),

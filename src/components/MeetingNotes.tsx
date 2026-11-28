@@ -10,6 +10,7 @@ import {
   writeMeetingNotes,
   type CheckItem,
   type MeetingNotesDraft,
+  type MeetingNotesPlan,
   type MeetingNotesResult,
 } from '../lib/meetingNotes';
 import type { Snapshot } from '../lib/types';
@@ -49,8 +50,23 @@ export function MeetingNotes({
   const [error, setError] = useState('');
   const [result, setResult] = useState<MeetingNotesResult | null>(null);
   const [text, setText] = useState('');
+  const [retryPlan, setRetryPlan] = useState<MeetingNotesPlan | null>(null);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const reviewButton = useRef<HTMLButtonElement>(null);
+  const activeSession = useRef(snapshot.session);
+  activeSession.current = snapshot.session;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const current = (sessionId: string) =>
+    mounted.current && activeSession.current === sessionId;
   const sectionRef = useRef<HTMLElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
+  const failureMessage = useRef<HTMLParagraphElement>(null);
   const writeButton = useRef<HTMLButtonElement>(null);
   const session = useRef(phase);
   const handledTrigger = useRef(0);
@@ -68,6 +84,24 @@ export function MeetingNotes({
     session.current = phase;
   }, [phase]);
 
+  useEffect(() => {
+    setRetryPlan(null);
+    setBusy(false);
+    setError('');
+    setResult(null);
+    setText('');
+    setIncludeNotes(false);
+  }, [snapshot.session]);
+
+  // Editing the scope invalidates an unsent review. Rust also checks its digest.
+  useEffect(() => {
+    setRetryPlan(null);
+  }, [includeNotes, snapshot.notes, phase]);
+
+  useEffect(() => {
+    if (retryPlan) reviewHeading.current?.focus();
+  }, [retryPlan]);
+
   // Draft, failure and kept notes live in Rust; read them when shown.
   useEffect(() => {
     if (phase !== 'draft' && phase !== 'failed' && phase !== 'kept') return;
@@ -84,7 +118,7 @@ export function MeetingNotes({
     return () => {
       live = false;
     };
-  }, [phase]);
+  }, [phase, snapshot.session]);
 
   // Triggered when the person clicks Write notes from the floating dock.
   useEffect(() => {
@@ -110,8 +144,10 @@ export function MeetingNotes({
     setBusy(true);
     setError('');
     const notes = includeNotes;
+    const sessionId = snapshot.session;
     try {
       const plan = await meetingNotesPlan(notes);
+      if (!current(sessionId)) return;
       let draft: MeetingNotesDraft;
       try {
         draft = await writeMeetingNotes(notes, plan.fingerprint);
@@ -119,19 +155,80 @@ export function MeetingNotes({
         const failureText = message(failure, 'No notes were written.');
         if (failureText.startsWith(planChanged)) {
           const refreshed = await meetingNotesPlan(notes);
+          if (!current(sessionId)) return;
           draft = await writeMeetingNotes(notes, refreshed.fingerprint);
         } else {
           throw failure;
         }
       }
+      if (!current(sessionId)) return;
       setResult({ draft, spentMicroUsd: draft.spentMicroUsd });
       setText(draft.markdown);
       focusResult.current = true;
     } catch (failure) {
+      if (!current(sessionId)) return;
       setError(message(failure, 'No notes were written.'));
-      requestAnimationFrame(() => writeButton.current?.focus());
+      requestAnimationFrame(() =>
+        (writeButton.current ?? failureMessage.current)?.focus(),
+      );
     } finally {
-      setBusy(false);
+      if (current(sessionId)) setBusy(false);
+    }
+  };
+
+  const reviewRetry = async () => {
+    const sessionId = snapshot.session;
+    setBusy(true);
+    setError('');
+    try {
+      const plan = await meetingNotesPlan(includeNotes, true);
+      if (current(sessionId)) setRetryPlan(plan);
+    } catch (failure) {
+      if (current(sessionId))
+        setError(
+          message(
+            failure,
+            'The retry could not be reviewed. Nothing was sent.',
+          ),
+        );
+    } finally {
+      if (current(sessionId)) setBusy(false);
+    }
+  };
+
+  const confirmRetry = async () => {
+    if (!retryPlan || busy) return;
+    const sessionId = snapshot.session;
+    const plan = retryPlan;
+    setRetryPlan(null);
+    setBusy(true);
+    setError('');
+    try {
+      // A changed plan always returns to review; never replan and send a retry.
+      const draft = await writeMeetingNotes(
+        includeNotes,
+        plan.fingerprint,
+        true,
+      );
+      if (!current(sessionId)) return;
+      setResult({ draft, spentMicroUsd: draft.spentMicroUsd });
+      setText(draft.markdown);
+      focusResult.current = true;
+    } catch (failure) {
+      if (!current(sessionId)) return;
+      setError(message(failure, 'No notes were written.'));
+      const next = await meetingNotesResult().catch(() => null);
+      if (!current(sessionId)) return;
+      setResult(next);
+      requestAnimationFrame(() =>
+        (
+          reviewButton.current ??
+          failureMessage.current ??
+          sectionRef.current
+        )?.focus(),
+      );
+    } finally {
+      if (current(sessionId)) setBusy(false);
     }
   };
 
@@ -162,7 +259,7 @@ export function MeetingNotes({
   const resultCustom = result?.customModel ?? result?.draft?.customModel;
   const cost =
     result?.spentMicroUsd !== undefined && result?.spentMicroUsd !== null
-      ? ` Estimated cost: about ${dollars(result.spentMicroUsd)}.`
+      ? ` Latest request estimated cost: about ${dollars(result.spentMicroUsd)}.`
       : resultCustom
         ? ` Estimated cost unavailable for custom model; check ${providerConsole(resultProvider)}.`
         : '';
@@ -184,6 +281,7 @@ export function MeetingNotes({
     <section
       ref={sectionRef}
       className="meeting-notes"
+      tabIndex={-1}
       aria-labelledby={`${id}-title`}
     >
       <div className="meeting-notes-head">
@@ -325,20 +423,127 @@ export function MeetingNotes({
         </div>
       )}
 
-      {phase === 'failed' && result?.failure && !error && (
-        <p role="alert" className="meeting-notes-error">
-          {result.failure}
-        </p>
+      {phase === 'failed' && (
+        <>
+          {result?.failure && !error && (
+            <p
+              ref={failureMessage}
+              tabIndex={-1}
+              role="alert"
+              className="meeting-notes-error"
+            >
+              {result.failure}
+            </p>
+          )}
+          {result?.retryAvailable && !retryPlan && (
+            <>
+              <p className="meeting-notes-help">
+                The transcript is still available. You can review one retry
+                after a validation failure. It sends the transcript again and
+                may incur another charge. Nothing is retried automatically.
+              </p>
+              <div className="meeting-notes-choice">
+                <input
+                  id={`${id}-retry-notes`}
+                  type="checkbox"
+                  checked={includeNotes}
+                  disabled={busy}
+                  onChange={(event) => setIncludeNotes(event.target.checked)}
+                />
+                <label htmlFor={`${id}-retry-notes`}>
+                  Include my notes in retry
+                </label>
+              </div>
+              <div className="meeting-notes-actions">
+                <button
+                  ref={reviewButton}
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void reviewRetry()}
+                >
+                  Review one retry
+                </button>
+              </div>
+            </>
+          )}
+          {!result?.retryAvailable && result && (
+            <p className="meeting-notes-help">
+              No retry is available for this result. The transcript remains
+              available to review and export.
+            </p>
+          )}
+          {retryPlan && (
+            <div
+              className="meeting-notes-retry"
+              aria-labelledby={`${id}-retry-title`}
+            >
+              <h3 id={`${id}-retry-title`} ref={reviewHeading} tabIndex={-1}>
+                Review the final retry
+              </h3>
+              <p>
+                Send {retryPlan.transcriptLines} transcript lines (
+                {retryPlan.kilobytes} kB),{' '}
+                {retryPlan.noteLines === undefined
+                  ? 'without your notes'
+                  : `with ${retryPlan.noteLines} lines of your notes`}
+                , to {retryPlan.destination} using {retryPlan.model}. Speaker
+                labels and assigned names are included. Imported prior context,
+                cues and audio are excluded.
+              </p>
+              <p>
+                Prior request reserved estimate:{' '}
+                {dollars(retryPlan.priorReservedMicroUsd ?? 0)}. This retry:
+                likely {dollars(retryPlan.likelyMicroUsd ?? 0)}, at most{' '}
+                {dollars(retryPlan.worstMicroUsd ?? 0)} estimated. Combined
+                worst-case estimate:{' '}
+                {dollars(
+                  (retryPlan.priorReservedMicroUsd ?? 0) +
+                    (retryPlan.worstMicroUsd ?? 0),
+                )}
+                , within the $1.00 limit. These are estimates, not a bill; prior
+                usage remains reserved even when its reported cost is missing.
+              </p>
+              <p>
+                The same citation checks apply. A failed retry is final for this
+                meeting.
+              </p>
+              <div className="meeting-notes-actions">
+                <button
+                  className="primary-button"
+                  disabled={busy}
+                  onClick={() => void confirmRetry()}
+                >
+                  Send final retry
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRetryPlan(null);
+                    requestAnimationFrame(() => reviewButton.current?.focus());
+                  }}
+                >
+                  Cancel review
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {phase === 'discarded' && (
         <p className="meeting-notes-help" role="status">
-          Notes discarded. One request per meeting.
+          Notes discarded. A completed draft cannot be requested again.
         </p>
       )}
 
       {error && (
-        <p role="alert" className="meeting-notes-error">
+        <p
+          ref={failureMessage}
+          tabIndex={-1}
+          role="alert"
+          className="meeting-notes-error"
+        >
           {error}
         </p>
       )}

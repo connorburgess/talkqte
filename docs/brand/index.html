@@ -8013,90 +8013,33 @@ Cue processing stopped: -</pre>
               <div class="panel-card-tag mono-label">
                 <span>16 · Meeting notes &amp; Notes model setting</span
                 ><span
-                  >Idle, Confirm, Writing, Draft, Kept, Failed, Discarded</span
+                  >Idle, Writing, Draft, Kept, Failed, Retry review,
+                  Discarded</span
                 >
               </div>
               <div class="km-split">
                 <!-- Left: Idle, Confirmation, Writing, Failed -->
                 <div class="km-pane">
                   <div class="sk-row-head">
-                    <strong class="panel-h3">1. Idle &amp; Confirmation</strong>
-                    <span class="sk-chip">Nothing sent yet</span>
+                    <strong class="panel-h3">Idle · ended live session</strong
+                    ><span class="sk-chip">Nothing sent yet</span>
                   </div>
-                  <p
-                    class="panel-muted"
-                    style="margin-top: 6px; font-size: 12px"
-                  >
-                    A model can write a short summary, decisions, action items
-                    and open questions from this meeting's transcript, using
-                    your Anthropic key. You see what will be sent and an
-                    estimated cost first; nothing is sent until you confirm.
-                    Each meeting gets one request.
+                  <p class="panel-muted">
+                    Generate cited notes from this transcript using the
+                    configured provider key. Remote speaker labels and assigned
+                    names are included. Written notes are optional; imported
+                    context, cues and audio are excluded.
                   </p>
                   <div class="sk-actions">
-                    <span class="sk-btn">Write meeting notes…</span>
-                  </div>
-
-                  <div
-                    style="
-                      margin-top: 12px;
-                      padding: 14px;
-                      background: #ffffff;
-                      border: 1px solid var(--g-border);
-                      border-radius: 2px;
-                      display: grid;
-                      gap: 8px;
-                    "
-                  >
-                    <strong class="panel-h3 sk-focused"
-                      >Send this meeting to Anthropic?</strong
+                    <span class="sk-btn-primary">Generate notes</span
+                    ><span class="sk-check"
+                      ><span class="sk-check-box"></span>Include my notes</span
                     >
-                    <p style="font-size: 12px">
-                      This sends this session's transcript: 1 line, about 1
-                      minute (1 KB), with each line's time but no speaker
-                      labels. Your notes are not sent. Your session name, focus
-                      lines, imported notes and the cues shown are never sent.
-                    </p>
-                    <div class="panel-check" style="padding: 2px 0">
-                      <span class="panel-box"></span>
-                      <strong>Also send my notes</strong>
-                    </div>
-                    <div
-                      class="sk-session-box"
-                      style="
-                        margin-top: 0;
-                        padding: 10px 12px;
-                        display: grid;
-                        gap: 4px;
-                      "
-                    >
-                      <p style="font-size: 12px">
-                        To: the Anthropic API (US), with your own Anthropic API
-                        key, billed to your Anthropic account.
-                      </p>
-                      <p style="font-size: 12px">
-                        Notes setting: Most careful (default), model
-                        claude-opus-5-5. Change it in Settings before sending.
-                      </p>
-                      <p style="font-size: 12px">
-                        Estimated cost: about $0.07, at most $0.34, on top of
-                        about $0.01 for this meeting's cues. An estimate, not
-                        your bill; one meeting's notes may not be estimated
-                        above $1.00.
-                      </p>
-                    </div>
-                    <p class="panel-muted" style="font-size: 12px">
-                      One request, no retry: if it fails, nothing more is sent
-                      for this meeting. Anthropic handles what is sent under
-                      your API account's terms, and it cannot be recalled once
-                      sent.
-                    </p>
-                    <div class="sk-actions" style="margin-top: 2px">
-                      <span class="sk-btn-primary">Send and write notes</span>
-                      <span class="sk-btn">Cancel</span>
-                    </div>
                   </div>
-
+                  <p class="panel-muted">
+                    The initial action obtains a matching Rust plan and sends.
+                    It does not open a confirmation dialog.
+                  </p>
                   <div class="sk-row" style="margin-top: 14px">
                     <div class="sk-row-head">
                       <strong class="panel-h3">2. Writing in progress</strong>
@@ -8129,9 +8072,65 @@ Cue processing stopped: -</pre>
                     <div class="panel-error-box" style="font-size: 12px">
                       The notes that came back failed a check (an action item
                       named an owner that its lines do not mention), so none are
-                      shown. No notes were written, and nothing else will be
-                      sent for this meeting.
+                      shown. No notes were written. Nothing will be sent
+                      automatically.
                     </div>
+                  </div>
+
+                  <div class="sk-row" style="margin-top: 14px">
+                    <strong class="panel-h3"
+                      >Validation failure · recovery available</strong
+                    >
+                    <p class="panel-muted">
+                      The transcript is still available. Review one retry;
+                      sending it again may incur another charge. Nothing retries
+                      automatically.
+                    </p>
+                    <div class="sk-actions">
+                      <span class="sk-btn">Review one retry</span
+                      ><span class="sk-check">Include my notes in retry</span>
+                    </div>
+                  </div>
+                  <div class="sk-row" style="margin-top: 14px">
+                    <strong class="panel-h3"
+                      >Review the final retry · built</strong
+                    >
+                    <p class="panel-muted">
+                      Send 236 transcript lines without your notes to the
+                      selected provider using the reviewed model. Imported prior
+                      context, cues and audio are excluded.
+                    </p>
+                    <p class="panel-muted">
+                      Fictional estimates: prior reserved $0.34; retry likely
+                      $0.07, at most $0.34; combined $0.67 within $1.00.
+                      Estimates are not a bill. The same citation checks apply.
+                    </p>
+                    <div class="sk-actions">
+                      <span class="sk-btn-primary">Send final retry</span
+                      ><span class="sk-btn">Cancel review</span>
+                    </div>
+                  </div>
+                  <div class="sk-row" style="margin-top: 14px">
+                    <strong class="panel-h3"
+                      >Recovery boundaries · built</strong
+                    >
+                    <p class="panel-muted">
+                      Changed scope: Review it again. Nothing was sent. Cancel
+                      review returns focus without sending. An unsent
+                      key/offline/cancel outcome restores the prior failure and
+                      allows a fresh review.
+                    </p>
+                    <p class="panel-muted">
+                      Cap refusal: prior request plus retry exceeds the $1.00
+                      combined estimate; a lower-cost model may fit. Unknown
+                      pricing on either attempt: retry cannot be bounded;
+                      nothing sent.
+                    </p>
+                    <p class="panel-muted">
+                      Final failed retry or any non-validation failure: no retry
+                      is available. The transcript remains available to review
+                      and export.
+                    </p>
                   </div>
                 </div>
 
@@ -8226,9 +8225,8 @@ Cue processing stopped: -</pre>
                       class="panel-muted"
                       style="margin-top: 8px; font-size: 12px"
                     >
-                      <strong>Discarded:</strong> Notes discarded. Each meeting
-                      gets one request, so none will be written again for this
-                      meeting.
+                      <strong>Discarded:</strong> Notes discarded. A completed
+                      draft cannot be requested again.
                     </p>
                   </div>
 
@@ -8259,10 +8257,10 @@ Cue processing stopped: -</pre>
                     >
                       After a live session you can ask for notes written from
                       its transcript with your chosen provider key (Anthropic,
-                      OpenAI, or Gemini), one request per meeting, shown before
-                      anything is sent. Leave the custom field blank to use the
-                      curated model; estimated dollar cost is unavailable for
-                      custom model IDs.
+                      OpenAI, or Gemini), plus one reviewed retry after failed
+                      validation within a combined $1.00 estimate. Leave the
+                      custom field blank to use the curated model; estimated
+                      dollar cost is unavailable for custom model IDs.
                     </p>
                   </div>
                 </div>
@@ -10030,6 +10028,20 @@ Date: 2026-11-23 · Length: 06:42
                 confirmation, and the lab-run, unavailable and newer-version
                 states). Styles: <code>meeting-history.css</code>.
               </p>
+              <p class="up-boundary" id="upcoming-prior-context-excerpt">
+                <strong>Prior context · shortened excerpt disclosure</strong>
+                (<code>ContextNotes.tsx</code> &amp;
+                <code>ProcessingControl.tsx</code>): notes over 2,000 characters
+                stay bounded to the first 2,000 characters without expanding
+                provider payloads. Built in <code>ProcessingControl.tsx</code>
+                (<em>first 2,000 of N chars only</em> across choose, review, and
+                approved states); shared <code>ContextNotes.tsx</code> chooser
+                row, import notice, and imported-list all-round Direction C chip
+                (<code>1px</code> neutral border, <code>2px</code> radius,
+                <code>--accent-ink</code>, no one-sided borders) and excerpt
+                footer are designed here for integration with the batch file
+                import lane.
+              </p>
               <h3 id="meeting-folder-states">Meeting folders · built states</h3>
               <p class="studio-line">
                 Fictional content. Shared app tokens and meeting-history styles
@@ -10065,6 +10077,24 @@ Date: 2026-11-23 · Length: 06:42
             title="Interview mode states"
             src="interview-mode.html"
             style="width: 100%; height: 1200px; border: 1px solid var(--g-line)"
+          ></iframe>
+        </div>
+      </section>
+
+      <section class="sheet" id="transcript-turn-states">
+        <div class="wrap">
+          <h2>Transcript · grouped turns and citation highlight</h2>
+          <p>
+            Built live and saved transcript views: consecutive
+            same-source/speaker segments flow as readable paragraphs under one
+            turn header, while keeping immutable line IDs/timestamps for
+            exact-line Ask and cue highlights, live partial-to-final updates,
+            long-gap breaks, unknown-speaker isolation, and echo callouts.
+          </p>
+          <iframe
+            title="Transcript turn grouping states"
+            src="transcript-turns.html"
+            style="width: 100%; height: 720px; border: 1px solid var(--g-line)"
           ></iframe>
         </div>
       </section>
@@ -10914,5 +10944,6 @@ Date: 2026-11-23 · Length: 06:42
         >
       </div>
     </footer>
-  </body>
+  <section><h2>File context review</h2><p><a href="context-file-import.html">Undated references and bounded file batch states</a></p></section>
+</body>
 </html>

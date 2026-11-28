@@ -5,6 +5,8 @@ export interface Segment {
   speaker: string;
   speakerId?: number;
   text: string;
+  /** Optional live interim/partial state; finalized segments omit or set false. */
+  partial?: boolean;
 }
 /** Only the cited sources, not the evaluator's entire selected context. */
 export interface CueSource {
@@ -228,23 +230,29 @@ export interface ContextItem {
   title: string;
   sourceDate: string;
   excerpt: string;
+  /** Original trimmed character count when shortened to 2,000 characters. */
+  originalChars?: number;
   revision: number;
   /** True when TalkQTE pre-selected this kept meeting for the session. */
   autoSelected?: boolean;
 }
 export interface NoteSummary {
+  fileName?: string;
   sourceId: string;
   title: string;
   /** Empty when a Markdown or plain-text file gives no date. */
   sourceDate: string;
   preview: string;
+  /** Original trimmed character count when the note exceeds 2,000 characters. */
+  originalChars?: number;
 }
 export interface PickedNotes {
+  files?: { fileName: string; noteCount: number; error: string | null }[];
   fileName: string;
   notes: NoteSummary[];
   /** Notes in the file not listed: beyond the limit of 200, or repeated. */
   skipped: number;
-  /** A Markdown or plain-text file: a note without a date asks for one. */
+  /** A file source: undated notes offer an optional source date. */
   asksForDates?: boolean;
 }
 export interface MergeOutcome {
@@ -253,6 +261,8 @@ export interface MergeOutcome {
   unchanged: number;
   overLimit: number;
   rejected: number;
+  /** Added or updated notes shortened to the 2,000-character excerpt limit. */
+  shortened?: number;
 }
 export interface LiveStatus {
   available: boolean;

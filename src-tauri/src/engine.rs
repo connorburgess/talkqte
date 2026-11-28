@@ -2433,7 +2433,27 @@ impl Engine {
         &self,
         include_notes: bool,
     ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
-        self.meeting_notes_open()?;
+        self.meeting_notes_input_for(include_notes, false)
+    }
+
+    fn meeting_notes_input_for(
+        &self,
+        include_notes: bool,
+        retry: bool,
+    ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
+        if retry {
+            if !self.state.live || self.state.status != Status::Ended {
+                return Err(crate::meeting_notes::Refusal::NotEnded);
+            }
+            if self.state.meeting_notes == crate::meeting_notes::Phase::Writing {
+                return Err(crate::meeting_notes::Refusal::Writing);
+            }
+            if self.state.meeting_notes != crate::meeting_notes::Phase::Failed {
+                return Err(crate::meeting_notes::Refusal::RetryUnavailable);
+            }
+        } else {
+            self.meeting_notes_open()?;
+        }
         // Notes that silently miss the start of a meeting are worse than
         // none.
         if self.meeting_cut {
@@ -2446,6 +2466,45 @@ impl Engine {
             &self.state.speaker_names,
         )?;
         prepared.check_cap()?;
+        if retry {
+            self.meeting_notes.check_retry(&prepared)?;
+        }
+        Ok(prepared)
+    }
+
+    fn notes_retry_fingerprint(&self, prepared: &crate::meeting_notes::Prepared) -> String {
+        use sha2::{Digest, Sha256};
+        let value = format!(
+            "notes-retry:{}:{}:{}",
+            self.session(),
+            self.meeting_notes.generation(),
+            prepared.fingerprint()
+        );
+        format!("{:x}", Sha256::digest(value.as_bytes()))
+    }
+
+    pub fn meeting_notes_retry_plan(
+        &self,
+        include_notes: bool,
+    ) -> Result<crate::meeting_notes::PlanView, crate::meeting_notes::Refusal> {
+        let prepared = self.meeting_notes_input_for(include_notes, true)?;
+        let mut plan = prepared.plan_view();
+        plan.fingerprint = self.notes_retry_fingerprint(&prepared);
+        Ok(plan)
+    }
+
+    pub fn begin_meeting_notes_retry(
+        &mut self,
+        include_notes: bool,
+        fingerprint: &str,
+    ) -> Result<crate::meeting_notes::Prepared, crate::meeting_notes::Refusal> {
+        let prepared = self.meeting_notes_input_for(include_notes, true)?;
+        if self.notes_retry_fingerprint(&prepared) != fingerprint {
+            return Err(crate::meeting_notes::Refusal::Changed);
+        }
+        self.meeting_notes.begin(&prepared);
+        self.state.meeting_notes = crate::meeting_notes::Phase::Writing;
+        self.changed();
         Ok(prepared)
     }
 
@@ -2495,10 +2554,30 @@ impl Engine {
         if self.session() == session
             && self.state.meeting_notes == crate::meeting_notes::Phase::Writing
         {
-            self.meeting_notes.cancel();
-            self.state.meeting_notes = crate::meeting_notes::Phase::None;
+            self.state.meeting_notes = self.meeting_notes.abandon();
             self.changed();
         }
+    }
+
+    /// Worker callbacks must match both session and request generation.
+    pub fn abandon_meeting_notes_attempt(&mut self, session: u64, generation: u64) {
+        if self.meeting_notes.generation() == generation {
+            self.abandon_meeting_notes(session);
+        }
+    }
+
+    pub fn finish_meeting_notes_attempt(
+        &mut self,
+        session: u64,
+        generation: u64,
+        provider: crate::llm_provider::CueProvider,
+        result: Result<crate::meeting_notes::Draft, crate::meeting_notes::Failure>,
+        spent: Option<u64>,
+    ) -> bool {
+        if self.meeting_notes.generation() != generation {
+            return false;
+        }
+        self.finish_meeting_notes_for(session, provider, result, spent)
     }
 
     /// Records the sent request's outcome, unless a new session has begun.
@@ -5734,6 +5813,7 @@ mod tests {
                 title: title.to_string(),
                 source_date: "2026-11-01".into(),
                 excerpt: format!("About the {}.", title.to_lowercase()),
+                original_chars: None,
                 revision: 1,
             })
             .collect(),
@@ -7155,6 +7235,7 @@ mod tests {
                 title: "Garden welcome guide".into(),
                 source_date: "2026-10-28".into(),
                 excerpt: "Draft a one-page guide with a map of the tool shed.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7163,6 +7244,7 @@ mod tests {
                 title: "Sign".into(),
                 source_date: "2026-11-05".into(),
                 excerpt: "Too short a title to match.".into(),
+                original_chars: None,
                 revision: 1,
             },
         ]);
@@ -7249,6 +7331,7 @@ mod tests {
                         title: "Garden welcome guide".into(),
                         source_date: "2026-10-28".into(),
                         excerpt: "Use the tool shed map.".into(),
+                        original_chars: None,
                         revision: 1,
                     };
                     let mut store = ContextStore::default();
@@ -7413,6 +7496,7 @@ mod tests {
                 title: "Sign".into(),
                 source_date: "2026-11-05".into(),
                 excerpt: "An unrelated imported excerpt.".into(),
+                original_chars: None,
                 revision: 1,
             }]);
             assert!(
@@ -7497,6 +7581,7 @@ mod tests {
                 title: "Weekly planning meeting notes".into(),
                 source_date: "2026-11-01".into(),
                 excerpt: "Agenda items.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7505,6 +7590,7 @@ mod tests {
                 title: "Orchard volunteer handover plan for spring planting season and watering schedule".into(),
                 source_date: "2026-11-02".into(),
                 excerpt: "Seedling trays go to the north shed.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7513,6 +7599,7 @@ mod tests {
                 title: "Jardín opening".into(),
                 source_date: "2026-11-03".into(),
                 excerpt: "Menu draft.".into(),
+                original_chars: None,
                 revision: 1,
             },
         ]);

@@ -149,6 +149,7 @@ mod tests {
             title: "Fictional garden guide".into(),
             source_date: "2026-11-01".into(),
             excerpt: "The guide needs two days of review.".into(),
+            original_chars: None,
         }
     }
 

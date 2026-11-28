@@ -343,21 +343,63 @@ export function pickContextFile(): PickedNotes {
       asksForDates: false,
     };
   }
+  if (kind === 'batch') {
+    pickedNotes = [...noteFiles.markdown.notes, ...noteFiles.text.notes];
+    return {
+      fileName: '3 files',
+      skipped: 0,
+      asksForDates: true,
+      files: [
+        { fileName: 'Reference.md', noteCount: 1, error: null },
+        { fileName: 'Rota.txt', noteCount: 1, error: null },
+        {
+          fileName: 'Unreadable.md',
+          noteCount: 0,
+          error: 'The file could not be read.',
+        },
+      ],
+      notes: pickedNotes.map((note, index) => ({
+        sourceId: note.sourceId,
+        title: note.title,
+        sourceDate: note.sourceDate,
+        preview: note.excerpt,
+        fileName: index === 0 ? 'Reference.md' : 'Rota.txt',
+      })),
+    };
+  }
   if (refusedFiles[kind]) throw new Error(refusedFiles[kind]);
-  const file = noteFiles[kind] ?? {
-    fileName: 'garden-notes.json',
-    notes: exampleNotes,
-  };
+  const file =
+    kind === 'long'
+      ? {
+          fileName: 'Fictional reference.md',
+          notes: [
+            {
+              provider: 'file' as const,
+              sourceId: 'file-long-reference',
+              title: 'Fictional reference',
+              sourceDate: '',
+              excerpt: 'é'.repeat(2000) + 'Tail not imported.',
+              revision: 1,
+            },
+          ],
+        }
+      : (noteFiles[kind] ?? {
+          fileName: 'garden-notes.json',
+          notes: exampleNotes,
+        });
   pickedNotes = file.notes;
   return {
     fileName: file.fileName,
     skipped: 0,
-    asksForDates: !!noteFiles[kind],
+    asksForDates: !!noteFiles[kind] || kind === 'long',
     notes: file.notes.map((note) => ({
       sourceId: note.sourceId,
       title: note.title,
       sourceDate: note.sourceDate,
-      preview: note.excerpt,
+      preview: note.excerpt.slice(0, 120),
+      ...(Array.from(note.excerpt.trim()).length > 2000
+        ? { originalChars: Array.from(note.excerpt.trim()).length }
+        : {}),
     })),
   };
 }
@@ -371,21 +413,34 @@ export function importContextNotes(
     unchanged: 0,
     overLimit: 0,
     rejected: 0,
+    shortened: 0,
   };
   for (const picked of pickedNotes) {
     if (!ids.includes(picked.sourceId)) continue;
     // An entered date fills only a Markdown or text note without one.
     const asks = pickedNotes !== exampleNotes;
-    const note = {
+    const trimmed = picked.excerpt.trim();
+    const chars = Array.from(trimmed);
+    const originalChars =
+      chars.length > 2000
+        ? chars.length
+        : picked.originalChars && picked.originalChars > 2000
+          ? picked.originalChars
+          : undefined;
+    const note: ContextItem = {
       ...picked,
+      excerpt: chars.slice(0, 2000).join(''),
+      ...(originalChars ? { originalChars } : {}),
       sourceDate: picked.sourceDate || (asks && dates[picked.sourceId]) || '',
     };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate)) outcome.rejected++;
+    if (note.sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(note.sourceDate))
+      outcome.rejected++;
     else if (contextItems.some((item) => item.sourceId === note.sourceId))
       outcome.unchanged++;
     else {
       contextItems.push(structuredClone(note));
       outcome.added++;
+      if (note.originalChars) outcome.shortened = (outcome.shortened ?? 0) + 1;
     }
   }
   emitContext();

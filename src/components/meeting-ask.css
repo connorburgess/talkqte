@@ -167,7 +167,8 @@
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
-.transcript-segment:focus {
+.transcript-segment:focus,
+.transcript-line:focus {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }

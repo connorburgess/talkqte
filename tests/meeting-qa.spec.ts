@@ -177,7 +177,10 @@ test('new speech preserves scroll position while reading earlier transcript', as
         id: `qa-${i}`,
         atMs: i * 1000,
         speaker: 'Speaker',
-        text: `Fictional greenhouse discussion ${i}.`,
+        text:
+          i === 1
+            ? 'We chose a Saturday greenhouse check.'
+            : `Fictional greenhouse discussion ${i}.`,
       })),
     }),
   );

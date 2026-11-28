@@ -167,9 +167,9 @@ export function MeetingNotesModel({
       </div>
       <p id={`${id}-help`} className="provider-key-role">
         Generates notes from a transcript using your {cueProviderName(provider)}{' '}
-        key (one request per meeting, confirmed first; now {model ?? '…'}).
-        Leave custom blank for the curated model; cost estimates are unavailable
-        for custom IDs.
+        key (one request, plus one reviewed retry after failed validation; now{' '}
+        {model ?? '…'}). Leave custom blank for the curated model; cost
+        estimates are unavailable for custom IDs.
       </p>
       {error ? (
         <p id={`${id}-error`} className="provider-keys-error" role="alert">

@@ -73,10 +73,14 @@ pub struct ContextItem {
     pub source_id: String,
     /// At most `MAX_TITLE_CHARS`; "Untitled note" when empty.
     pub title: String,
-    /// The note's own date, YYYY-MM-DD, shown beside it.
+    /// The source date, YYYY-MM-DD; empty means unknown for file notes only.
     pub source_date: String,
     /// The selected excerpt, at most `MAX_EXCERPT_CHARS`.
     pub excerpt: String,
+    /// Original trimmed character count when shortened to `MAX_EXCERPT_CHARS`;
+    /// omitted when the note fit within the limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_chars: Option<usize>,
     /// Increases when the provider's note changes.
     pub revision: u64,
 }
@@ -111,9 +115,9 @@ pub trait NoteSource {
     fn provider(&self) -> Provider;
     fn capabilities(&self) -> Capabilities;
     fn fetch(&mut self, selection: &[String]) -> Result<Vec<ContextItem>, SourceError>;
-    /// Whether the chooser asks the person for the date of a note that has
-    /// none. Only a Markdown or plain-text file does; other sources state
-    /// their dates, and a note without one is skipped.
+    /// Whether the chooser offers an optional date for a file note that has
+    /// none. File batches include explicitly undated JSON entries; a direct
+    /// single JSON source keeps its supplied date. Other providers require dates.
     fn asks_for_dates(&self) -> bool {
         false
     }
@@ -182,8 +186,11 @@ pub struct MergeOutcome {
     /// Not imported because the store already holds `MAX_ITEMS` notes.
     pub over_limit: usize,
     /// Dropped because they were not selected, came from another provider,
-    /// or lacked a valid ID, date, or text.
+    /// or lacked a valid ID, permitted source date, or text.
     pub rejected: usize,
+    /// Added or updated notes whose trimmed text exceeded `MAX_EXCERPT_CHARS`
+    /// and was shortened to an excerpt.
+    pub shortened: usize,
 }
 
 /// Imported prior context for this app session, held in memory only.
@@ -217,15 +224,22 @@ impl ContextStore {
             let kept = self.items.iter().position(|kept| {
                 kept.provider == item.provider && kept.source_id == item.source_id
             });
+            let shortened = item.original_chars.is_some();
             match kept {
                 Some(index) if item.revision > self.items[index].revision => {
                     self.items[index] = item;
                     outcome.updated += 1;
+                    if shortened {
+                        outcome.shortened += 1;
+                    }
                 }
                 Some(_) => outcome.unchanged += 1,
                 None if self.items.len() < MAX_ITEMS => {
                     self.items.push(item);
                     outcome.added += 1;
+                    if shortened {
+                        outcome.shortened += 1;
+                    }
                 }
                 None => outcome.over_limit += 1,
             }
@@ -302,15 +316,24 @@ pub(crate) fn valid_date(date: &str) -> bool {
 }
 
 /// Accepts an item only if it came from this provider and has a clean ID, a
-/// real date, and some text; trims the ID, title, and excerpt.
+/// real date (or an explicitly unknown file date), and text; trims fields.
 fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
     item.source_id = item.source_id.trim().to_string();
-    item.excerpt = item
-        .excerpt
-        .trim()
-        .chars()
-        .take(MAX_EXCERPT_CHARS)
-        .collect();
+    let trimmed = item.excerpt.trim();
+    let trimmed_chars = trimmed.chars().count();
+    item.original_chars = if trimmed_chars > MAX_EXCERPT_CHARS {
+        Some(
+            item.original_chars
+                .unwrap_or(trimmed_chars)
+                .max(trimmed_chars),
+        )
+    } else if !trimmed.is_empty() {
+        item.original_chars
+            .filter(|&count| count > MAX_EXCERPT_CHARS)
+    } else {
+        None
+    };
+    item.excerpt = trimmed.chars().take(MAX_EXCERPT_CHARS).collect();
     item.title = item.title.trim().chars().take(MAX_TITLE_CHARS).collect();
     if item.title.is_empty() {
         item.title = "Untitled note".into();
@@ -323,7 +346,8 @@ fn validated(mut item: ContextItem, provider: Provider) -> Option<ContextItem> {
             .any(|c| c.is_control() || invisible(c));
     (item.provider == provider
         && id_ok
-        && valid_date(&item.source_date)
+        && (valid_date(&item.source_date)
+            || (provider == Provider::File && item.source_date.is_empty()))
         && !item.excerpt.is_empty())
     .then_some(item)
 }
@@ -343,6 +367,7 @@ mod tests {
             excerpt:
                 "Jordan offered to draft the welcome guide; the printing budget is still open."
                     .into(),
+            original_chars: None,
             revision,
         }
     }
@@ -566,15 +591,66 @@ mod tests {
 
     #[test]
     fn excerpts_and_the_store_stay_small_and_the_limit_is_reported() {
+        let mut exact = note("exact", 1);
+        exact.excerpt = "é".repeat(MAX_EXCERPT_CHARS);
         let mut long = note("n1", 1);
-        long.excerpt = "a".repeat(MAX_EXCERPT_CHARS + 500);
+        long.excerpt = format!(" {} ", "é".repeat(MAX_EXCERPT_CHARS + 500));
         let mut store = ContextStore::default();
-        store.merge(Provider::Granola, &ids(&["n1"]), vec![long]);
+        let first = store.merge(
+            Provider::Granola,
+            &ids(&["exact", "n1"]),
+            vec![exact, long.clone()],
+        );
+        assert_eq!((first.added, first.shortened), (2, 1));
         assert_eq!(store.items()[0].excerpt.chars().count(), MAX_EXCERPT_CHARS);
+        assert_eq!(store.items()[0].original_chars, None);
+        assert_eq!(store.items()[1].excerpt.chars().count(), MAX_EXCERPT_CHARS);
+        assert_eq!(
+            store.items()[1].original_chars,
+            Some(MAX_EXCERPT_CHARS + 500)
+        );
+        // Unchanged re-import does not report a newly shortened note.
+        let again = store.merge(Provider::Granola, &ids(&["n1"]), vec![long.clone()]);
+        assert_eq!((again.unchanged, again.shortened), (1, 0));
+        // Updating a shortened note with a newer revision counts as shortened;
+        // updating it to fit within the limit clears original_chars.
+        let mut updated_long = long;
+        updated_long.revision = 2;
+        updated_long.excerpt = "é".repeat(MAX_EXCERPT_CHARS + 1);
+        let upd = store.merge(Provider::Granola, &ids(&["n1"]), vec![updated_long]);
+        assert_eq!((upd.updated, upd.shortened), (1, 1));
+        assert_eq!(store.items()[1].original_chars, Some(MAX_EXCERPT_CHARS + 1));
+        let mut updated_short = note("n1", 3);
+        updated_short.excerpt = "Short enough now.".into();
+        let fit = store.merge(Provider::Granola, &ids(&["n1"]), vec![updated_short]);
+        assert_eq!((fit.updated, fit.shortened), (1, 0));
+        assert_eq!(store.items()[1].original_chars, None);
+        // Upstream truncation preserves original_chars even if char 2,000 was whitespace.
+        let mut upstream = note("n2", 1);
+        upstream.excerpt = format!("{}  ", "a".repeat(MAX_EXCERPT_CHARS - 2));
+        upstream.original_chars = Some(MAX_EXCERPT_CHARS + 320);
+        let up = store.merge(Provider::Granola, &ids(&["n2"]), vec![upstream]);
+        assert_eq!((up.added, up.shortened), (1, 1));
+        assert_eq!(
+            store.items()[2].original_chars,
+            Some(MAX_EXCERPT_CHARS + 320)
+        );
+        // Over-limit notes are never counted as shortened.
         let names: Vec<String> = (0..MAX_ITEMS + 5).map(|n| format!("m{n}")).collect();
-        let many = names.iter().map(|id| note(id, 1)).collect();
+        let many: Vec<ContextItem> = names
+            .iter()
+            .map(|id| {
+                let mut item = note(id, 1);
+                item.excerpt = "x".repeat(MAX_EXCERPT_CHARS + 10);
+                item
+            })
+            .collect();
         let outcome = store.merge(Provider::Granola, &names, many);
-        assert_eq!((outcome.added, outcome.over_limit), (MAX_ITEMS - 1, 6));
+        let added = MAX_ITEMS - 3;
+        assert_eq!(
+            (outcome.added, outcome.over_limit, outcome.shortened),
+            (added, 8, added)
+        );
         assert_eq!(store.items().len(), MAX_ITEMS);
     }
 
@@ -602,5 +678,34 @@ mod tests {
         };
         let (result, _) = fetch(&mut source);
         assert_eq!((result, source.calls), (Err(FetchError::NotSupported), 0));
+    }
+}
+
+#[cfg(test)]
+mod unknown_file_date_tests {
+    use super::*;
+    #[test]
+    fn only_file_sources_can_keep_an_unknown_date_and_known_dates_are_preserved() {
+        let note = |provider, date: &str| ContextItem {
+            provider,
+            source_id: "fictional-reference".into(),
+            title: "Reference".into(),
+            source_date: date.into(),
+            excerpt: "Fixed journeys use authored frames.".into(),
+            original_chars: None,
+            revision: 1,
+        };
+        for provider in [Provider::File, Provider::Granola, Provider::History] {
+            let mut store = ContextStore::default();
+            let outcome = store.merge(
+                provider,
+                &["fictional-reference".into()],
+                vec![note(provider, "")],
+            );
+            assert_eq!(outcome.added, usize::from(provider == Provider::File));
+            assert_eq!(outcome.rejected, usize::from(provider != Provider::File));
+        }
+        assert!(validated(note(Provider::File, "2026-11-04"), Provider::File).is_some());
+        assert!(validated(note(Provider::File, "2026-02-30"), Provider::File).is_none());
     }
 }

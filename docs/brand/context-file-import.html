@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>File context review · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/tokens.css" />
+    <style>
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.5 system-ui;
+        margin: 32px auto;
+        padding: 0 20px;
+        max-width: 760px;
+      }
+      section {
+        margin-block: 32px;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+      }
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        min-height: 44px;
+        padding: 8px;
+      }
+      p {
+        max-width: 65ch;
+      }
+      .muted {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>File context review</h1>
+    <p>
+      Implemented interaction states shown with fictional references. Native
+      picker and VoiceOver acceptance remain unverified.
+    </p>
+    <section>
+      <h2>Mixed batch · one note explicitly selected</h2>
+      <p>
+        3 files · 2 readable notes. Choose up to 20 files, 1 MB each and 4 MB
+        total.
+      </p>
+      <ul>
+        <li>Reference.md · 1 note ready</li>
+        <li>Rota.txt · 1 note ready</li>
+        <li>Unreadable.md · 0 notes ready. The file could not be read.</li>
+      </ul>
+      <label
+        ><input type="checkbox" checked /> Fictional rendering reference</label
+      >
+      <p class="muted">Unknown date</p>
+      <label>Source date · optional <input type="date" /></label>
+      <p>
+        Leave blank to keep the source date unknown. Import time is not used.
+      </p>
+      <button>Import 1 selected</button>
+      <p>
+        Nothing is selected automatically. Provider processing requires a
+        separate review.
+      </p>
+    </section>
+    <section>
+      <h2>Known source date</h2>
+      <p>
+        Fictional rota · <time datetime="2026-11-04">2026-11-04</time>. Source
+        date is preserved; there is no replacement field.
+      </p>
+    </section>
+    <section>
+      <h2>No readable notes</h2>
+      <p>
+        No readable notes are ready. Review file results, cancel and choose
+        other files. Nothing was imported.
+      </p>
+      <button disabled>Import selected</button>
+    </section>
+    <section>
+      <h2>Optional date is invalid</h2>
+      <p>Enter a valid source date, or clear it to keep the date unknown.</p>
+      <button disabled>Import selected</button>
+    </section>
+    <section>
+      <h2>Import pending or canceled</h2>
+      <p>
+        Reading selected notes… You can cancel without importing. A
+        canceled/replaced chooser cannot install its late result.
+      </p>
+      <button>Cancel</button>
+    </section>
+    <section>
+      <h2>Imported reference</h2>
+      <p>Fictional rendering reference · Unknown date · From a file</p>
+      <p>Fixed journeys use authored frames.</p>
+      <button>Remove reference</button>
+      <p>
+        Reference material is not current meeting evidence. No date, recency or
+        provider approval is inferred.
+      </p>
+    </section>
+    <section>
+      <h2>Long reference · excerpt disclosure</h2>
+      <p>
+        Chooser: Shortened on import: keeps first 2,000 of 5,420 characters.
+      </p>
+      <p>Import notice: 1 imported · 1 shortened to first 2,000 characters.</p>
+      <p>
+        Imported list: Excerpt · 2,000 / 5,420 chars. Excerpt only: kept first
+        2,000 of 5,420 characters. The rest of the original note was not
+        imported.
+      </p>
+      <p>
+        Processing review: first 2,000 of 5,420 chars only. Separate approval is
+        still required. Short notes show no shortening label; Granola listing
+        has no original count until its body is fetched.
+      </p>
+    </section>
+  </body>
+</html>

@@ -486,7 +486,11 @@ impl Meeting {
             (None, Some(n)) => n.to_string(),
             (None, None) => return None,
         };
-        let excerpt: String = excerpt
+        let trimmed = excerpt.trim();
+        let trimmed_chars = trimmed.chars().count();
+        let original_chars =
+            (trimmed_chars > crate::context::MAX_EXCERPT_CHARS).then_some(trimmed_chars);
+        let excerpt: String = trimmed
             .chars()
             .take(crate::context::MAX_EXCERPT_CHARS)
             .collect();
@@ -496,6 +500,7 @@ impl Meeting {
             title: self.title.clone(),
             source_date,
             excerpt,
+            original_chars,
             revision: self.revision,
         })
     }
@@ -565,10 +570,12 @@ impl HistorySource {
         self.items
             .iter()
             .map(|item| crate::notes_file::NoteSummary {
+                file_name: None,
                 source_id: item.source_id.clone(),
                 title: item.title.clone(),
                 source_date: item.source_date.clone(),
                 preview: preview_of(&item.excerpt),
+                original_chars: item.original_chars,
             })
             .collect()
     }

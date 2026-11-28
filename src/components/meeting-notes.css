@@ -30,7 +30,9 @@
   letter-spacing: -0.01em;
   line-height: 1.35;
 }
-.meeting-notes h3:focus {
+.meeting-notes h3:focus,
+.meeting-notes-error:focus,
+.meeting-notes:focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
   border-radius: var(--radius-control);
@@ -87,7 +89,8 @@
   font-size: 13.5px;
 }
 .meeting-notes-result,
-.meeting-notes-writing {
+.meeting-notes-writing,
+.meeting-notes-retry {
   display: grid;
   gap: var(--space-12);
   min-width: 0;
@@ -229,4 +232,8 @@
     transition: none;
     animation: none;
   }
+}
+
+.meeting-notes-retry {
+  overflow-wrap: anywhere;
 }

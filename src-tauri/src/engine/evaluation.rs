@@ -1950,6 +1950,7 @@ mod tests {
             title: "Garden review".into(),
             source_date: "2026-11-01".into(),
             excerpt: "Legal review takes two days.".into(),
+            original_chars: None,
             revision: 7,
         }
     }
@@ -2248,6 +2249,7 @@ mod tests {
             title: "Earlier launch review".into(),
             source_date: "2026-11-01".into(),
             excerpt: "Selected prior excerpt".into(),
+            original_chars: None,
             revision: 1,
         };
         h.engine.set_notes(vec![imported.clone()]);
@@ -2861,6 +2863,7 @@ mod tests {
             title: "Earlier launch review".into(),
             source_date: "2026-11-01".into(),
             excerpt: "Selected prior excerpt".into(),
+            original_chars: None,
             revision: 1,
         };
         h.engine.set_notes(vec![note]);
@@ -3640,6 +3643,7 @@ mod tests {
                     title: "Earlier review".into(),
                     source_date: "2026-11-01".into(),
                     excerpt: "A newly selected fictional note.".into(),
+                    original_chars: None,
                     revision: 1,
                 }]),
                 _ => (),
