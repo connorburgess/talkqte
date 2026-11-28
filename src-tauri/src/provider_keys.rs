@@ -598,7 +598,11 @@ impl Keys {
             let entry = &mut memo[provider.index()];
             // Retire old work even if the platform write fails ambiguously.
             entry.revision = entry.revision.checked_add(1).ok_or(KeyError::Store)?;
+            // A platform error can follow an actual mutation. Neither old
+            // authentication flag nor cached presence describes that result.
             entry.verified = false;
+            entry.rejected = false;
+            entry.present = None;
             self.store
                 .set(provider.account(), &secret)
                 .map_err(store_error)?;
@@ -613,7 +617,11 @@ impl Keys {
             let mut memo = self.memo();
             let entry = &mut memo[provider.index()];
             entry.revision = entry.revision.checked_add(1).ok_or(KeyError::Store)?;
+            // A platform error can follow an actual mutation. Neither old
+            // authentication flag nor cached presence describes that result.
             entry.verified = false;
+            entry.rejected = false;
+            entry.present = None;
             self.store.delete(provider.account()).map_err(store_error)?;
             entry.present = Some(false);
             entry.rejected = false;
@@ -985,7 +993,12 @@ mod tests {
         }
         for remove in [false, true] {
             for write_before_error in [false, true] {
-                for answer in [ProbeResult::Accepted, ProbeResult::Rejected] {
+                for (previous, answer) in [
+                    (ProbeResult::Accepted, ProbeResult::Accepted),
+                    (ProbeResult::Accepted, ProbeResult::Rejected),
+                    (ProbeResult::Rejected, ProbeResult::Accepted),
+                    (ProbeResult::Rejected, ProbeResult::Rejected),
+                ] {
                     let fail = Arc::new(AtomicBool::new(false));
                     let keys = Keys::new(
                         Box::new(Faulty {
@@ -997,8 +1010,11 @@ mod tests {
                     );
                     keys.set(Provider::Anthropic, ANTHROPIC).unwrap();
                     let (_, old) = keys.get_with_revision(Provider::Anthropic).unwrap();
-                    keys.apply_result(&old, ProbeResult::Accepted);
-                    assert!(keys.status().anthropic.verified);
+                    keys.apply_result(&old, previous);
+                    assert_eq!(
+                        keys.status().anthropic.verified,
+                        previous == ProbeResult::Accepted
+                    );
                     fail.store(true, Ordering::Release);
                     let result = if remove {
                         keys.remove(Provider::Anthropic)

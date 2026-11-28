@@ -89,7 +89,7 @@ one.
   appear in diagnostics. Existing cancellation/source-withdrawal checks apply
   before the revision check; an already-sent request cannot be recalled.
 - A failed store write or removal also retires older observations and clears
-  verification, including when the platform may have changed the item before
+  cached presence, verification and rejection, including when the platform may have changed the item before
   returning an error. It does not infer success or verify any credential. A
   fresh read can obtain a new receipt for whatever the store actually contains.
 - Checking whether a key is set does not unlock the Linux keyring: it searches
