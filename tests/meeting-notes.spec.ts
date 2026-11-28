@@ -463,12 +463,13 @@ test('unknown model pricing blocks retry planning without a second write', async
   page,
 }) => {
   await failFragmentedMeeting(page);
-  await page.evaluate(async () => {
-    // Fictional model setting, no credential or provider access.
-    await window.__TAURI_INTERNALS__.invoke('set_notes_model_override', {
-      model: 'fictional-custom-notes-model',
-    });
-  });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByText('Custom model ID & meeting notes model').click();
+  await page
+    .getByLabel('Custom meeting notes model ID (optional)')
+    .fill('fictional-custom-notes-model');
+  await page.getByRole('button', { name: 'Save notes model' }).click();
+  await page.getByRole('button', { name: 'Notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Review one retry' }).click();
   await expect(notesSection(page).getByRole('alert')).toContainText(
     'unknown model pricing',
