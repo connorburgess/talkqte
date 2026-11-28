@@ -1395,3 +1395,70 @@ fn ask_snapshot_rejects_edited_deleted_and_unavailable_saved_revisions() {
         .with_question_snapshot(&saved.id, saved.revision, |_| ())
         .is_err());
 }
+
+#[test]
+fn saved_mutations_withdraw_pending_ask_before_its_next_transport_check() {
+    for change in [
+        "rename",
+        "update",
+        "move",
+        "archive",
+        "delete",
+        "delete-all",
+        "folder-rename",
+        "folder-delete",
+    ] {
+        let folder = Folder::new("ask-withdraw");
+        let store = folder.store();
+        store.create_folder("Fictional folder").unwrap();
+        let saved = store
+            .keep(
+                "Fictional seed review",
+                content(1000, "Keep seed trays indoors."),
+            )
+            .unwrap();
+        let moved = store
+            .set_folder(&saved.id, Some("Fictional folder"))
+            .unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        store
+            .with_question_snapshot(&saved.id, moved.revision, |_| {
+                store.track_question(&saved.id, flag.clone()).unwrap()
+            })
+            .unwrap();
+        match change {
+            "rename" => {
+                store.rename(&saved.id, "Fictional renamed review").unwrap();
+            }
+            "update" => {
+                store
+                    .update(&saved.id, content(1000, "Move seed trays outdoors."))
+                    .unwrap();
+            }
+            "move" => {
+                store.set_folder(&saved.id, None).unwrap();
+            }
+            "archive" => {
+                store.set_archived(&saved.id, true).unwrap();
+            }
+            "delete" => {
+                store.delete(&saved.id).unwrap();
+            }
+            "delete-all" => {
+                store.delete_all().unwrap();
+            }
+            "folder-rename" => {
+                store
+                    .rename_folder("Fictional folder", "Fictional renamed folder")
+                    .unwrap();
+            }
+            _ => {
+                store.delete_folder("Fictional folder").unwrap();
+            }
+        }
+        assert!(
+            flag.load(Ordering::Acquire),
+            "{change} must suppress a pending send/result"
+        );
+    }
+}

@@ -169,11 +169,17 @@ pub async fn ask_question(
     let sent_question = question.clone();
     let p = if let Some(selected) = saved.clone() {
         let source = selected.source();
+        let store_app = app.clone();
         saved_access(&app, selected, move |record, meeting| {
             if !record.matches_saved(meeting) || record.source() != Some(&source) {
                 return Err(CHANGED.into());
             }
-            record.begin(&ticket, &question, &target)
+            let request = record.begin(&ticket, &question, &target)?;
+            store_app
+                .state::<Store>()
+                .track_question(&meeting.id, request.withdrawal())
+                .map_err(|_| CHANGED.to_string())?;
+            Ok(request)
         })
         .await?
     } else {

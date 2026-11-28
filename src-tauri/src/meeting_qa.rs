@@ -76,6 +76,9 @@ impl Prepared {
     pub fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Acquire) || self.started.elapsed() >= DEADLINE
     }
+    pub(crate) fn withdrawal(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
     pub fn body(&self) -> &Value {
         &self.body
     }
@@ -832,9 +835,9 @@ mod tests {
     #[test]
     fn unicode_and_escaped_questions_fit_reserved_actual_provider_bodies() {
         for model in [
-            llm_provider::ANTHROPIC_MODELS[0],
-            llm_provider::OPENAI_MODELS[0],
-            llm_provider::GEMINI_MODELS[0],
+            &llm_provider::ANTHROPIC_MODELS[0],
+            &llm_provider::OPENAI_MODELS[0],
+            &llm_provider::GEMINI_MODELS[0],
         ] {
             for question in [
                 "🪴".repeat(1000),
@@ -843,7 +846,7 @@ mod tests {
                 "a\t".repeat(500),
             ] {
                 let mut r = Record::default();
-                let target = ResolvedModel::from_curated(&model);
+                let target = ResolvedModel::from_curated(model);
                 let scope = r.prepare(&lines(3), target.clone()).unwrap();
                 let p = r.begin(&scope.ticket, &question, &target).unwrap();
                 let bytes = serde_json::to_vec(p.body()).unwrap().len();
