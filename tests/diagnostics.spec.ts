@@ -127,3 +127,81 @@ test('diagnostics show codes and settings, never meeting content, and copy only 
     ]),
   ).toEqual([0, 0]);
 });
+
+test('diagnostics do not attribute stale usage to a provider-free or unrelated session', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const reports = await page.evaluate(async () => {
+    const modulePath = '/src/lib/diagnostics.ts';
+    const { diagnosticsReport } = await import(/* @vite-ignore */ modulePath);
+    const base = {
+      desktop: true,
+      liveAvailable: true,
+      session: {
+        live: true,
+        simulated: false,
+        status: 'running',
+        elapsedMs: 1_000,
+        transcript: [],
+      },
+      processing: {
+        phase: 'unavailable',
+        processor: null,
+        approved: null,
+        issue: null,
+        capture: 'running',
+      },
+      usage: {
+        provider: 'anthropic',
+        model: 'claude-haiku-5-5',
+        requests: 12,
+        requestCap: 400,
+        spentMicroUsd: 1_000,
+        spendCapMicroUsd: 500_000,
+        customModel: false,
+      },
+      keys: null,
+      microphone: null,
+      preferences: null,
+      transcriptionProvider: null,
+      language: null,
+    };
+    const report = (
+      processor: string | null,
+      live = true,
+      status = 'running',
+    ) =>
+      diagnosticsReport({
+        ...base,
+        session: { ...base.session, live, simulated: !live, status },
+        processing: {
+          ...base.processing,
+          processor: processor ? { id: processor } : null,
+        },
+      });
+    return {
+      noProcessor: report(null),
+      otherProvider: report('openai-api'),
+      lab: report('lab-api-selected-prior-v2'),
+      simulated: report('anthropic-api', false),
+      current: report('anthropic-api'),
+      ended: report('anthropic-api', true, 'ended'),
+    };
+  });
+  for (const name of [
+    'noProcessor',
+    'otherProvider',
+    'lab',
+    'simulated',
+  ] as const) {
+    expect(reports[name], name).toContain('Cue requests: -\n');
+    expect(reports[name], name).toContain('Estimated cue spend (USD): -\n');
+  }
+  for (const name of ['current', 'ended'] as const) {
+    expect(reports[name], name).toContain('Cue requests: 12 of 400\n');
+    expect(reports[name], name).toContain(
+      'Estimated cue spend (USD): 0.001 of 0.50\n',
+    );
+  }
+});

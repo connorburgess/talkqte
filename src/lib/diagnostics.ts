@@ -54,7 +54,22 @@ function flag(value: unknown): string {
 
 /** The report as plain lines of `name: value`. */
 export function diagnosticsReport(input: DiagnosticsInput): string {
-  const { session, processing, microphone, keys, usage, preferences } = input;
+  const { session, processing, microphone, keys, preferences } = input;
+  // Native usage is process-global and can outlive an evaluator. Do not
+  // attribute it to a provider-free, simulated or different-provider session.
+  // This is a display guard, not proof of session identity or model decisions.
+  const processor = processing?.processor?.id;
+  const expectedProcessor = input.usage?.provider
+    ? {
+        anthropic: 'anthropic-api',
+        openai: 'openai-api',
+        gemini: 'gemini-api',
+      }[input.usage.provider]
+    : undefined;
+  const usage =
+    session?.live && expectedProcessor && processor === expectedProcessor
+      ? input.usage
+      : null;
   const transcription = session?.transcription;
   const sources = session?.sources;
   const key = (provider: KeyProvider) => {
