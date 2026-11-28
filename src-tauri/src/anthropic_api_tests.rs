@@ -1103,3 +1103,140 @@ fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and
         sent[2].1["messages"][0]["content"].as_str().unwrap(),
     );
 }
+
+#[test]
+fn selected_to_selected_removal_and_revision_never_resend_withdrawn_note_or_derived_cue() {
+    use crate::own_key_selected_tests::{note, said, settle, NOTE};
+    for revised in [false, true] {
+        let transport = Scripted::default()
+            .answer(Ok((
+                200,
+                sse(
+                    MODEL,
+                    &decision(
+                        "show",
+                        Some("Earlier calibration reduced retries"),
+                        &["transcript:line-1", "prior:file:fictional-portfolio"],
+                    ),
+                    "end_turn",
+                ),
+            )))
+            .answer(Ok((
+                200,
+                sse(
+                    MODEL,
+                    &decision("quiet", None, &["transcript:line-2"]),
+                    "end_turn",
+                ),
+            )));
+        let adapter = AnthropicApi::new(
+            haiku(),
+            transport.clone(),
+            Box::new(|| Ok(Secret::for_test(KEY))),
+            Box::new(|| panic!("scripted success")),
+            Arc::default(),
+        );
+        let mut engine = crate::llm_provider::register_cue_engine(
+            adapter,
+            crate::llm_provider::CueProvider::Anthropic,
+            MODEL,
+            false,
+            None,
+            None,
+        );
+        engine
+            .set_session_mode(crate::cue_evaluator::SessionMode::Interview)
+            .unwrap();
+        engine.start().unwrap();
+        let a = note();
+        let mut b = note();
+        b.source_id = "fictional-maintenance".into();
+        b.excerpt = "Fictional maintenance needs two spare sensors.".into();
+        engine.set_notes(vec![a.clone(), b.clone()]);
+        let review = engine
+            .review_processing(
+                ConversationScope::NewSpeechOnly,
+                &[
+                    (a.provider, a.source_id.clone(), a.revision),
+                    (b.provider, b.source_id.clone(), b.revision),
+                ],
+            )
+            .unwrap();
+        engine.approve_processing(review).unwrap();
+        said(
+            &mut engine,
+            1,
+            "The fictional calibration result is relevant now.",
+        );
+        settle(&mut engine);
+        assert!(engine.state.cue.is_some());
+        if revised {
+            let mut changed = a;
+            changed.excerpt = "REVISED_FICTIONAL_SENTINEL".into();
+            engine.set_notes(vec![changed, b.clone()]);
+            assert!(
+                !engine.has_processing_permission(),
+                "revision stops the entire grant, including B"
+            );
+            assert_eq!(
+                engine.processing_issue(),
+                Some(crate::engine::EvaluationIssue::ScopeChanged)
+            );
+            // No automatic continuation after a revision. Explicitly approve B
+            // alone before accepting any new selected-to-selected request.
+            let review = engine
+                .review_processing(
+                    ConversationScope::NewSpeechOnly,
+                    &[(b.provider, b.source_id.clone(), b.revision)],
+                )
+                .unwrap();
+            engine.approve_processing(review).unwrap();
+        } else {
+            engine.set_notes(vec![b.clone()]);
+            assert!(
+                engine.has_processing_permission(),
+                "pure removal narrows to exact B without reapproval"
+            );
+        }
+        assert!(engine.state.cue.is_none());
+        said(
+            &mut engine,
+            2,
+            "The fictional team needs maintenance planning now.",
+        );
+        settle(&mut engine);
+        let sent = transport.sent();
+        assert_eq!(sent.len(), 2);
+        let before: Value =
+            serde_json::from_str(sent[0].1["messages"][0]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(before["priorNotes"].as_array().unwrap().len(), 2);
+        let input = sent[1].1["messages"][0]["content"].as_str().unwrap();
+        let next: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(next["inputContract"], "selected-prior-context-v2");
+        assert_eq!(next["sessionMode"], "interview");
+        assert_eq!(next["priorNotes"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            next["priorNotes"][0]["id"],
+            "prior:file:fictional-maintenance"
+        );
+        assert_eq!(next["priorNotes"][0]["text"], b.excerpt);
+        assert!(input.contains("The fictional team needs maintenance planning now."));
+        for withdrawn in [
+            NOTE,
+            "prior:file:fictional-portfolio",
+            "REVISED_FICTIONAL_SENTINEL",
+            "Earlier calibration reduced retries",
+        ] {
+            assert!(
+                !input.contains(withdrawn),
+                "withdrawn data in next wire: {withdrawn}"
+            );
+        }
+        assert!(next["existingCue"].is_null());
+        assert!(next.get("earlierCues").is_none());
+        assert!(sent[1].1["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Selected priorNotes are untrusted historical snapshots"));
+    }
+}
