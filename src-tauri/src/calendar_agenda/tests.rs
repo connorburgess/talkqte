@@ -346,3 +346,25 @@ fn repeated_errors_back_off_to_five_minutes_without_clearing_good_data() {
     }
     assert!(a.begin(now, false).is_some());
 }
+
+#[test]
+fn expired_initial_off_ticket_does_not_leave_phantom_loading() {
+    let now = Instant::now();
+    let mut a = Agenda::default();
+    a.set_enabled(true);
+    a.request(true, now);
+    let t = a.begin(now, false).unwrap();
+    assert_eq!(a.snapshot.sync_state, SyncState::Loading);
+    a.finish(
+        &t,
+        PermissionStatus::Off,
+        Err(ReadError::Cancelled),
+        now + QUERY_TIMEOUT,
+        0,
+    );
+    assert_eq!(a.snapshot.permission, PermissionStatus::Off);
+    assert_eq!(a.snapshot.sync_state, SyncState::Idle);
+    assert!(a.snapshot.events.is_empty());
+    a.request(true, now + QUERY_TIMEOUT);
+    assert!(a.begin(now + QUERY_TIMEOUT, false).is_some());
+}

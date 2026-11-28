@@ -456,6 +456,12 @@ impl Agenda {
         }
         self.permission(auth);
         if auth != PermissionStatus::Connected {
+            // Authorization can remain Off when an initial ticket expires
+            // before dispatch. Equal permission must still finish Loading.
+            self.clear();
+            self.pending = false;
+            self.allow_permission = false;
+            self.changed();
             return;
         }
         let result = if now >= ticket.deadline {
