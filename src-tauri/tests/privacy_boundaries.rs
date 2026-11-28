@@ -62,6 +62,7 @@ fn imported_note() -> ContextItem {
         title: "Compost rota handover".into(),
         source_date: "2026-11-02".into(),
         excerpt: "Priya keeps the padlock code for the bins.".into(),
+        original_chars: None,
         revision: 1,
     }
 }
