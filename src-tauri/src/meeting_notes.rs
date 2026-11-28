@@ -1453,12 +1453,8 @@ impl Record {
     ) -> Phase {
         self.in_flight = None;
         self.sent_attempts = self.sent_attempts.saturating_add(1);
-        if let Some((worst, _, _)) = self.pending.take() {
-            if let Some(worst) = worst {
-                self.reserved_micro_usd = self.reserved_micro_usd.saturating_add(worst);
-            } else {
-                self.unpriced_sent = true;
-            }
+        if let Some((Some(worst), _, _)) = self.pending.take() {
+            self.reserved_micro_usd = self.reserved_micro_usd.saturating_add(worst);
         } else {
             self.unpriced_sent = true;
         }
