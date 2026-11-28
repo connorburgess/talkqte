@@ -588,7 +588,7 @@ mod tests {
     const EXAMPLE: &str = r#"{"notes":[
         {"id":"n1","title":"Garden welcome guide","date":"2026-10-28","text":"Draft a one-page guide. Robin suggested a map of the tool shed."},
         {"id":"n2","date":"2026-11-02","text":"Visitors asked where to find watering cans."},
-        {"id":"n3","title":"No date","date":"","text":"Should be rejected by the store."}
+        {"id":"n3","title":"No date","date":"","text":"Fictional undated reference material."}
     ]}"#;
 
     #[test]
@@ -606,11 +606,15 @@ mod tests {
         let outcome = store.merge(Provider::File, &ids, fetched);
         assert_eq!(
             (outcome.added, outcome.rejected),
-            (1, 1),
-            "the dateless note is rejected"
+            (2, 0),
+            "an explicitly empty file date stays unknown"
         );
         assert_eq!(store.items()[0].source_id, "n2");
         assert_eq!(store.items()[0].provider, Provider::File);
+        assert_eq!(store.items()[0].source_date, "2026-11-02");
+        assert_eq!(store.items()[1].source_id, "n3");
+        assert!(store.items()[1].source_date.is_empty());
+        assert!(store.items().iter().all(|note| note.source_id != "n1"));
     }
 
     #[test]
