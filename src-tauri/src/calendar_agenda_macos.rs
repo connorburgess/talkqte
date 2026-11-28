@@ -154,7 +154,8 @@ fn event_dates(
 ) -> Option<(String, String)> {
     let local_date = date_string(f, start)?;
     let end_date = if all_day {
-        date_string(f, &object_date(end_epoch.checked_sub(1)?)?)?
+        let last = object_date(end_epoch.checked_sub(1)?)?;
+        date_string(f, &last)?
     } else {
         date_string(f, end)?
     };
