@@ -78,7 +78,10 @@ fn real_adapter_401_uses_the_original_credential_revision() {
 #[test]
 fn held_generations_keep_separate_receipts_and_cancel_never_overlaps_a_reader() {
     use crate::provider_keys::{KeyState, Keys, MemoryStore, Probe, ProbeResult};
-    use std::sync::{atomic::AtomicUsize, mpsc};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
     struct Offline;
     impl Probe for Offline {
         fn check(&self, _: Provider, _: &Secret) -> ProbeResult {
