@@ -1,0 +1,2991 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notebook Calendar Home (Designed, not built) · TalkQTE</title>
+    <link rel="stylesheet" href="../../src/tokens.css" />
+    <style>
+      @font-face {
+        font-family: 'Manrope Variable';
+        font-style: normal;
+        font-weight: 200 800;
+        font-display: swap;
+        src: url('./fonts/manrope-latin-wght-normal.woff2')
+          format('woff2-variations');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url('./fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url('./fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--band);
+        color: var(--ink);
+        font-family: var(--font);
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--band);
+        color: var(--ink);
+        overflow-x: clip;
+      }
+
+      ::selection {
+        background: var(--selection);
+        color: var(--ink);
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      ul,
+      ol,
+      dl,
+      dt,
+      dd {
+        margin: 0;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .mono-tag {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        line-height: 1.3;
+      }
+
+      /* Prototype Banner & State Switcher (outside app chrome) */
+      .proto-bar {
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
+        padding: var(--space-12) var(--space-24);
+      }
+
+      .proto-bar-inner {
+        max-width: 1360px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .proto-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: var(--space-12);
+      }
+
+      .proto-title-group {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-12);
+      }
+
+      .proto-title-group h1 {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: var(--radius-control);
+        border: 1px solid var(--border);
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .status-pill.is-amber {
+        border-color: var(--accent-ink);
+        background: var(--cue-asked-surface);
+        color: var(--accent-ink);
+      }
+
+      .status-pill.is-error {
+        border-color: var(--danger);
+        background: var(--danger-surface);
+        color: var(--danger);
+      }
+
+      .proto-links {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-16);
+        font-size: 13px;
+      }
+
+      .proto-links a {
+        color: var(--accent-ink);
+        text-decoration: underline;
+        text-underline-offset: 0.22em;
+      }
+
+      .proto-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-12);
+        padding-top: var(--space-8);
+        border-top: 1px solid var(--line);
+      }
+
+      .proto-group {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .proto-group-label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+
+      .chip-btn {
+        min-height: 32px;
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        color: var(--muted);
+        font-size: 12.5px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 150ms ease,
+          border-color 150ms ease,
+          color 150ms ease;
+      }
+
+      .chip-btn:hover {
+        border-color: var(--border);
+        color: var(--ink);
+      }
+
+      .chip-btn[aria-pressed='true'] {
+        background: var(--btn-primary-bg);
+        border-color: var(--btn-primary-bg);
+        color: var(--btn-primary-fg);
+      }
+
+      /* App Canvas Stage */
+      .stage {
+        padding: var(--space-24);
+        max-width: 1380px;
+        margin: 0 auto;
+      }
+
+      .app-frame {
+        margin: 0 auto;
+        width: 100%;
+        padding: var(--space-8);
+        background: var(--paper);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 10px 28px rgba(17, 21, 27, 0.06);
+        transition: max-width 200ms ease;
+      }
+
+      .app-frame.is-narrow {
+        max-width: 390px;
+      }
+
+      /* Desktop Notebook Shell */
+      .app-shell {
+        display: grid;
+        grid-template-columns: 236px minmax(0, 1fr);
+        min-height: 760px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .sidebar {
+        background: var(--band);
+        border-right: 1px solid var(--line);
+        padding: var(--space-24) var(--space-12) var(--space-16);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 var(--space-8) var(--space-16);
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      .nav-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .nav-btn {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 44px;
+        padding: 8px 12px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-control);
+        background: transparent;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .nav-btn:hover {
+        background: rgba(17, 21, 27, 0.04);
+      }
+
+      .nav-btn.is-selected {
+        background: var(--paper);
+        border-color: var(--border);
+        font-weight: 600;
+      }
+
+      .sidebar-foot {
+        margin-top: auto;
+        padding-top: var(--space-16);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .build-foot {
+        padding: var(--space-12) var(--space-8) 0;
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-8);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      /* Main Workspace */
+      .workspace {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--paper);
+      }
+
+      .toolbar {
+        min-height: 52px;
+        padding: 8px var(--space-24);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+      }
+
+      .breadcrumb strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+      }
+
+      /* Return-to-Live Banner (when glancing at calendar during a live call) */
+      .live-return-banner {
+        padding: var(--space-12) var(--space-24);
+        background: var(--cue-asked-surface);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+      }
+
+      .live-return-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        color: var(--ink);
+        flex-wrap: wrap;
+      }
+
+      .square-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 1px;
+        background: var(--accent-ink);
+        display: inline-block;
+        flex-shrink: 0;
+      }
+
+      .square-dot.is-muted {
+        background: var(--border);
+      }
+
+      .square-dot.is-error {
+        background: var(--danger);
+      }
+
+      /* Shared Buttons */
+      .btn-primary,
+      .btn-secondary,
+      .btn-text {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        border-radius: var(--radius-control);
+        font-size: 13.5px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition:
+          background 150ms ease,
+          border-color 150ms ease;
+      }
+
+      .btn-primary {
+        min-height: 44px;
+        padding: 9px 16px;
+        border: 1px solid var(--btn-primary-bg);
+        background: var(--btn-primary-bg);
+        color: var(--btn-primary-fg);
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        background: var(--btn-primary-bg-hover);
+        border-color: var(--btn-primary-bg-hover);
+      }
+
+      .btn-secondary {
+        min-height: 40px;
+        padding: 7px 13px;
+        border: 1px solid var(--border);
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--band);
+      }
+
+      .btn-secondary.is-compact {
+        min-height: 36px;
+        padding: 5px 10px;
+        font-size: 13px;
+      }
+
+      .btn-icon {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        color: var(--ink);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      .btn-icon:hover:not(:disabled) {
+        background: var(--band);
+      }
+
+      .btn-icon:disabled,
+      .btn-secondary:disabled,
+      .btn-primary:disabled {
+        opacity: 0.52;
+        cursor: not-allowed;
+      }
+
+      .btn-text {
+        min-height: 36px;
+        padding: 4px 6px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--accent-ink);
+        font-size: 13px;
+        font-weight: 500;
+        text-decoration: underline;
+        text-underline-offset: 0.22em;
+      }
+
+      .btn-text:hover {
+        color: var(--ink);
+      }
+
+      /* Calendar Home Header + 7-day Strip */
+      .cal-header {
+        padding: var(--space-16) var(--space-24) var(--space-16);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .cal-header-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-16);
+        flex-wrap: wrap;
+      }
+
+      .cal-date-nav {
+        display: flex;
+        align-items: center;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+      }
+
+      .cal-date-nav h2 {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+      }
+
+      .cal-tz {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+        padding: 2px 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+      }
+
+      .cal-nav-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .cal-sync-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+
+      .sync-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .sync-meta.is-stale {
+        color: var(--accent-ink);
+      }
+
+      .sync-meta.is-error {
+        color: var(--danger);
+      }
+
+      /* 7-Day Week Strip */
+      .week-strip {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 6px;
+        padding: 4px;
+        background: var(--band);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+      }
+
+      .day-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        min-height: 54px;
+        padding: 6px 4px;
+        border: 1.5px solid transparent;
+        border-radius: var(--radius-control);
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        transition:
+          background 150ms ease,
+          border-color 150ms ease,
+          color 150ms ease;
+      }
+
+      .day-cell:hover {
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--ink);
+      }
+
+      .day-cell.is-today .day-num {
+        color: var(--accent-ink);
+        font-weight: 700;
+      }
+
+      .day-cell.is-selected {
+        background: var(--paper);
+        border-color: var(--ink);
+        color: var(--ink);
+      }
+
+      .day-dow {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .day-num {
+        font-family: var(--font-mono);
+        font-size: 14px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .day-dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        min-height: 5px;
+      }
+
+      .day-dot {
+        width: 4px;
+        height: 4px;
+        border-radius: 1px;
+        background: var(--border);
+      }
+
+      .day-cell.is-today .day-dot {
+        background: var(--accent-ink);
+      }
+
+      /* Inline Notice / Error Banners */
+      .inline-banner {
+        margin: var(--space-16) var(--space-24) 0;
+        padding: var(--space-12) var(--space-16);
+        border-radius: var(--radius-control);
+        border: 1px solid var(--border);
+        background: var(--band);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+        font-size: 13.5px;
+      }
+
+      .inline-banner.is-error {
+        border-color: var(--danger);
+        background: var(--danger-surface);
+        color: var(--danger);
+      }
+
+      .inline-banner.is-amber {
+        border-color: var(--accent-ink);
+        background: var(--cue-asked-surface);
+        color: var(--ink);
+      }
+
+      .inline-banner p {
+        max-width: 66ch;
+      }
+
+      .inline-banner-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-8);
+        flex-wrap: wrap;
+      }
+
+      /* Home Two-Column Body: Agenda + Prepare Pane */
+      .home-split {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        flex: 1;
+        min-height: 0;
+      }
+
+      .agenda-col {
+        padding: var(--space-16) var(--space-24) var(--space-24);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-16);
+        min-width: 0;
+      }
+
+      .prep-col {
+        padding: var(--space-16) var(--space-24) var(--space-24);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-16);
+        min-width: 0;
+        background: var(--paper);
+      }
+
+      .col-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-8);
+        flex-wrap: wrap;
+      }
+
+      .col-head h3 {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .col-sub {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      /* All-Day Row */
+      .all-day-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-8);
+        padding-bottom: var(--space-12);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .all-day-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--band);
+        color: var(--ink);
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .all-day-chip:hover {
+        border-color: var(--border);
+      }
+
+      .all-day-chip.is-selected {
+        border-color: var(--ink);
+        background: var(--paper);
+        font-weight: 600;
+      }
+
+      /* Agenda Event List */
+      .agenda-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+      }
+
+      .event-row {
+        width: 100%;
+        text-align: left;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        display: grid;
+        grid-template-columns: 104px minmax(0, 1fr);
+        gap: var(--space-12);
+        align-items: start;
+        cursor: pointer;
+        transition:
+          background 150ms ease,
+          border-color 150ms ease;
+      }
+
+      .event-row:hover {
+        border-color: var(--border);
+        background: var(--band);
+      }
+
+      .event-row.is-now {
+        background: var(--cue-asked-surface);
+        border: 1.5px solid var(--accent-ink);
+      }
+
+      .event-row.is-selected {
+        border: 1.5px solid var(--ink);
+        background: var(--band);
+      }
+
+      .event-row.is-now.is-selected {
+        background: var(--cue-asked-surface);
+        border: 1.5px solid var(--ink);
+      }
+
+      .event-row.is-past {
+        opacity: 0.72;
+      }
+
+      .event-time {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .event-time .now-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--accent-ink);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .event-time .time-sub {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .event-body {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .event-title-line {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-8);
+        flex-wrap: wrap;
+      }
+
+      .event-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--ink);
+        line-height: 1.3;
+      }
+
+      .event-meta-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .meta-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+
+      .meta-tag.is-overlap {
+        border-color: var(--accent-ink);
+        background: var(--cue-asked-surface);
+        color: var(--accent-ink);
+      }
+
+      .agenda-foot {
+        margin-top: auto;
+        padding-top: var(--space-12);
+        border-top: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      /* Empty / Disconnected / Denied / Skeleton States inside Agenda */
+      .agenda-state-box {
+        padding: var(--space-24);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
+        background: var(--band);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .agenda-state-box.is-error {
+        border-color: var(--danger);
+        background: var(--danger-surface);
+      }
+
+      .agenda-state-box h4 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .agenda-state-box p {
+        font-size: 14px;
+        color: var(--muted);
+        max-width: 54ch;
+      }
+
+      .agenda-state-box.is-error p {
+        color: var(--danger);
+      }
+
+      .state-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-8);
+        padding-top: var(--space-4);
+      }
+
+      .skeleton-row {
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        gap: var(--space-12);
+      }
+
+      .skel {
+        height: 12px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+
+      .skel.is-wide {
+        width: 78%;
+        height: 14px;
+        margin-bottom: 8px;
+      }
+
+      .skel.is-mid {
+        width: 48%;
+      }
+
+      /* Right Column: Prepare Notebook Pane */
+      .prep-header {
+        padding-bottom: var(--space-16);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .prep-source-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-8);
+        flex-wrap: wrap;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .title-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .title-field label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+
+      .title-input-row {
+        display: flex;
+        gap: var(--space-8);
+        align-items: center;
+      }
+
+      .title-input-row input {
+        flex: 1;
+        min-width: 0;
+        min-height: 42px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .start-block {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .start-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-8);
+        flex-wrap: wrap;
+      }
+
+      .disclosure-copy {
+        font-size: 12.5px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .prep-notes-area {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .prep-notes-area label {
+        font-size: 13.5px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .prep-notes-area textarea {
+        width: 100%;
+        min-height: 116px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        background: var(--paper);
+        resize: vertical;
+        font-size: 14.5px;
+        line-height: 1.6;
+      }
+
+      .prep-disclosure {
+        border-top: 1px solid var(--line);
+        padding-top: var(--space-12);
+      }
+
+      .prep-disclosure summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-8);
+        min-height: 36px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .prep-disclosure summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .prep-disclosure-body {
+        padding-top: var(--space-8);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+        font-size: 13.5px;
+        color: var(--muted);
+      }
+
+      .context-item {
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--cue-surface);
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-8);
+        align-items: center;
+      }
+
+      .context-item strong {
+        display: block;
+        font-size: 13.5px;
+        color: var(--ink);
+      }
+
+      .context-item span {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .prep-cue-standby {
+        margin-top: auto;
+        padding: var(--space-12) var(--space-16);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-panel);
+        background: var(--cue-surface);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .prep-cue-standby-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .prep-cue-standby p {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      /* Live Session View (Calendar cleanly tucked away) */
+      .live-body {
+        padding: var(--space-16) var(--space-24) var(--space-24);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-16);
+        flex: 1;
+      }
+
+      .live-capture-row {
+        padding-bottom: var(--space-12);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        flex-wrap: wrap;
+      }
+
+      .live-telemetry {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        padding-bottom: var(--space-12);
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+
+      .live-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+        gap: var(--space-24);
+        flex: 1;
+      }
+
+      .live-tabs {
+        display: flex;
+        gap: var(--space-16);
+        border-bottom: 1px solid var(--line);
+        margin-bottom: var(--space-12);
+      }
+
+      .live-tab {
+        padding: 8px 0;
+        border: 0;
+        background: transparent;
+        font-size: 14px;
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .live-tab.is-active {
+        color: var(--ink);
+        font-weight: 600;
+        text-decoration: underline;
+        text-decoration-thickness: 2px;
+        text-underline-offset: 8px;
+      }
+
+      .cue-card-proto {
+        padding: 18px 20px 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-panel);
+        background: var(--cue-surface);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .cue-lead {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--accent-ink);
+      }
+
+      .cue-card-proto h3 {
+        font-size: 21px;
+        font-weight: 600;
+        line-height: 1.24;
+        letter-spacing: -0.015em;
+      }
+
+      .cue-timeline {
+        height: 3px;
+        border-radius: 1px;
+        background: var(--line);
+        overflow: hidden;
+      }
+
+      .cue-timeline-fill {
+        width: 68%;
+        height: 100%;
+        background: var(--cue-fill);
+      }
+
+      .cue-source {
+        padding-top: var(--space-8);
+        border-top: 1px solid var(--line);
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      /* Settings -> Calendar View */
+      .settings-wrap {
+        padding: var(--space-24);
+        max-width: 780px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-24);
+      }
+
+      .settings-section {
+        padding-bottom: var(--space-24);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-12);
+      }
+
+      .settings-section:last-child {
+        border-bottom: 0;
+      }
+
+      .settings-section h3 {
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      .settings-section p {
+        font-size: 14px;
+        color: var(--muted);
+        max-width: 65ch;
+      }
+
+      .check-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        min-height: 36px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      .check-row input[type='checkbox'] {
+        width: 18px;
+        height: 18px;
+        margin-top: 2px;
+        accent-color: var(--ink);
+      }
+
+      .cal-source-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: var(--space-12) var(--space-16);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--band);
+      }
+
+      .cal-source-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-12);
+        padding: 6px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .cal-source-row:last-child {
+        border-bottom: 0;
+      }
+
+      .future-box {
+        padding: var(--space-16);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: var(--band);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .workspace-foot {
+        padding: var(--space-12) var(--space-24);
+        border-top: 1px solid var(--line);
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+
+      /* Narrow Layout (both viewport <= 860px and simulated .app-frame.is-narrow) */
+      .app-frame.is-narrow .app-shell {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
+
+      .app-frame.is-narrow .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: var(--space-12);
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .app-frame.is-narrow .brand {
+        padding: 0;
+        font-size: 16px;
+      }
+
+      .app-frame.is-narrow .nav-list {
+        flex-direction: row;
+        gap: 4px;
+      }
+
+      .app-frame.is-narrow .nav-btn {
+        width: auto;
+        min-height: 36px;
+        padding: 6px 10px;
+        font-size: 13px;
+      }
+
+      .app-frame.is-narrow .sidebar-foot {
+        display: none;
+      }
+
+      .app-frame.is-narrow .toolbar,
+      .app-frame.is-narrow .cal-header,
+      .app-frame.is-narrow .agenda-col,
+      .app-frame.is-narrow .prep-col,
+      .app-frame.is-narrow .live-body,
+      .app-frame.is-narrow .settings-wrap,
+      .app-frame.is-narrow .workspace-foot {
+        padding-left: var(--space-16);
+        padding-right: var(--space-16);
+      }
+
+      .app-frame.is-narrow .inline-banner {
+        margin-left: var(--space-16);
+        margin-right: var(--space-16);
+      }
+
+      .app-frame.is-narrow .home-split,
+      .app-frame.is-narrow .live-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .app-frame.is-narrow .agenda-col {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .app-frame.is-narrow .event-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      @media (max-width: 860px) {
+        .stage {
+          padding: var(--space-12);
+        }
+        .proto-bar {
+          padding: var(--space-12) var(--space-16);
+        }
+        .app-shell {
+          grid-template-columns: 1fr;
+          min-height: 0;
+        }
+        .sidebar {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding: var(--space-12);
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+        }
+        .brand {
+          padding: 0;
+          font-size: 16px;
+        }
+        .nav-list {
+          flex-direction: row;
+        }
+        .nav-btn {
+          width: auto;
+          min-height: 36px;
+          padding: 6px 10px;
+        }
+        .sidebar-foot {
+          display: none;
+        }
+        .home-split,
+        .live-grid {
+          grid-template-columns: 1fr;
+        }
+        .agenda-col {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .event-row {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="proto-bar" aria-label="Interactive prototype controls">
+      <div class="proto-bar-inner">
+        <div class="proto-top">
+          <div class="proto-title-group">
+            <span class="status-pill is-amber">Designed, not built</span>
+            <h1>Notebook Calendar Home · Interactive Fictional Prototype</h1>
+            <span class="status-pill">Direction C · Fictional data only</span>
+          </div>
+          <div class="proto-links">
+            <a href="index.html">Brand Guide</a>
+            <a href="notebook-ready.html">Built Notebook states</a>
+          </div>
+        </div>
+
+        <div class="proto-controls">
+          <div class="proto-group" role="group" aria-label="Surface mode">
+            <span class="proto-group-label">View</span>
+            <button
+              type="button"
+              class="chip-btn"
+              data-surface="home"
+              aria-pressed="true"
+            >
+              Notebook Home (Ready)
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-surface="live"
+              aria-pressed="false"
+            >
+              Live Session (Active)
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-surface="live-glance"
+              aria-pressed="false"
+            >
+              Live + Schedule Glance
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-surface="settings"
+              aria-pressed="false"
+            >
+              Settings → Calendar
+            </button>
+          </div>
+
+          <div class="proto-group" role="group" aria-label="Calendar state">
+            <span class="proto-group-label">State</span>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="populated"
+              aria-pressed="true"
+            >
+              Connected
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="empty"
+              aria-pressed="false"
+            >
+              Empty day
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="disconnected"
+              aria-pressed="false"
+            >
+              Disconnected
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="denied"
+              aria-pressed="false"
+            >
+              Permission denied
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="loading"
+              aria-pressed="false"
+            >
+              Loading
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="refreshing"
+              aria-pressed="false"
+            >
+              Refreshing
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-cal-state="stale"
+              aria-pressed="false"
+            >
+              Stale / Error
+            </button>
+          </div>
+
+          <div class="proto-group" role="group" aria-label="Viewport width">
+            <span class="proto-group-label">Width</span>
+            <button
+              type="button"
+              class="chip-btn"
+              data-width="desktop"
+              aria-pressed="true"
+            >
+              Desktop
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-width="narrow"
+              aria-pressed="false"
+            >
+              Narrow (390px)
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="stage">
+      <div class="app-frame" id="app-frame">
+        <div class="app-shell">
+          <aside class="sidebar" aria-label="Notebook navigation">
+            <a class="brand" href="#notebook" id="brand-link">
+              <svg
+                width="26"
+                height="26"
+                viewBox="0 0 32 32"
+                fill="none"
+                aria-hidden="true"
+              >
+                <rect
+                  x="0.5"
+                  y="0.5"
+                  width="31"
+                  height="31"
+                  rx="3.5"
+                  fill="#0D1014"
+                  stroke="#38414E"
+                />
+                <path
+                  d="M7 13V7H13"
+                  stroke="#F5F7FA"
+                  stroke-width="2.4"
+                  stroke-linecap="square"
+                />
+                <path
+                  d="M25 19V25H19"
+                  stroke="#F5F7FA"
+                  stroke-width="2.4"
+                  stroke-linecap="square"
+                />
+                <rect
+                  x="10.5"
+                  y="14.5"
+                  width="11"
+                  height="3"
+                  rx="1"
+                  fill="#EBB45B"
+                />
+              </svg>
+              <span>TalkQTE</span>
+            </a>
+
+            <nav class="nav-list" aria-label="Main navigation">
+              <button
+                type="button"
+                class="nav-btn is-selected"
+                id="nav-notebook"
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                </svg>
+                <span>Notebook</span>
+              </button>
+              <button type="button" class="nav-btn" id="nav-meetings" disabled>
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <polyline points="12 7 12 12 15 14" />
+                </svg>
+                <span>Meetings</span>
+              </button>
+              <button type="button" class="nav-btn" id="nav-settings">
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="3" />
+                  <path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.25.4-1.51 1z"
+                  />
+                </svg>
+                <span>Settings</span>
+              </button>
+            </nav>
+
+            <div class="sidebar-foot">
+              <div class="build-foot">
+                <span>TalkQTE</span>
+                <span>Prototype · Designed</span>
+              </div>
+            </div>
+          </aside>
+
+          <main class="workspace" id="workspace" aria-live="polite"></main>
+        </div>
+      </div>
+    </div>
+
+    <div class="visually-hidden" role="status" id="live-announcer"></div>
+
+    <script>
+      (function () {
+        // Fictional, synthetic calendar data ONLY. No real accounts, attendees, or URLs.
+        const WEEK_DAYS = [
+          {
+            iso: '2026-11-23',
+            dow: 'Mon',
+            num: '23',
+            heading: 'Monday, Nov 23',
+            isToday: false,
+            allDay: [],
+            events: [
+              {
+                id: 'evt-mon-1',
+                title: 'Editorial Kickoff — Winter Issue',
+                start: '10:00',
+                end: '10:45',
+                duration: '45 min',
+                calendar: 'Work',
+                hasVideoLink: true,
+                status: 'past',
+                suggestedNotes: [
+                  {
+                    title: 'Winter Issue Outline Notes',
+                    meta: 'KEPT MEETING · NOV 16',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            iso: '2026-11-24',
+            dow: 'Tue',
+            num: '24',
+            heading: 'Tuesday, Nov 24',
+            isToday: false,
+            allDay: [],
+            events: [
+              {
+                id: 'evt-tue-1',
+                title: 'Print Shop Paper Proofs Check',
+                start: '14:00',
+                end: '14:30',
+                duration: '30 min',
+                calendar: 'Work',
+                hasVideoLink: true,
+                status: 'past',
+                suggestedNotes: [],
+              },
+            ],
+          },
+          {
+            iso: '2026-11-25',
+            dow: 'Wed',
+            num: '25',
+            heading: 'Wednesday, Nov 25',
+            isToday: false,
+            allDay: [],
+            events: [
+              {
+                id: 'evt-wed-1',
+                title: 'Greenhouse Sensor Calibration',
+                start: '11:00',
+                end: '11:45',
+                duration: '45 min',
+                calendar: 'Studio',
+                hasVideoLink: false,
+                status: 'past',
+                suggestedNotes: [],
+              },
+            ],
+          },
+          {
+            iso: '2026-11-26',
+            dow: 'Thu',
+            num: '26',
+            heading: 'Thursday, Nov 26',
+            isToday: false,
+            allDay: [],
+            events: [],
+          },
+          {
+            iso: '2026-11-27',
+            dow: 'Fri',
+            num: '27',
+            heading: 'Friday, Nov 27',
+            isToday: true,
+            allDay: [
+              {
+                id: 'evt-fri-allday',
+                title: 'Q4 Studio Release Freeze',
+                calendar: 'Studio',
+                isAllDay: true,
+                suggestedNotes: [
+                  {
+                    title: 'Release Freeze Checklist',
+                    meta: 'LOCAL NOTE · NOV 20',
+                  },
+                ],
+              },
+            ],
+            events: [
+              {
+                id: 'evt-fri-1',
+                title: 'Cedar Welcome Guide Review',
+                start: '12:00',
+                end: '12:45',
+                duration: '45 min',
+                calendar: 'Work',
+                hasVideoLink: true,
+                status: 'now',
+                remaining: '28 min left',
+                suggestedNotes: [
+                  {
+                    title: 'Welcome Guide First Draft Sync',
+                    meta: 'KEPT MEETING · NOV 20',
+                  },
+                  {
+                    title: 'Large-Print Copy Guidelines',
+                    meta: 'IMPORTED FILE · NOV 14',
+                  },
+                ],
+              },
+              {
+                id: 'evt-fri-2',
+                title: 'Greenhouse Logistics Sync',
+                start: '14:00',
+                end: '14:45',
+                duration: '45 min',
+                calendar: 'Studio',
+                hasVideoLink: true,
+                status: 'upcoming',
+                overlaps: true,
+                suggestedNotes: [
+                  {
+                    title: 'Saturday Greenhouse Check Notes',
+                    meta: 'KEPT MEETING · NOV 21',
+                  },
+                ],
+              },
+              {
+                id: 'evt-fri-3',
+                title: 'Boardwalk Accessibility Walkthrough',
+                start: '14:15',
+                end: '15:00',
+                duration: '45 min',
+                calendar: 'Work',
+                hasVideoLink: true,
+                status: 'upcoming',
+                overlaps: true,
+                suggestedNotes: [
+                  {
+                    title: 'Keyboard & Focus Audit Notes',
+                    meta: 'KEPT MEETING · NOV 19',
+                  },
+                ],
+              },
+              {
+                id: 'evt-fri-4',
+                title: 'Weekly Wrap & Next Week Priorities',
+                start: '16:30',
+                end: '17:00',
+                duration: '30 min',
+                calendar: 'Work',
+                hasVideoLink: false,
+                status: 'upcoming',
+                suggestedNotes: [],
+              },
+            ],
+          },
+          {
+            iso: '2026-11-28',
+            dow: 'Sat',
+            num: '28',
+            heading: 'Saturday, Nov 28',
+            isToday: false,
+            allDay: [],
+            events: [],
+          },
+          {
+            iso: '2026-11-29',
+            dow: 'Sun',
+            num: '29',
+            heading: 'Sunday, Nov 29',
+            isToday: false,
+            allDay: [],
+            events: [
+              {
+                id: 'evt-sun-1',
+                title: 'Community Garden Schedule Check',
+                start: '10:30',
+                end: '11:00',
+                duration: '30 min',
+                calendar: 'Studio',
+                hasVideoLink: true,
+                status: 'upcoming',
+                suggestedNotes: [],
+              },
+            ],
+          },
+        ];
+
+        const state = {
+          surface: 'home', // home | live | live-glance | settings
+          calState: 'populated', // populated | empty | disconnected | denied | loading | refreshing | stale
+          width: 'desktop', // desktop | narrow
+          selectedDayIso: '2026-11-27',
+          selectedEventId: 'evt-fri-1',
+          adHoc: false,
+          prepTitle: 'Cedar Welcome Guide Review',
+          prepNotes: '',
+          prepFocus: '',
+          lastUpdated: '12:14',
+          liveMeetingTitle: 'Cedar Welcome Guide Review',
+          liveTab: 'notes',
+          settingsAgendaEnabled: true,
+          settingsPromptsEnabled: true,
+          calendars: [
+            { id: 'cal-work', name: 'Work', source: 'Google (via Apple Calendar)', enabled: true },
+            { id: 'cal-studio', name: 'Studio', source: 'iCloud (via Apple Calendar)', enabled: true },
+            { id: 'cal-personal', name: 'Personal', source: 'iCloud (via Apple Calendar)', enabled: false },
+          ],
+        };
+
+        const workspace = document.getElementById('workspace');
+        const appFrame = document.getElementById('app-frame');
+        const announcer = document.getElementById('live-announcer');
+        const navNotebook = document.getElementById('nav-notebook');
+        const navSettings = document.getElementById('nav-settings');
+
+        function announce(msg) {
+          announcer.textContent = '';
+          requestAnimationFrame(() => {
+            announcer.textContent = msg;
+          });
+        }
+
+        function escapeHtml(str) {
+          return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+
+        function currentDay() {
+          return (
+            WEEK_DAYS.find((d) => d.iso === state.selectedDayIso) ||
+            WEEK_DAYS[4]
+          );
+        }
+
+        function visibleEventsForDay(day) {
+          if (state.calState === 'empty') return { allDay: [], events: [] };
+          const enabledNames = new Set(
+            state.calendars.filter((c) => c.enabled).map((c) => c.name),
+          );
+          return {
+            allDay: day.allDay.filter((e) => enabledNames.has(e.calendar)),
+            events: day.events.filter((e) => enabledNames.has(e.calendar)),
+          };
+        }
+
+        function findSelectedEvent() {
+          if (state.adHoc) return null;
+          for (const d of WEEK_DAYS) {
+            for (const e of d.allDay) {
+              if (e.id === state.selectedEventId) return { day: d, event: e };
+            }
+            for (const e of d.events) {
+              if (e.id === state.selectedEventId) return { day: d, event: e };
+            }
+          }
+          return null;
+        }
+
+        function selectEvent(eventId) {
+          state.adHoc = false;
+          state.selectedEventId = eventId;
+          const found = findSelectedEvent();
+          if (found) {
+            state.prepTitle = found.event.title;
+            announce(`Prepared notebook for ${found.event.title}. Nothing is captured yet.`);
+          }
+          render();
+        }
+
+        function selectAdHoc() {
+          state.adHoc = true;
+          state.selectedEventId = null;
+          state.prepTitle = '';
+          announce('Switched to ad-hoc meeting preparation.');
+          render();
+        }
+
+        function triggerManualRefresh() {
+          if (state.calState === 'refreshing') return;
+          const prev = state.calState;
+          state.calState = 'refreshing';
+          syncPrototypeButtons();
+          render();
+          announce('Refreshing local Apple Calendar metadata.');
+          setTimeout(() => {
+            state.calState = prev === 'stale' ? 'populated' : prev === 'loading' ? 'populated' : prev;
+            state.lastUpdated = '12:17';
+            syncPrototypeButtons();
+            render();
+            announce('Calendar updated at 12:17.');
+          }, 550);
+        }
+
+        function syncPrototypeButtons() {
+          document.querySelectorAll('[data-surface]').forEach((btn) => {
+            btn.setAttribute(
+              'aria-pressed',
+              String(btn.dataset.surface === state.surface),
+            );
+          });
+          document.querySelectorAll('[data-cal-state]').forEach((btn) => {
+            btn.setAttribute(
+              'aria-pressed',
+              String(btn.dataset.calState === state.calState),
+            );
+          });
+          document.querySelectorAll('[data-width]').forEach((btn) => {
+            btn.setAttribute(
+              'aria-pressed',
+              String(btn.dataset.width === state.width),
+            );
+          });
+          appFrame.classList.toggle('is-narrow', state.width === 'narrow');
+          navNotebook.classList.toggle(
+            'is-selected',
+            state.surface !== 'settings',
+          );
+          navSettings.classList.toggle(
+            'is-selected',
+            state.surface === 'settings',
+          );
+        }
+
+        function renderSyncRow(readOnlyGlance) {
+          const activeCalCount = state.calendars.filter((c) => c.enabled).length;
+          if (state.calState === 'disconnected') {
+            return `
+              <div class="cal-sync-row">
+                <span class="sync-meta"><span class="square-dot is-muted"></span>Apple Calendar · Off</span>
+                <button type="button" class="btn-text" data-action="open-settings">Connect in Settings</button>
+              </div>
+            `;
+          }
+          if (state.calState === 'denied') {
+            return `
+              <div class="cal-sync-row">
+                <span class="sync-meta is-error"><span class="square-dot is-error"></span>Calendar permission denied</span>
+                <button type="button" class="btn-text" data-action="open-settings">Calendar settings</button>
+              </div>
+            `;
+          }
+          const isRefreshing =
+            state.calState === 'refreshing' || state.calState === 'loading';
+          const syncText = readOnlyGlance
+            ? state.calState === 'refreshing'
+              ? 'Refreshing local cache…'
+              : `Paused while live · cached ${state.lastUpdated}`
+            : state.calState === 'loading'
+              ? 'Reading Apple Calendar…'
+              : state.calState === 'refreshing'
+                ? 'Refreshing local cache…'
+                : state.calState === 'stale'
+                  ? 'Stale · last updated 11:48'
+                  : `Apple Calendar (${activeCalCount}) · Updated ${state.lastUpdated}`;
+          const cls =
+            state.calState === 'stale' || readOnlyGlance
+              ? 'sync-meta is-stale'
+              : 'sync-meta';
+          return `
+            <div class="cal-sync-row">
+              <span class="${cls}">
+                <span class="square-dot${state.calState === 'stale' ? '' : isRefreshing || readOnlyGlance ? ' is-muted' : ''}"></span>
+                ${escapeHtml(syncText)}
+              </span>
+              <button
+                type="button"
+                class="btn-secondary is-compact"
+                data-action="refresh"
+                ${isRefreshing ? 'disabled' : ''}
+                aria-label="Refresh calendar"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+                ${isRefreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <button type="button" class="btn-text" data-action="open-settings">Calendar settings</button>
+            </div>
+          `;
+        }
+
+        function renderCalendarHeader(day, readOnlyGlance) {
+          const disabledNav =
+            state.calState === 'disconnected' || state.calState === 'denied';
+          const stripHtml = WEEK_DAYS.map((d) => {
+            const count =
+              state.calState === 'empty' ||
+              state.calState === 'disconnected' ||
+              state.calState === 'denied' ||
+              state.calState === 'loading'
+                ? 0
+                : visibleEventsForDay(d).events.length +
+                  visibleEventsForDay(d).allDay.length;
+            const dots = Math.min(count, 3);
+            const selected = d.iso === day.iso;
+            return `
+              <button
+                type="button"
+                class="day-cell${d.isToday ? ' is-today' : ''}${selected ? ' is-selected' : ''}"
+                data-day="${d.iso}"
+                aria-pressed="${selected}"
+                aria-label="${d.heading}${d.isToday ? ', Today' : ''}, ${count} meetings"
+                ${disabledNav ? 'disabled' : ''}
+              >
+                <span class="day-dow">${d.dow}</span>
+                <span class="day-num">${d.num}</span>
+                <span class="day-dots" aria-hidden="true">
+                  ${Array.from({ length: dots }, () => '<span class="day-dot"></span>').join('')}
+                </span>
+              </button>
+            `;
+          }).join('');
+
+          return `
+            <section class="cal-header" aria-label="Schedule navigation">
+              <div class="cal-header-top">
+                <div class="cal-date-nav">
+                  <h2>${escapeHtml(day.heading)}</h2>
+                  <span class="cal-tz">ICT · UTC+7</span>
+                  <div class="cal-nav-controls" role="group" aria-label="Change day">
+                    <button type="button" class="btn-icon" data-action="prev-day" aria-label="Previous day" ${disabledNav ? 'disabled' : ''}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                    <button type="button" class="btn-secondary is-compact" data-action="today" ${disabledNav ? 'disabled' : ''}>Today</button>
+                    <button type="button" class="btn-icon" data-action="next-day" aria-label="Next day" ${disabledNav ? 'disabled' : ''}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                  </div>
+                </div>
+                ${renderSyncRow(readOnlyGlance)}
+              </div>
+              <div class="week-strip" role="group" aria-label="Week of November 23 to 29, 2026">
+                ${stripHtml}
+              </div>
+            </section>
+          `;
+        }
+
+        function renderAgendaColumn(day, readOnlyGlance) {
+          const { allDay, events } = visibleEventsForDay(day);
+          const totalCount = allDay.length + events.length;
+
+          let bodyHtml = '';
+          if (state.calState === 'disconnected') {
+            bodyHtml = `
+              <div class="agenda-state-box">
+                <h4>Connect your macOS Calendar</h4>
+                <p>
+                  Show today’s meetings here so you can prepare notes and start a titled live session in one step.
+                  TalkQTE reads titles and timestamps locally from Apple Calendar (which already syncs Google Calendar,
+                  iCloud, and Outlook on your Mac). It never accesses attendees or organizers, and never retains raw links or invite notes. Direct Google/Microsoft OAuth is not built.
+                </p>
+                <div class="state-actions">
+                  <button type="button" class="btn-primary" data-action="enable-demo">Enable Apple Calendar</button>
+                  <button type="button" class="btn-secondary" data-action="open-settings">Review Calendar settings</button>
+                </div>
+              </div>
+            `;
+          } else if (state.calState === 'denied') {
+            bodyHtml = `
+              <div class="agenda-state-box is-error" role="alert">
+                <h4>Calendar permission is off in macOS</h4>
+                <p>
+                  macOS denied or revoked Calendar access for TalkQTE. Open System Settings → Privacy &amp; Security → Calendars
+                  to allow access, then check again. You can still start an ad-hoc session anytime.
+                </p>
+                <div class="state-actions">
+                  <button type="button" class="btn-secondary" data-action="open-system-settings">Open Calendar privacy settings</button>
+                  <button type="button" class="btn-secondary" data-action="retry-permission">Check again</button>
+                </div>
+              </div>
+            `;
+          } else if (state.calState === 'loading') {
+            bodyHtml = `
+              <div aria-label="Loading agenda" role="status">
+                ${[1, 2, 3]
+                  .map(
+                    () => `
+                  <div class="skeleton-row" style="margin-bottom: 8px">
+                    <div><div class="skel"></div></div>
+                    <div>
+                      <div class="skel is-wide"></div>
+                      <div class="skel is-mid"></div>
+                    </div>
+                  </div>
+                `,
+                  )
+                  .join('')}
+              </div>
+            `;
+          } else if (totalCount === 0) {
+            bodyHtml = `
+              <div class="agenda-state-box">
+                <h4>No meetings scheduled on ${escapeHtml(day.heading)}</h4>
+                <p>
+                  Your selected Apple Calendar sources have no events on this day. Prepare an ad-hoc notebook session on the right, or jump to your next upcoming day.
+                </p>
+                <div class="state-actions">
+                  <button type="button" class="btn-secondary" data-action="jump-next-meeting">Jump to next meeting</button>
+                  <button type="button" class="btn-secondary" data-action="ad-hoc">Prepare ad-hoc session</button>
+                </div>
+              </div>
+            `;
+          } else {
+            const allDayHtml = allDay.length
+              ? `
+                <div class="all-day-strip" aria-label="All-day events">
+                  ${allDay
+                    .map((item) => {
+                      const sel = !state.adHoc && state.selectedEventId === item.id;
+                      return `
+                        <button
+                          type="button"
+                          class="all-day-chip${sel ? ' is-selected' : ''}"
+                          data-event="${item.id}"
+                          aria-pressed="${sel}"
+                        >
+                          <span class="mono-tag">All day</span>
+                          <span>${escapeHtml(item.title)}</span>
+                          <span class="mono" style="font-size:11px;color:var(--muted)">${escapeHtml(item.calendar)}</span>
+                        </button>
+                      `;
+                    })
+                    .join('')}
+                </div>
+              `
+              : '';
+
+            const rowsHtml = events
+              .map((ev) => {
+                const sel = !state.adHoc && state.selectedEventId === ev.id;
+                const isNow = ev.status === 'now';
+                const isPast = ev.status === 'past';
+                return `
+                  <li>
+                    <button
+                      type="button"
+                      class="event-row${isNow ? ' is-now' : ''}${sel ? ' is-selected' : ''}${isPast ? ' is-past' : ''}"
+                      data-event="${ev.id}"
+                      aria-pressed="${sel}"
+                    >
+                      <div class="event-time">
+                        ${
+                          isNow
+                            ? `<span class="now-badge"><span class="square-dot"></span>Now</span>`
+                            : ''
+                        }
+                        <span>${ev.start}–${ev.end}</span>
+                        <span class="time-sub">${ev.remaining ? ev.remaining : ev.duration}</span>
+                      </div>
+                      <div class="event-body">
+                        <div class="event-title-line">
+                          <span class="event-title">${escapeHtml(ev.title)}</span>
+                        </div>
+                        <div class="event-meta-row">
+                          <span>${escapeHtml(ev.calendar)} · Apple Calendar</span>
+                          ${ev.hasVideoLink ? '<span class="meta-tag">Video link detected</span>' : ''}
+                          ${ev.overlaps ? '<span class="meta-tag is-overlap">Overlaps</span>' : ''}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                `;
+              })
+              .join('');
+
+            bodyHtml = `${allDayHtml}<ul class="agenda-list" aria-label="Meetings for ${escapeHtml(day.heading)}">${rowsHtml}</ul>`;
+          }
+
+          return `
+            <section class="agenda-col" aria-label="Agenda">
+              <div class="col-head">
+                <h3>Agenda</h3>
+                <span class="col-sub">
+                  ${
+                    state.calState === 'disconnected' || state.calState === 'denied' || state.calState === 'loading'
+                      ? 'LOCAL HORIZON: -1D TO +14D'
+                      : `${totalCount} ${totalCount === 1 ? 'EVENT' : 'EVENTS'} · SELECT TO PREPARE`
+                  }
+                </span>
+              </div>
+              ${bodyHtml}
+              ${
+                !readOnlyGlance
+                  ? `
+                <div class="agenda-foot">
+                  <span>Meeting not on your calendar?</span>
+                  <button type="button" class="btn-secondary is-compact" data-action="ad-hoc">
+                    Prepare ad-hoc session
+                  </button>
+                </div>
+              `
+                  : ''
+              }
+            </section>
+          `;
+        }
+
+        function renderPrepColumn(readOnlyGlance) {
+          const found = findSelectedEvent();
+          const ev = found ? found.event : null;
+          const isCalendarBound =
+            !!ev &&
+            state.calState !== 'disconnected' &&
+            state.calState !== 'denied';
+
+          const sourceSummary = isCalendarBound
+            ? ev.isAllDay
+              ? `ALL DAY · ${ev.calendar.toUpperCase()} · APPLE CALENDAR`
+              : `${ev.start}–${ev.end} · ${ev.calendar.toUpperCase()} · APPLE CALENDAR`
+            : 'AD-HOC SESSION · NO CALENDAR EVENT SELECTED';
+
+          const suggestedNotes = isCalendarBound ? ev.suggestedNotes || [] : [];
+
+          return `
+            <section class="prep-col" aria-label="Prepare notebook">
+              <div class="prep-header">
+                <div class="prep-source-line">
+                  <span>${escapeHtml(sourceSummary)}</span>
+                  ${
+                    readOnlyGlance
+                      ? '<span class="status-pill">Read-only glance</span>'
+                      : isCalendarBound
+                        ? '<span class="status-pill">No capture yet</span>'
+                        : ''
+                  }
+                </div>
+                <div class="title-field">
+                  <label for="prep-title-input">Session title (local only)</label>
+                  <div class="title-input-row">
+                    <input
+                      id="prep-title-input"
+                      type="text"
+                      maxlength="120"
+                      value="${escapeHtml(state.prepTitle)}"
+                      placeholder="Optional title for this session"
+                      ${readOnlyGlance ? 'disabled' : ''}
+                    />
+                    ${
+                      state.prepTitle
+                        ? `<button type="button" class="btn-secondary is-compact" data-action="clear-title" ${readOnlyGlance ? 'disabled' : ''}>Clear</button>`
+                        : ''
+                    }
+                  </div>
+                </div>
+                ${
+                  readOnlyGlance
+                    ? `
+                  <p class="disclosure-copy">
+                    A live session is already running (“${escapeHtml(state.liveMeetingTitle)}”). Stop the active session before starting another.
+                  </p>
+                `
+                    : `
+                  <div class="start-block">
+                    <div class="start-row">
+                      <button type="button" class="btn-primary" data-action="start-live">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+                        Start live session
+                      </button>
+                    </div>
+                    <p class="disclosure-copy">
+                      Starts immediately: sends your microphone and system audio to Deepgram and recent lines to Anthropic until you press Stop. Selecting an event never starts capture.
+                    </p>
+                  </div>
+                `
+                }
+              </div>
+
+              <div class="prep-notes-area">
+                <label for="prep-notes-input">Working notes</label>
+                <textarea
+                  id="prep-notes-input"
+                  placeholder="Jot questions or reminders before the call starts…"
+                  ${readOnlyGlance ? 'disabled' : ''}
+                >${escapeHtml(state.prepNotes)}</textarea>
+              </div>
+
+              <details class="prep-disclosure">
+                <summary>
+                  <span>This meeting</span>
+                  <span class="mono" style="font-size:11px;color:var(--muted)">Add focus · optional</span>
+                </summary>
+                <div class="prep-disclosure-body">
+                  <p>Up to 5 short topics you want to keep in mind for this meeting. Local to this session.</p>
+                  <input
+                    type="text"
+                    id="prep-focus-input"
+                    value="${escapeHtml(state.prepFocus)}"
+                    placeholder="e.g., print turnaround, Saturday schedule"
+                    style="min-height:38px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-control)"
+                    ${readOnlyGlance ? 'disabled' : ''}
+                  />
+                </div>
+              </details>
+
+              <details class="prep-disclosure" ${suggestedNotes.length ? 'open' : ''}>
+                <summary>
+                  <span>Prior context</span>
+                  <span class="mono" style="font-size:11px;color:var(--muted)">${suggestedNotes.length} suggested from local history</span>
+                </summary>
+                <div class="prep-disclosure-body">
+                  ${
+                    suggestedNotes.length
+                      ? suggestedNotes
+                          .map(
+                            (n) => `
+                        <div class="context-item">
+                          <div>
+                            <strong>${escapeHtml(n.title)}</strong>
+                            <span>${escapeHtml(n.meta)}</span>
+                          </div>
+                          <span class="mono-tag" style="color:var(--muted)">Suggested · not selected or sent</span>
+                        </div>
+                      `,
+                          )
+                          .join('')
+                      : '<p>No matching kept notes yet. Transcripts are never imported as prior context.</p>'
+                  }
+                </div>
+              </details>
+
+              <div class="prep-cue-standby">
+                <div class="prep-cue-standby-head">
+                  <span>Cues</span>
+                  <span class="mono-tag" style="color:var(--muted)">Standby</span>
+                </div>
+                <p>
+                  Once you start the live session, this calendar tucks away so Notes, Transcript, Ask, and Cues get the full workspace.
+                </p>
+              </div>
+            </section>
+          `;
+        }
+
+        function renderHome(readOnlyGlance) {
+          const day = currentDay();
+          const staleBanner =
+            state.calState === 'stale'
+              ? `
+                <div class="inline-banner is-error" role="alert">
+                  <p>
+                    <strong>Could not refresh Apple Calendar</strong> — showing cached meetings from 11:48. Next automatic retry in 30s.
+                  </p>
+                  <div class="inline-banner-actions">
+                    <button type="button" class="btn-secondary is-compact" data-action="refresh">Retry now</button>
+                  </div>
+                </div>
+              `
+              : '';
+
+          const liveReturnBar = readOnlyGlance
+            ? `
+              <div class="live-return-banner" role="region" aria-label="Active live session">
+                <div class="live-return-meta">
+                  <span class="square-dot"></span>
+                  <strong>Live session in progress: ${escapeHtml(state.liveMeetingTitle)}</strong>
+                  <span class="mono" style="font-size:12px;color:var(--muted)">04:08 · Mic &amp; system audio on</span>
+                </div>
+                <div class="inline-banner-actions">
+                  <button type="button" class="btn-primary" data-action="return-live">Return to live session</button>
+                  <button type="button" class="btn-secondary" data-action="stop-live">Stop live session</button>
+                </div>
+              </div>
+            `
+            : '';
+
+          return `
+            <header class="toolbar">
+              <div class="breadcrumb">
+                <span>Notebook</span>
+                <span>›</span>
+                <strong>${readOnlyGlance ? 'Schedule glance (live session active)' : 'Calendar home'}</strong>
+              </div>
+              <div class="toolbar-actions">
+                <span class="mono-tag">Designed, not built</span>
+              </div>
+            </header>
+            ${liveReturnBar}
+            ${renderCalendarHeader(day, readOnlyGlance)}
+            ${staleBanner}
+            <div class="home-split">
+              ${renderAgendaColumn(day, readOnlyGlance)}
+              ${renderPrepColumn(readOnlyGlance)}
+            </div>
+            <footer class="workspace-foot">
+              Unselected agenda events stay local in memory. Starting a session with a calendar title names the local session and any saved meeting or Meetings export; live transcription, Ask, and cues do not send it.
+            </footer>
+          `;
+        }
+
+        function renderLiveView() {
+          const tabBody =
+            state.liveTab === 'notes'
+              ? `
+                <textarea
+                  aria-label="Live meeting notes"
+                  style="width:100%;min-height:240px;border:0;outline:0;font-size:15.5px;line-height:1.7;resize:vertical"
+                  placeholder="What would you like to remember?"
+                >${escapeHtml(state.prepNotes || 'Confirm large-print layout turnaround with the fictional print shop.')}</textarea>
+              `
+              : state.liveTab === 'transcript'
+                ? `
+                  <div style="display:flex;flex-direction:column;gap:12px;font-size:14.5px">
+                    <div style="padding-bottom:10px;border-bottom:1px solid var(--line)">
+                      <div class="mono" style="font-size:11px;color:var(--muted)">YOU · 02:14</div>
+                      <p>Let us confirm who will send the updated welcome guide to the print shop.</p>
+                    </div>
+                    <div>
+                      <div class="mono" style="font-size:11px;color:var(--muted)">SPEAKER 1 · 04:05</div>
+                      <p>Agreed. Someone can take the first draft of the welcome guide soon.</p>
+                    </div>
+                  </div>
+                `
+                : `
+                  <div style="display:flex;flex-direction:column;gap:10px;font-size:14px">
+                    <div style="padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--band)">
+                      Recent excerpt: 2 lines in scope (capped at 200 lines / 64 KiB)
+                    </div>
+                    <p style="color:var(--muted)">Ask explicitly about the recent transcript excerpt. Opening Ask sends nothing.</p>
+                  </div>
+                `;
+
+          return `
+            <header class="toolbar">
+              <div class="breadcrumb">
+                <span>Notebook</span>
+                <span>›</span>
+                <strong>Live session · ${escapeHtml(state.liveMeetingTitle)}</strong>
+              </div>
+              <div class="toolbar-actions">
+                <button type="button" class="btn-secondary is-compact" data-action="glance-schedule">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  Glance at schedule
+                </button>
+              </div>
+            </header>
+
+            <div class="live-body">
+              <div class="live-capture-row">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px">
+                  <strong>Live session</strong>
+                  <span style="color:var(--muted)">· On ·</span>
+                  <span style="display:inline-flex;align-items:center;gap:6px;color:var(--accent-ink);font-weight:600">
+                    <span class="square-dot"></span>Signal detected
+                  </span>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button type="button" class="btn-secondary is-compact">Pause cues</button>
+                  <button type="button" class="btn-secondary is-compact" data-action="stop-live">Stop live session</button>
+                </div>
+              </div>
+
+              <div class="live-telemetry">
+                <div>
+                  <h2 style="font-size:20px;font-weight:600;letter-spacing:-0.02em">Live session in progress</h2>
+                  <p style="font-size:13.5px;color:var(--muted)">
+                    Meeting: ${escapeHtml(state.liveMeetingTitle)} · Calendar agenda is tucked away while live.
+                  </p>
+                </div>
+                <span class="mono" style="font-size:14px;color:var(--muted)">04:08</span>
+              </div>
+
+              <div class="live-grid">
+                <section aria-label="Live notes and transcript">
+                  <div class="live-tabs" role="tablist">
+                    <button type="button" role="tab" class="live-tab${state.liveTab === 'notes' ? ' is-active' : ''}" data-live-tab="notes" aria-selected="${state.liveTab === 'notes'}">Notes</button>
+                    <button type="button" role="tab" class="live-tab${state.liveTab === 'transcript' ? ' is-active' : ''}" data-live-tab="transcript" aria-selected="${state.liveTab === 'transcript'}">Transcript <span class="mono" style="font-size:12px">2</span></button>
+                    <button type="button" role="tab" class="live-tab${state.liveTab === 'ask' ? ' is-active' : ''}" data-live-tab="ask" aria-selected="${state.liveTab === 'ask'}">Ask</button>
+                  </div>
+                  ${tabBody}
+                </section>
+
+                <aside aria-label="Active cue">
+                  <div class="col-head" style="margin-bottom:12px">
+                    <h3>Cues</h3>
+                  </div>
+                  <article class="cue-card-proto">
+                    <div class="cue-lead mono-tag">
+                      <span class="square-dot"></span>
+                      <span>You could ask</span>
+                    </div>
+                    <h3>Who will take the first draft?</h3>
+                    <div class="cue-timeline" aria-hidden="true"><div class="cue-timeline-fill"></div></div>
+                    <div class="cue-source">
+                      <div class="mono-tag" style="margin-bottom:4px">From this conversation</div>
+                      <p>“Agreed. Someone can take the first draft of the welcome guide soon.”</p>
+                    </div>
+                  </article>
+                </aside>
+              </div>
+            </div>
+
+            <footer class="workspace-foot">
+              In memory while running; non-empty live sessions save to Meetings on stop unless changed in Settings.
+            </footer>
+          `;
+        }
+
+        function renderSettingsView() {
+          const calRows = state.calendars
+            .map(
+              (cal) => `
+                <label class="cal-source-row">
+                  <span style="display:flex;align-items:center;gap:10px">
+                    <input
+                      type="checkbox"
+                      data-toggle-cal="${cal.id}"
+                      ${cal.enabled ? 'checked' : ''}
+                      ${!state.settingsAgendaEnabled ? 'disabled' : ''}
+                      style="width:17px;height:17px;accent-color:var(--ink)"
+                    />
+                    <span>
+                      <strong style="display:block;font-size:14px">${escapeHtml(cal.name)}</strong>
+                      <span style="font-size:12px;color:var(--muted)">${escapeHtml(cal.source)}</span>
+                    </span>
+                  </span>
+                  <span class="mono-tag" style="color:var(--muted)">${cal.enabled ? 'Shown' : 'Hidden'}</span>
+                </label>
+              `,
+            )
+            .join('');
+
+          return `
+            <header class="toolbar">
+              <div class="breadcrumb">
+                <span>Settings</span>
+                <span>›</span>
+                <strong>Calendar</strong>
+              </div>
+              <div class="toolbar-actions">
+                <button type="button" class="btn-secondary is-compact" data-action="back-home">Back to Notebook</button>
+              </div>
+            </header>
+
+            <div class="settings-wrap">
+              <section class="settings-section">
+                <h3>macOS Apple Calendar (local via EventKit)</h3>
+                <p>
+                  Reads meeting titles, start/end times, all-day flags, calendar labels, and a video-link boolean
+                  locally from Apple Calendar on this Mac (which already syncs Google Calendar, iCloud, and Outlook/Exchange
+                  accounts you set up in macOS). Never accesses attendees or organizers. On the 14-day agenda, URL and location
+                  fields are checked transiently in Rust only for the video-link badge and immediately discarded (event notes
+                  are checked transiently only inside the 15-minute pre-call prompt window). Raw links and text are never
+                  retained or uploaded.
+                </p>
+
+                <label class="check-row">
+                  <input type="checkbox" id="opt-agenda" ${state.settingsAgendaEnabled ? 'checked' : ''} />
+                  <span>
+                    <strong>Show upcoming meetings on Notebook Home</strong>
+                    <span style="display:block;font-size:13px;color:var(--muted)">
+                      Reads a bounded local window (yesterday through the next 14 days). Updates on Apple Calendar changes, app resume, day rollover, and a 5-minute fallback poll while idle.
+                    </span>
+                  </span>
+                </label>
+
+                <label class="check-row">
+                  <input type="checkbox" id="opt-prompts" ${state.settingsPromptsEnabled ? 'checked' : ''} />
+                  <span>
+                    <strong>Offer pre-call dock prompt before video meetings</strong>
+                    <span style="display:block;font-size:13px;color:var(--muted)">
+                      Existing 15-minute tight window (~2 minutes before start). Skips all-day events and never starts capture on its own.
+                    </span>
+                  </span>
+                </label>
+
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span class="status-pill ${state.calState === 'denied' ? 'is-error' : state.settingsAgendaEnabled ? 'is-amber' : ''}">
+                    ${
+                      state.calState === 'denied'
+                        ? 'Permission denied'
+                        : state.settingsAgendaEnabled
+                          ? 'Connected · Apple Calendar'
+                          : 'Off'
+                    }
+                  </span>
+                  <span class="mono" style="font-size:12px;color:var(--muted)">
+                    Last updated ${state.lastUpdated} · Local Mac cache
+                  </span>
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h3>Included calendars (from Apple Calendar)</h3>
+                <p>
+                  Choose which macOS calendars appear on Notebook Home. Unchecked calendars are excluded before events reach the Notebook UI.
+                </p>
+                <div class="cal-source-list">
+                  ${calRows}
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h3>Direct account connections</h3>
+                <div class="future-box">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <strong style="font-size:14.5px">Google Calendar &amp; Microsoft 365 (Direct OAuth)</strong>
+                    <span class="status-pill">Planned · Not built</span>
+                  </div>
+                  <p>
+                    TalkQTE does not connect directly to Google Calendar or Microsoft Graph APIs today. On macOS, connect those accounts in
+                    <strong>System Settings → Internet Accounts</strong> (Apple Calendar) to populate TalkQTE locally without adding cloud OAuth tokens. Direct account connectors are planned separately for Windows and cross-platform support.
+                  </p>
+                </div>
+              </section>
+            </div>
+          `;
+        }
+
+        function render() {
+          syncPrototypeButtons();
+          if (state.surface === 'settings') {
+            workspace.innerHTML = renderSettingsView();
+          } else if (state.surface === 'live') {
+            workspace.innerHTML = renderLiveView();
+          } else if (state.surface === 'live-glance') {
+            workspace.innerHTML = renderHome(true);
+          } else {
+            workspace.innerHTML = renderHome(false);
+          }
+          bindWorkspaceEvents();
+        }
+
+        function bindWorkspaceEvents() {
+          workspace.querySelectorAll('[data-day]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              state.selectedDayIso = btn.dataset.day;
+              const d = currentDay();
+              const { events, allDay } = visibleEventsForDay(d);
+              if (events.length > 0) {
+                selectEvent(events[0].id);
+              } else if (allDay.length > 0) {
+                selectEvent(allDay[0].id);
+              } else {
+                selectAdHoc();
+              }
+            });
+            btn.addEventListener('keydown', (e) => {
+              if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+              e.preventDefault();
+              const idx = WEEK_DAYS.findIndex((d) => d.iso === btn.dataset.day);
+              const nextIdx =
+                e.key === 'ArrowRight'
+                  ? Math.min(WEEK_DAYS.length - 1, idx + 1)
+                  : Math.max(0, idx - 1);
+              state.selectedDayIso = WEEK_DAYS[nextIdx].iso;
+              render();
+              workspace
+                .querySelector(`[data-day="${WEEK_DAYS[nextIdx].iso}"]`)
+                ?.focus();
+            });
+          });
+
+          workspace.querySelectorAll('[data-event]').forEach((btn) => {
+            btn.addEventListener('click', () => selectEvent(btn.dataset.event));
+          });
+
+          workspace.querySelectorAll('[data-live-tab]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              state.liveTab = btn.dataset.liveTab;
+              render();
+            });
+          });
+
+          const titleInput = workspace.querySelector('#prep-title-input');
+          if (titleInput) {
+            titleInput.addEventListener('input', (e) => {
+              state.prepTitle = e.target.value;
+            });
+          }
+
+          const notesInput = workspace.querySelector('#prep-notes-input');
+          if (notesInput) {
+            notesInput.addEventListener('input', (e) => {
+              state.prepNotes = e.target.value;
+            });
+          }
+
+          const focusInput = workspace.querySelector('#prep-focus-input');
+          if (focusInput) {
+            focusInput.addEventListener('input', (e) => {
+              state.prepFocus = e.target.value;
+            });
+          }
+
+          const optAgenda = workspace.querySelector('#opt-agenda');
+          if (optAgenda) {
+            optAgenda.addEventListener('change', (e) => {
+              state.settingsAgendaEnabled = e.target.checked;
+              state.calState = e.target.checked ? 'populated' : 'disconnected';
+              render();
+            });
+          }
+
+          const optPrompts = workspace.querySelector('#opt-prompts');
+          if (optPrompts) {
+            optPrompts.addEventListener('change', (e) => {
+              state.settingsPromptsEnabled = e.target.checked;
+            });
+          }
+
+          workspace.querySelectorAll('[data-toggle-cal]').forEach((cb) => {
+            cb.addEventListener('change', (e) => {
+              const found = state.calendars.find(
+                (c) => c.id === cb.dataset.toggleCal,
+              );
+              if (found) found.enabled = e.target.checked;
+              render();
+            });
+          });
+
+          workspace.querySelectorAll('[data-action]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const action = btn.dataset.action;
+              if (action === 'prev-day') {
+                const idx = WEEK_DAYS.findIndex(
+                  (d) => d.iso === state.selectedDayIso,
+                );
+                if (idx > 0) {
+                  state.selectedDayIso = WEEK_DAYS[idx - 1].iso;
+                  render();
+                }
+              } else if (action === 'next-day') {
+                const idx = WEEK_DAYS.findIndex(
+                  (d) => d.iso === state.selectedDayIso,
+                );
+                if (idx < WEEK_DAYS.length - 1) {
+                  state.selectedDayIso = WEEK_DAYS[idx + 1].iso;
+                  render();
+                }
+              } else if (action === 'today') {
+                state.selectedDayIso = '2026-11-27';
+                selectEvent('evt-fri-1');
+              } else if (action === 'refresh') {
+                triggerManualRefresh();
+              } else if (action === 'open-settings') {
+                state.surface = 'settings';
+                render();
+              } else if (action === 'back-home') {
+                state.surface = 'home';
+                render();
+              } else if (action === 'enable-demo') {
+                state.settingsAgendaEnabled = true;
+                state.calState = 'populated';
+                render();
+              } else if (action === 'retry-permission') {
+                state.calState = 'populated';
+                render();
+              } else if (action === 'open-system-settings') {
+                announce(
+                  'Prototype action: in the desktop app, opens System Settings → Privacy & Security → Calendars.',
+                );
+              } else if (action === 'jump-next-meeting') {
+                state.calState = 'populated';
+                state.selectedDayIso = '2026-11-27';
+                selectEvent('evt-fri-1');
+              } else if (action === 'ad-hoc') {
+                selectAdHoc();
+              } else if (action === 'clear-title') {
+                state.prepTitle = '';
+                render();
+              } else if (action === 'start-live') {
+                state.liveMeetingTitle =
+                  state.prepTitle.trim() || 'Untitled session';
+                state.surface = 'live';
+                announce(
+                  `Prototype live session view opened for ${state.liveMeetingTitle}. No audio is captured in this prototype.`,
+                );
+                render();
+              } else if (action === 'glance-schedule') {
+                state.surface = 'live-glance';
+                render();
+              } else if (action === 'return-live') {
+                state.surface = 'live';
+                render();
+              } else if (action === 'stop-live') {
+                state.surface = 'home';
+                announce('Returned to Calendar home.');
+                render();
+              }
+            });
+          });
+        }
+
+        // Top prototype switcher bindings
+        document.querySelectorAll('[data-surface]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.surface = btn.dataset.surface;
+            render();
+          });
+        });
+
+        document.querySelectorAll('[data-cal-state]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.calState = btn.dataset.calState;
+            if (state.surface === 'live') state.surface = 'home';
+            render();
+          });
+        });
+
+        document.querySelectorAll('[data-width]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.width = btn.dataset.width;
+            render();
+          });
+        });
+
+        navNotebook.addEventListener('click', () => {
+          state.surface = 'home';
+          render();
+        });
+
+        navSettings.addEventListener('click', () => {
+          state.surface = 'settings';
+          render();
+        });
+
+        document.getElementById('brand-link').addEventListener('click', (e) => {
+          e.preventDefault();
+          state.surface = 'home';
+          render();
+        });
+
+        // Support deep-link query params for deterministic QA captures
+        const params = new URLSearchParams(location.search);
+        if (params.get('surface')) state.surface = params.get('surface');
+        if (params.get('state')) state.calState = params.get('state');
+        if (params.get('width')) state.width = params.get('width');
+        if (params.get('day')) state.selectedDayIso = params.get('day');
+
+        render();
+      })();
+    </script>
+  </body>
+</html>
