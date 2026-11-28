@@ -195,6 +195,16 @@ pub struct CalendarEvent {
 pub trait CalendarSource: Send + Sync {
     fn authorization_status(&self) -> PermissionStatus;
     fn request_access(&self) -> PermissionStatus;
+    /// Separate wider agenda query. Existing prompt fakes remain unavailable.
+    fn agenda(
+        &self,
+        _ticket: &crate::calendar_agenda::Ticket,
+    ) -> Result<crate::calendar_agenda::Batch, crate::calendar_agenda::ReadError> {
+        Err(crate::calendar_agenda::ReadError::Unavailable)
+    }
+    fn agenda_change_version(&self) -> u64 {
+        0
+    }
     fn upcoming_events(
         &self,
         window_start_epoch_s: i64,
@@ -469,12 +479,14 @@ mod macos {
 
     pub struct EventKitSource {
         store: Mutex<Option<StoreHandle>>,
+        changes: crate::calendar_agenda_macos::Changes,
     }
 
     impl EventKitSource {
         pub fn new() -> Self {
             Self {
                 store: Mutex::new(None),
+                changes: crate::calendar_agenda_macos::Changes::default(),
             }
         }
 
@@ -514,6 +526,29 @@ mod macos {
     }
 
     impl CalendarSource for EventKitSource {
+        fn agenda_change_version(&self) -> u64 {
+            self.changes.version()
+        }
+        fn agenda(
+            &self,
+            ticket: &crate::calendar_agenda::Ticket,
+        ) -> Result<crate::calendar_agenda::Batch, crate::calendar_agenda::ReadError> {
+            use crate::calendar_agenda::ReadError;
+            if ticket.cancelled() {
+                return Err(ReadError::Cancelled);
+            }
+            if current_raw_status() != 3 {
+                return Err(ReadError::Unavailable);
+            }
+            self.changes.install();
+            self.ensure_store().map_err(|_| ReadError::Failed)?;
+            let guard = self.store.lock().map_err(|_| ReadError::Failed)?;
+            if ticket.cancelled() {
+                return Err(ReadError::Cancelled);
+            }
+            let handle = guard.as_ref().ok_or(ReadError::Failed)?;
+            crate::calendar_agenda_macos::read(&handle.0, ticket)
+        }
         fn authorization_status(&self) -> PermissionStatus {
             map_auth_status(current_raw_status()).unwrap_or(PermissionStatus::Off)
         }
