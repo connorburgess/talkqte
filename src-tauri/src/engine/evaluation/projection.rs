@@ -944,8 +944,14 @@ mod tests {
         let snapshot = e.processing_snapshot(CaptureState::Running, 1);
         assert_eq!(snapshot.notes.len(), 2);
         let serialized = serde_json::to_value(&snapshot.notes).unwrap();
-        assert!(serialized[0].get("originalChars").is_none());
-        assert_eq!(serialized[1]["originalChars"], serde_json::json!(5_420));
-        assert!(serialized[1].get("excerpt").is_none());
+        let list = serialized.as_array().unwrap();
+        let short_json = list
+            .iter()
+            .find(|item| item["sourceId"] == "short")
+            .unwrap();
+        let long_json = list.iter().find(|item| item["sourceId"] == "long").unwrap();
+        assert!(short_json.get("originalChars").is_none());
+        assert_eq!(long_json["originalChars"], serde_json::json!(5_420));
+        assert!(long_json.get("excerpt").is_none());
     }
 }
