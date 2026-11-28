@@ -114,6 +114,34 @@ pub(crate) fn check_wire(input: &str, system: &str) {
     assert!(system.contains("every state-changing proposal must cite current speech"));
 }
 
+/// Exercise removal after a real adapter has rendered a note-backed cue.
+pub(crate) fn withdraw_visible_note_cue(engine: &mut Engine) {
+    said(
+        engine,
+        2,
+        "The fictional calibration result is relevant now.",
+    );
+    settle(engine);
+    assert!(
+        engine.state.cue.is_some(),
+        "scripted note-backed cue was visible"
+    );
+    engine.set_notes(vec![]);
+    assert!(engine.state.cue.is_none());
+    said(engine, 3, "The fictional team has moved to maintenance.");
+    settle(engine);
+}
+pub(crate) fn check_withdrawn_wire(input: &str) {
+    let value: Value = serde_json::from_str(input).unwrap();
+    assert!(value.get("priorNotes").is_none());
+    assert!(value["existingCue"].is_null());
+    assert!(value.get("earlierCues").is_none());
+    assert!(!input.contains(NOTE));
+    assert!(!input.contains("Earlier calibration reduced retries"));
+    assert!(!input.contains("prior:file:fictional-portfolio"));
+    assert!(input.contains("The fictional team has moved to maintenance."));
+}
+
 struct Controlled {
     sent: mpsc::Sender<Request>,
     reply: mpsc::Receiver<String>,

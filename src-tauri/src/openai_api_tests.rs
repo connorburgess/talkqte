@@ -338,6 +338,22 @@ fn production_approved_selected_notes_reach_openai_wire_with_unknown_date_and_in
         200,
         sse(&model_id, &decision("quiet", None, &["transcript:line-1"])),
     )));
+    let transport = transport
+        .answer(Ok((
+            200,
+            sse(
+                &model_id,
+                &decision(
+                    "show",
+                    Some("Earlier calibration reduced retries"),
+                    &["transcript:line-2", "prior:file:fictional-portfolio"],
+                ),
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse(&model_id, &decision("quiet", None, &["transcript:line-3"])),
+        )));
     let usage = Arc::new(CueUsageTracker::new(CueProvider::OpenAi, &model_id, false));
     let adapter = OpenAiApi::new(
         model,
@@ -346,7 +362,8 @@ fn production_approved_selected_notes_reach_openai_wire_with_unknown_date_and_in
         Box::new(|| panic!("scripted success")),
         usage,
     );
-    crate::own_key_selected_tests::selected_engine(adapter, CueProvider::OpenAi, &model_id);
+    let mut engine =
+        crate::own_key_selected_tests::selected_engine(adapter, CueProvider::OpenAi, &model_id);
     let sent = transport.sent();
     assert_eq!(sent.len(), 1);
     let body = &sent[0].1;
@@ -354,4 +371,8 @@ fn production_approved_selected_notes_reach_openai_wire_with_unknown_date_and_in
         body["input"].as_str().unwrap(),
         body["instructions"].as_str().unwrap(),
     );
+    crate::own_key_selected_tests::withdraw_visible_note_cue(&mut engine);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 3);
+    crate::own_key_selected_tests::check_withdrawn_wire(sent[2].1["input"].as_str().unwrap());
 }

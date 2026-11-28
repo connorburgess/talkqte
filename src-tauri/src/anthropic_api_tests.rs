@@ -1053,6 +1053,27 @@ fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and
             "end_turn",
         ),
     )));
+    let transport = transport
+        .answer(Ok((
+            200,
+            sse(
+                MODEL,
+                &decision(
+                    "show",
+                    Some("Earlier calibration reduced retries"),
+                    &["transcript:line-2", "prior:file:fictional-portfolio"],
+                ),
+                "end_turn",
+            ),
+        )))
+        .answer(Ok((
+            200,
+            sse(
+                MODEL,
+                &decision("quiet", None, &["transcript:line-3"]),
+                "end_turn",
+            ),
+        )));
     let adapter = AnthropicApi::new(
         haiku(),
         transport.clone(),
@@ -1060,7 +1081,7 @@ fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and
         Box::new(|| panic!("scripted success")),
         Arc::default(),
     );
-    crate::own_key_selected_tests::selected_engine(
+    let mut engine = crate::own_key_selected_tests::selected_engine(
         adapter,
         crate::llm_provider::CueProvider::Anthropic,
         MODEL,
@@ -1074,5 +1095,11 @@ fn production_approved_selected_notes_reach_anthropic_wire_with_unknown_date_and
     assert_eq!(
         sent[0].1["output_config"]["format"]["schema"],
         schema(OnScreen::Nothing)
+    );
+    crate::own_key_selected_tests::withdraw_visible_note_cue(&mut engine);
+    let sent = transport.sent();
+    assert_eq!(sent.len(), 3);
+    crate::own_key_selected_tests::check_withdrawn_wire(
+        sent[2].1["messages"][0]["content"].as_str().unwrap(),
     );
 }

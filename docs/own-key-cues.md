@@ -252,6 +252,9 @@ and does not fetch or reapprove anything. Pause retains unchanged approval;
 resume accepts new speech only. None of these operations resets cumulative
 request/spend limits. A late response, including an authentication failure, must
 not affect a withdrawn scope or replacement session.
+Narrowing also clears visible and earlier cue wording because a cue may contain
+withdrawn snapshot text; these derived strings cannot be safely separated by source.
+Unchanged transcript lines remain subject to the narrowed speech scope.
 
 Every nonquiet proposal still needs a **fresh cited current-speech source**;
 notes alone cannot raise, resolve or withdraw a cue. Prior snapshots do not make
