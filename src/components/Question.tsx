@@ -248,7 +248,7 @@ function Sources({
                     : source.provenance.provider === 'history'
                       ? 'Kept meeting'
                       : 'Imported file'
-                } · ${source.provenance.date} · prior note`
+                } · ${source.provenance.date || 'Unknown date'} · prior note`
               : `This conversation · ${clockTime(source.provenance.atMs)} · ${source.provenance.speaker}`}
           </span>{' '}
           <blockquote className="cue-quote">“{source.text}”</blockquote>
@@ -420,7 +420,8 @@ export function Question({
           ) : cue.note ? (
             <>
               <span className="cue-source-label">
-                Its title came up · imported note, {cue.note.sourceDate}
+                Its title came up · imported note,{' '}
+                {cue.note.sourceDate || 'Unknown date'}
               </span>{' '}
               {/* Present for every note reminder, so a warning that appears
                 or changes in place is announced; empty when there is none.

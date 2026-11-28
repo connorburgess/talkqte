@@ -534,13 +534,16 @@ fn a_kept_meeting_context_item_sends_notes_and_meeting_notes_only_never_transcri
     let summaries = source.summaries();
     assert_eq!(summaries.len(), 2);
     assert_eq!(summaries[0].source_id, bounded.id);
+    assert_eq!(summaries[0].original_chars, Some(MAX_EXCERPT_CHARS + 500));
     assert_eq!(summaries[1].source_id, with_notes.id);
+    assert_eq!(summaries[1].original_chars, None);
 
     let fetched = source.fetch(std::slice::from_ref(&with_notes.id)).unwrap();
     assert_eq!(fetched.len(), 1);
     let item = &fetched[0];
     assert_eq!(item.provider, Provider::History);
     assert_eq!(item.revision, 1);
+    assert_eq!(item.original_chars, None);
     assert!(item.excerpt.contains("Meeting notes:"));
     assert!(item.excerpt.contains("Review takes two days."));
     assert!(item.excerpt.contains("Your notes:"));
@@ -550,6 +553,10 @@ fn a_kept_meeting_context_item_sends_notes_and_meeting_notes_only_never_transcri
 
     let bounded_item = source.fetch(&[bounded.id]).unwrap();
     assert_eq!(bounded_item[0].excerpt.chars().count(), MAX_EXCERPT_CHARS);
+    assert_eq!(
+        bounded_item[0].original_chars,
+        Some(MAX_EXCERPT_CHARS + 500)
+    );
 
     let lab = Store::open(Some(folder.root()), true);
     assert!(matches!(HistorySource::read(&lab), Err(Error::Off)));

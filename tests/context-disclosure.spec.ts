@@ -4,7 +4,7 @@ test('prior context is compact and keyboard accessible', async ({ page }) => {
   await page.goto('/');
   const panel = page.getByRole('region', { name: 'Prior context' });
   const summary = panel.locator('summary');
-  const add = panel.getByRole('button', { name: 'Add notes from a file' });
+  const add = panel.getByRole('button', { name: 'Add notes from files' });
   await expect(summary).toContainText('0 notes selected');
   await expect(add).toBeHidden();
   await summary.focus();

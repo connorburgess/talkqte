@@ -82,12 +82,12 @@ test('Prior context opens, imports and removes notes from the keyboard at 480px 
   await page.goto('/');
   const panel = page.getByRole('region', { name: 'Prior context' });
   const summary = panel.locator('summary');
-  const add = panel.getByRole('button', { name: 'Add notes from a file' });
+  const add = panel.getByRole('button', { name: 'Add notes from files' });
   await expect(add).toBeHidden();
   await summary.press('Enter');
   await expect(add).toBeVisible();
   await expect(summary).toBeFocused();
-  await expectToFit(add, 'Add notes from a file');
+  await expectToFit(add, 'Add notes from files');
   await add.press('Enter');
   const chooser = page.getByRole('dialog', { name: /Choose notes/ });
   await expect(chooser).toBeVisible();

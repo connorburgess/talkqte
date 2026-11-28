@@ -77,7 +77,7 @@ export async function watchAnchor(receive: (edge: 'top' | 'bottom') => void) {
   return unlisten;
 }
 
-/** Opens the file chooser and lists a notes file; null if none was chosen. */
+/** Opens a bounded multi-file chooser and lists notes for review; null if canceled. */
 export async function pickContextFile() {
   if (preview) return (await preview).pickContextFile();
   return invoke<PickedNotes | null>('pick_context_file');

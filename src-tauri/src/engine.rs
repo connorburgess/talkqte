@@ -5734,6 +5734,7 @@ mod tests {
                 title: title.to_string(),
                 source_date: "2026-11-01".into(),
                 excerpt: format!("About the {}.", title.to_lowercase()),
+                original_chars: None,
                 revision: 1,
             })
             .collect(),
@@ -7155,6 +7156,7 @@ mod tests {
                 title: "Garden welcome guide".into(),
                 source_date: "2026-10-28".into(),
                 excerpt: "Draft a one-page guide with a map of the tool shed.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7163,6 +7165,7 @@ mod tests {
                 title: "Sign".into(),
                 source_date: "2026-11-05".into(),
                 excerpt: "Too short a title to match.".into(),
+                original_chars: None,
                 revision: 1,
             },
         ]);
@@ -7249,6 +7252,7 @@ mod tests {
                         title: "Garden welcome guide".into(),
                         source_date: "2026-10-28".into(),
                         excerpt: "Use the tool shed map.".into(),
+                        original_chars: None,
                         revision: 1,
                     };
                     let mut store = ContextStore::default();
@@ -7413,6 +7417,7 @@ mod tests {
                 title: "Sign".into(),
                 source_date: "2026-11-05".into(),
                 excerpt: "An unrelated imported excerpt.".into(),
+                original_chars: None,
                 revision: 1,
             }]);
             assert!(
@@ -7497,6 +7502,7 @@ mod tests {
                 title: "Weekly planning meeting notes".into(),
                 source_date: "2026-11-01".into(),
                 excerpt: "Agenda items.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7505,6 +7511,7 @@ mod tests {
                 title: "Orchard volunteer handover plan for spring planting season and watering schedule".into(),
                 source_date: "2026-11-02".into(),
                 excerpt: "Seedling trays go to the north shed.".into(),
+                original_chars: None,
                 revision: 1,
             },
             ContextItem {
@@ -7513,6 +7520,7 @@ mod tests {
                 title: "Jardín opening".into(),
                 source_date: "2026-11-03".into(),
                 excerpt: "Menu draft.".into(),
+                original_chars: None,
                 revision: 1,
             },
         ]);

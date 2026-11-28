@@ -1066,6 +1066,7 @@ const CLOUD_CHUNK_MS: u64 = 100;
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PickedNotes {
+    pub(crate) files: Vec<notes_file::FileReadResult>,
     pub(crate) file_name: String,
     pub(crate) notes: Vec<notes_file::NoteSummary>,
     /// Notes in the source that are not listed: beyond the limit or without
@@ -1311,10 +1312,15 @@ async fn pick_context_file(
             .dialog()
             .file()
             .add_filter("Notes", &notes_file::EXTENSIONS)
-            .blocking_pick_file()
-            .map(|file| {
-                file.into_path()
-                    .map_err(|_| "Choose a local file.".to_string())
+            .blocking_pick_files()
+            .map(|files| {
+                files
+                    .into_iter()
+                    .map(|file| {
+                        file.into_path()
+                            .map_err(|_| "Choose local files.".to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()
             })
     })
     .await
@@ -1322,7 +1328,7 @@ async fn pick_context_file(
     let Some(path) = picked.transpose()? else {
         return Ok(None);
     };
-    read_context_file(&state, ticket, path).await.map(Some)
+    read_context_files(&state, ticket, path).await.map(Some)
 }
 
 /// An explicit local path avoids the system chooser when its service is unavailable.
@@ -1363,10 +1369,33 @@ async fn read_context_file(
     let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
     finish_file_pick(&mut runtime, &ticket, source)?;
     Ok(PickedNotes {
+        files: vec![],
         file_name,
         notes,
         skipped,
         asks_for_dates,
+    })
+}
+
+async fn read_context_files(
+    state: &AppState,
+    ticket: Arc<()>,
+    paths: Vec<std::path::PathBuf>,
+) -> Result<PickedNotes, String> {
+    let count = paths.len();
+    let (source, notes, files) =
+        tauri::async_runtime::spawn_blocking(move || notes_file::FileSource::read_batch(&paths))
+            .await
+            .map_err(|_| "The selected files could not be read.")??;
+    let skipped = source.skipped;
+    let mut runtime = state.0.lock().map_err(|_| "The notebook is unavailable.")?;
+    finish_file_pick(&mut runtime, &ticket, source)?;
+    Ok(PickedNotes {
+        file_name: format!("{count} files"),
+        notes,
+        skipped,
+        asks_for_dates: true,
+        files,
     })
 }
 
@@ -1694,6 +1723,7 @@ async fn list_granola_notes(state: tauri::State<'_, AppState>) -> Result<PickedN
     runtime.pending_file_pick = None;
     runtime.pending_import = Some(context_import::PendingImport::new(Box::new(shared)));
     Ok(PickedNotes {
+        files: vec![],
         file_name: "Granola · the last 30 days".into(),
         notes,
         skipped,
@@ -2747,6 +2777,7 @@ mod auto_prior_context_tests {
             title: title.into(),
             source_date: "2026-11-02".into(),
             excerpt: format!("Notes for {title}"),
+            original_chars: None,
             revision: 1,
         }
     }
@@ -2758,6 +2789,7 @@ mod auto_prior_context_tests {
             title: title.into(),
             source_date: "2026-11-01".into(),
             excerpt: format!("File note for {title}"),
+            original_chars: None,
             revision: 1,
         }
     }
@@ -3695,6 +3727,41 @@ mod context_file_path_tests {
         assert!(runtime.context.items().is_empty());
         drop(runtime);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn batch_read_returns_per_file_results_without_importing_and_rejects_stale_selection() {
+        let state = AppState(Mutex::new(Runtime::default()));
+        let root = std::env::temp_dir().join(format!(
+            "talkqte-fictional-batch-command-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("reference.md");
+        std::fs::write(&path, "# Fictional reference\nUse a fixed journey.").unwrap();
+        let paths = vec![path, root.join("missing.md")];
+        let stale = begin_file_pick(&state).unwrap();
+        let latest = begin_file_pick(&state).unwrap();
+        assert!(
+            tauri::async_runtime::block_on(read_context_files(&state, stale, paths.clone()))
+                .is_err()
+        );
+        assert!(state.0.lock().unwrap().pending_import.is_none());
+        let result =
+            tauri::async_runtime::block_on(read_context_files(&state, latest, paths.clone()))
+                .unwrap();
+        assert_eq!(result.notes.len(), 1);
+        assert!(result.notes[0].source_date.is_empty());
+        assert_eq!(result.files.len(), 2);
+        assert!(result.files[1].error.is_some());
+        assert!(state.0.lock().unwrap().context.items().is_empty());
+        let canceled = begin_file_pick(&state).unwrap();
+        state.0.lock().unwrap().pending_file_pick = None;
+        assert!(
+            tauri::async_runtime::block_on(read_context_files(&state, canceled, paths)).is_err()
+        );
+        assert!(state.0.lock().unwrap().pending_import.is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -83,3 +83,7 @@ TalkQTE is built in public. Read [CONTRIBUTING.md](CONTRIBUTING.md) for focused 
 **Source-available under the [Sustainable Use License 1.0](LICENSE)**, not an OSI-approved open-source license. Personal use and ordinary internal workplace use—including your own consulting work—are free. Selling, white-labeling, incorporating it into a commercial product, or offering a paid hosted service requires a separate agreement. The license governs; see the [licensing guide](LICENSING.md) and [name and logo guide](TRADEMARKS.md).
 
 [Website artwork provenance and license](docs/assets/README.md).
+
+### Importing reference notes
+
+**Prior context → Add notes from files** supports a reviewed batch of up to 20 Markdown, text or TalkQTE JSON files (1 MB each, 4 MB total). Readable notes remain reviewable when another file fails. Undated file references can stay **Unknown date**; source dates are optional and never replaced by import time. Nothing is selected, imported or approved for provider processing automatically. See [file formats and limits](docs/note-file-formats.md#multiple-files-and-review). Native multi-file picker/accessibility acceptance remains separate from browser fixtures.
